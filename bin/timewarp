@@ -1,0 +1,22 @@
+#!/bin/sh
+# Run the TimeWarp tree this script lives in (symlink ~/.local/bin/timewarp here).
+set -eu
+
+if command -v readlink >/dev/null 2>&1; then
+    SCRIPT=$(readlink -f "$0")
+else
+    SCRIPT=$0
+fi
+ROOT=$(dirname "$(dirname "$SCRIPT")")
+
+if [ ! -d "$ROOT/src/timewarp" ]; then
+    echo "timewarp: source tree not found at $ROOT" >&2
+    exit 127
+fi
+
+if [ -x "$ROOT/.venv/bin/python" ]; then
+    exec "$ROOT/.venv/bin/python" -m timewarp "$@"
+fi
+
+export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m timewarp "$@"

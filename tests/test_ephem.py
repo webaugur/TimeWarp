@@ -1,13 +1,30 @@
 import unittest
 from datetime import datetime, timezone
 
-from timewarp.ephem import day_number, position, sun_state
+from timewarp.ephem import BODIES, SYMBOLS, day_number, format_body, position, sun_state
 from timewarp.places import lookup_place
 from timewarp.rise import events_for_day
 
 
 # Schlyter tutorial: 19 April 1990, 00:00 UT, d = -3543.0
 TEST = datetime(1990, 4, 19, 0, 0, tzinfo=timezone.utc)
+
+
+class SymbolTests(unittest.TestCase):
+    def test_every_body_has_a_symbol(self):
+        for name in BODIES:
+            self.assertIn(name, SYMBOLS)
+            self.assertTrue(SYMBOLS[name])
+            self.assertIn(SYMBOLS[name], format_body(name))
+            self.assertIn(name, format_body(name))
+
+    def test_color_tints_symbol_and_keeps_width(self):
+        plain = format_body("mars", width=12)
+        tinted = format_body("mars", color=True, width=12)
+        self.assertTrue(plain.startswith("♂"))
+        self.assertIn("\033[1;38;2;", tinted)
+        self.assertIn("mars", tinted)
+        self.assertEqual(len(plain), 12)
 
 
 class DayNumberTests(unittest.TestCase):
@@ -106,6 +123,55 @@ class RiseTests(unittest.TestCase):
         place = lookup_place("UTC")
         with self.assertRaises(TimeWarpError):
             events_for_day("ceres", datetime(2026, 7, 4).date(), place)
+
+    def test_period_two_days(self):
+        from datetime import date
+
+        from timewarp.rise import events_for_period
+
+        place = lookup_place("New York")
+        rows = events_for_period("sun", date(2026, 7, 4), date(2026, 7, 5), place)
+        self.assertEqual([r.date for r in rows], [date(2026, 7, 4), date(2026, 7, 5)])
+        self.assertTrue(all(r.visible for r in rows))
+
+    def test_polar_night_sun_not_visible(self):
+        from datetime import date
+
+        from timewarp.places import Place
+
+        tromso = Place("Tromso", 69.6492, 18.9553, "Europe/Oslo")
+        ev = events_for_day("sun", date(2026, 12, 21), tromso)
+        self.assertFalse(ev.visible)
+        self.assertFalse(ev.after_rise_33)
+        self.assertFalse(ev.before_set_33)
+
+    def test_sun_13_and_33_summer(self):
+        from datetime import date
+
+        place = lookup_place("Indianapolis")
+        ev = events_for_day("sun", date(2026, 7, 4), place)
+        self.assertTrue(ev.rises and ev.sets)
+        self.assertTrue(ev.after_rise_13 and ev.before_set_13)
+        self.assertTrue(ev.after_rise_33 and ev.before_set_33)
+        seq = [
+            ev.rises[0],
+            ev.after_rise_13[0],
+            ev.after_rise_33[0],
+            ev.before_set_33[0],
+            ev.before_set_13[0],
+            ev.sets[0],
+        ]
+        self.assertEqual(seq, sorted(seq))
+
+    def test_sun_33_unreached_in_winter(self):
+        from datetime import date
+
+        place = lookup_place("Indianapolis")
+        ev = events_for_day("sun", date(2026, 12, 21), place)
+        self.assertTrue(ev.rises and ev.sets)
+        self.assertTrue(ev.after_rise_13 and ev.before_set_13)
+        self.assertFalse(ev.after_rise_33)
+        self.assertFalse(ev.before_set_33)
 
 
 if __name__ == "__main__":

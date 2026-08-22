@@ -25,6 +25,57 @@ BODIES = (
     "pluto",
 )
 
+# IAU/astronomical symbols (Unicode Miscellaneous Symbols).
+SYMBOLS = {
+    "sun": "☉",
+    "moon": "☾",
+    "mercury": "☿",
+    "venus": "♀",
+    "mars": "♂",
+    "jupiter": "♃",
+    "saturn": "♄",
+    "uranus": "♅",
+    "neptune": "♆",
+    "pluto": "♇",
+}
+
+# Approximate visual colors for a color terminal (not albedo-accurate).
+SYMBOL_RGB = {
+    "sun": (255, 204, 0),
+    "moon": (210, 215, 230),
+    "mercury": (176, 176, 186),
+    "venus": (255, 214, 90),
+    "mars": (220, 68, 40),
+    "jupiter": (232, 164, 72),
+    "saturn": (214, 196, 118),
+    "uranus": (110, 220, 228),
+    "neptune": (56, 96, 230),
+    "pluto": (186, 150, 118),
+}
+
+_RESET = "\033[0m"
+
+
+def body_symbol(name: str) -> str | None:
+    return SYMBOLS.get(name.strip().lower())
+
+
+def _color_symbol(symbol: str, rgb: tuple[int, int, int]) -> str:
+    r, g, b = rgb
+    return f"\033[1;38;2;{r};{g};{b}m{symbol}{_RESET}"
+
+
+def format_body(name: str, *, color: bool = False, width: int = 0) -> str:
+    """Plain '☉ sun' label. If color=True, tint only the symbol (ANSI), then pad to width."""
+    key = name.strip().lower()
+    symbol = SYMBOLS.get(key)
+    plain = f"{symbol} {key}" if symbol else key
+    if width > 0:
+        plain = f"{plain:{width}}"
+    if not color or not symbol or key not in SYMBOL_RGB:
+        return plain
+    return plain.replace(symbol, _color_symbol(symbol, SYMBOL_RGB[key]), 1)
+
 # Apparent equatorial diameter at 1 AU, arcseconds (Schlyter).
 DIAMETER_ARCSEC = {
     "mercury": 6.74,

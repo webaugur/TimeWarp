@@ -4,27 +4,42 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import sys
+import traceback
 from datetime import date, datetime
 from typing import Sequence
 
 from timewarp import __version__
 from timewarp.astro import moon_info, sun_times
-from timewarp.ephem import BODIES
-from timewarp.rise import events_for_day
+from timewarp.ephem import BODIES, format_body
+from timewarp.rise import events_for_period
 from timewarp.calendar_view import year_calendar
-from timewarp.duration import apply_offset, parse_offset, span
+from timewarp.duration import OffsetError, apply_offset, parse_offset, span
 from timewarp.eclipses import eclipse_to_dict, iso_range, list_eclipses
 from timewarp.errors import TimeWarpError
 from timewarp.holidays import parse_weekend
 from timewarp.iso import (
     as_date,
+    format_clock,
     format_instant,
     format_labeled,
     parse_instant,
     weekday_name,
 )
-from timewarp.places import Place, lookup_place
+from timewarp.cache import (
+    CACHEABLE,
+    cache_path,
+    clear as cache_clear,
+    data_as_pulled,
+    flags_on_argv,
+    format_pulled_cli,
+    load as cache_load,
+    quote_value,
+    save as cache_save,
+)
+from timewarp.places import Place, lookup_place, place_names
 from timewarp.workdays import add_workdays, count_workdays, parse_workday_count
 
 PROG = "timewarp"
@@ -46,11 +61,21 @@ Phase 2 (basic):
   countdown      signed time from now to a date (negative if past)
   sun            sunrise / solar noon / sunset
   moon           moon phase and illumination
-  rise           rise/set/transit: moon, sun, mercury, venus, mars, jupiter, …
+  rise           rise times for visible bodies (today, or a date / date range)
+  set            set times for the same bodies and period
   moonrise       alias for: rise moon
+  moonset        alias for: set moon
+  cities         named places (capitals + IANA tz cities)
+  save           store --city and similar flags
+  load           print stored flags (scriptable)
+  unload         drop stored flags
+  cache          same as save/load/unload, nested: cache save|load|unload
   eclipse        solar/lunar eclipses 2021–2030 (NASA / Espenak)
+  help           this overview, or help for one command (--help works too)
 
 Examples:
+  {PROG} add P7M6D
+  {PROG} add 7 years 6 months
   {PROG} add 2026-07-04 7 months 6 days
   {PROG} add 2026-07-04T09:00:00 P7M6DT3H
   {PROG} count 2026-05-31 2025-04-30
@@ -62,22 +87,117 @@ Examples:
   {PROG} countdown 2026-12-31T00:00:00
   {PROG} sun --city "New York" 2026-07-04
   {PROG} moon 2026-08-28
+  {PROG} rise --city "New York"
+  {PROG} rise --city "New York" 2026-07-04
+  {PROG} rise --city Indianapolis --13 --33
+  {PROG} rise --city "New York" 2026-07-04 2026-07-10
   {PROG} rise moon --city "New York" 2026-07-04
   {PROG} moonrise --city London 2026-08-28
-  {PROG} rise venus --city "New York" 2026-07-04
-  {PROG} rise --all --city "New York" 2026-07-04
+  {PROG} set --city "New York" 2026-07-04
+  {PROG} set venus --city London
+  {PROG} moonset --city London 2026-08-28
   {PROG} eclipse 2026
+  {PROG} cities
+  {PROG} save --city Indianapolis
+  {PROG} load
+  {PROG} unload --city
+  {PROG} unload
+  {PROG} help
+  {PROG} help add
 
 Dates are ISO 8601 only: YYYY-MM-DD, YYYY-MM-DDTHH:MM[:SS][Z|+HH:MM],
 YYYY-Www-D, YYYY-DDD. Optional words: today, now, yesterday, tomorrow.
+Omit a date to use today (yellow on the reconstructed command line).
+Rise/set tables print HH:MM plus a zone letter (17:52R); -q and --json stay ISO 8601.
 Negative offsets after the date may need -- so they are not flags:
   {PROG} add 2026-07-04 -- -P7M
 """
 
 
+def _want_color(args: argparse.Namespace | None = None) -> bool:
+    if args is not None and getattr(args, "no_color", False):
+        return False
+    if args is not None and getattr(args, "color", False):
+        return True
+    force = os.environ.get("FORCE_COLOR", "").strip().lower()
+    if force in {"1", "true", "yes"}:
+        return True
+    return sys.stdout.isatty()
+
+
+def _body_label(name: str, width: int = 0, *, color: bool | None = None) -> str:
+    if color is None:
+        color = _want_color()
+    return format_body(name, color=color, width=width)
+
+
+_PINK = "\033[38;2;255;128;192m"
+_YELLOW = "\033[38;2;255;220;0m"
+_WHITE = "\033[97m"
+_RESET = "\033[0m"
+
+
+def _stderr_color(args: argparse.Namespace | None = None) -> bool:
+    if args is not None and getattr(args, "no_color", False):
+        return False
+    if args is not None and getattr(args, "color", False):
+        return True
+    return sys.stderr.isatty()
+
+
+def _paint(text: str, on: str, *, enabled: bool) -> str:
+    if not enabled or not text:
+        return text
+    return f"{on}{text}{_RESET}"
+
+
+def _echo_cached_command(
+    pulled: list, raw: list[str], args: argparse.Namespace, *, assumed: str | None = None
+) -> None:
+    color = _stderr_color(args)
+    user = " ".join(quote_value(a) for a in raw)
+    flags = format_pulled_cli(pulled, prog="")
+    head = _paint("timewarp", _WHITE, enabled=color)
+    mid = _paint(flags, _PINK, enabled=color)
+    tail = _paint(user, _WHITE, enabled=color)
+    guess = _paint(assumed, _YELLOW, enabled=color) if assumed else ""
+    print(" ".join(p for p in (head, mid, tail, guess) if p), file=sys.stderr)
+
+
+def _maybe_echo_command(args: argparse.Namespace, assumed: str | None) -> None:
+    pulled = getattr(args, "cache_pulled", None) or []
+    raw = getattr(args, "raw_argv", None) or []
+    assumed_s = None if getattr(args, "json", False) else assumed
+    if pulled or assumed_s:
+        _echo_cached_command(pulled, raw, args, assumed=assumed_s)
+
+
 def _print_json(payload: object) -> int:
     json.dump(payload, sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")
+    return 0
+
+
+def cmd_help(args: argparse.Namespace) -> int:
+    topic = getattr(args, "topic", None)
+    commands = getattr(args, "help_commands", {}) or {}
+    if not topic:
+        text = HELP if HELP.endswith("\n") else HELP + "\n"
+        sys.stdout.write(text)
+        print(f"Command help: {PROG} help COMMAND")
+        print(f"Also:         {PROG} --help    {PROG} COMMAND --help")
+        return 0
+    key = topic.lower()
+    if key in {"help", "?", "h"}:
+        print(f"usage: {PROG} help [COMMAND]")
+        print()
+        print("Show the overview, or the same text as COMMAND --help.")
+        return 0
+    target = commands.get(topic) or commands.get(key)
+    if target is None:
+        names = sorted({p.prog.rsplit(" ", 1)[-1] for p in commands.values()})
+        raise TimeWarpError(f"no help for {topic!r}; commands: {', '.join(names)}")
+    target.print_help()
     return 0
 
 
@@ -121,10 +241,52 @@ def _peel_flags(args: argparse.Namespace, tokens: list[str]) -> list[str]:
     return kept
 
 
+def _looks_like_offset(text: str) -> bool:
+    compact = text.strip().replace(" ", "")
+    if re.match(r"^-?P", compact, re.IGNORECASE):
+        return True
+    if re.fullmatch(r"-?\d{1,3}-\d{1,2}(?:-\d{1,2})?", compact):
+        return True
+    return bool(
+        re.search(
+            r"\d\s*(years?|yrs?|y|months?|mons?|mo|weeks?|wks?|w|days?|d|"
+            r"hours?|hrs?|h|minutes?|mins?|min|seconds?|secs?|s)\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _split_start_offset(tokens: list[str]) -> tuple:
+    """Return (start, offset_tokens, assumed_today). Date omitted → today."""
+    if not tokens:
+        raise OffsetError(
+            "missing offset; example: 7 months 6 days or P7M6D (date defaults to today)"
+        )
+    first = tokens[0]
+    if _looks_like_offset(first):
+        return date.today(), tokens, True
+    try:
+        start = parse_instant(first)
+    except TimeWarpError:
+        return date.today(), tokens, True
+    rest = tokens[1:]
+    if not rest:
+        raise OffsetError(
+            "missing offset; example: 7 months 6 days or P7M6D "
+            "(omit the date to add to today)"
+        )
+    return start, rest, False
+
+
 def cmd_add(args: argparse.Namespace) -> int:
-    start = parse_instant(args.date)
-    tokens = _peel_flags(args, list(args.offset))
-    offset = parse_offset(tokens)
+    tokens = []
+    if getattr(args, "date", None):
+        tokens.append(args.date)
+    tokens.extend(_peel_flags(args, list(getattr(args, "offset", None) or [])))
+    start, offset_tokens, assumed = _split_start_offset(tokens)
+    _maybe_echo_command(args, as_date(start).isoformat() if assumed else None)
+    offset = parse_offset(offset_tokens)
     if args.subtract:
         offset = offset.negated()
     result = apply_offset(start, offset)
@@ -183,9 +345,19 @@ def cmd_workdays(args: argparse.Namespace) -> int:
 
 
 def cmd_add_workdays(args: argparse.Namespace) -> int:
-    start = parse_instant(args.date)
+    if args.count is None:
+        if not args.date:
+            raise TimeWarpError("missing workday count; example: timewarp add-workdays 10")
+        start = date.today()
+        assumed = True
+        count_tok = args.date
+    else:
+        start = parse_instant(args.date)
+        assumed = False
+        count_tok = args.count
+    _maybe_echo_command(args, as_date(start).isoformat() if assumed else None)
     try:
-        n = parse_workday_count(args.count)
+        n = parse_workday_count(count_tok)
     except ValueError as exc:
         raise TimeWarpError(str(exc)) from exc
     result = add_workdays(start, n, holiday_country=args.holidays, weekend=parse_weekend(args.weekend))
@@ -209,7 +381,9 @@ def cmd_add_workdays(args: argparse.Namespace) -> int:
 
 
 def cmd_weekday(args: argparse.Namespace) -> int:
-    inst = parse_instant(args.date)
+    assumed = not args.date
+    inst = parse_instant(args.date) if args.date else date.today()
+    _maybe_echo_command(args, as_date(inst).isoformat() if assumed else None)
     d = as_date(inst)
     iso = d.isoweekday()
     payload = {
@@ -231,7 +405,9 @@ def cmd_weekday(args: argparse.Namespace) -> int:
 
 
 def cmd_week(args: argparse.Namespace) -> int:
-    inst = parse_instant(args.date)
+    assumed = not args.date
+    inst = parse_instant(args.date) if args.date else date.today()
+    _maybe_echo_command(args, as_date(inst).isoformat() if assumed else None)
     d = as_date(inst)
     iso = d.isocalendar()
     label = _iso_week_label(d)
@@ -258,9 +434,11 @@ def cmd_week(args: argparse.Namespace) -> int:
 
 
 def cmd_calendar(args: argparse.Namespace) -> int:
+    assumed = args.year is None
     year = args.year
     if year is None:
         year = date.today().year
+    _maybe_echo_command(args, str(year) if assumed else None)
     if not 1 <= year <= 9999:
         raise TimeWarpError(f"year {year} is out of range 1..9999")
     text = year_calendar(year, country=args.country, iso_weeks=args.iso)
@@ -276,7 +454,9 @@ def cmd_calendar(args: argparse.Namespace) -> int:
 
 
 def cmd_countdown(args: argparse.Namespace) -> int:
-    target = parse_instant(args.date)
+    assumed = not args.date
+    target = parse_instant(args.date) if args.date else date.today()
+    _maybe_echo_command(args, as_date(target).isoformat() if assumed else None)
     if isinstance(target, datetime):
         start: datetime | date = datetime.now(tz=target.tzinfo).replace(microsecond=0)
     else:
@@ -304,19 +484,29 @@ def _place_from_args(args: argparse.Namespace) -> Place:
         lat = args.lat if args.lat is not None else place.lat
         lon = args.lon if args.lon is not None else place.lon
         tz = args.tz if args.tz else place.tz
-        return Place(place.name, lat, lon, tz)
-    if args.lat is None or args.lon is None:
-        raise TimeWarpError("location required: --city NAME or both --lat and --lon (and usually --tz)")
-    tz = args.tz or "UTC"
-    return Place("custom", args.lat, args.lon, tz)
+        name = place.name
+    else:
+        if args.lat is None or args.lon is None:
+            raise TimeWarpError("location required: --city NAME or both --lat and --lon (and usually --tz)")
+        lat, lon = args.lat, args.lon
+        tz = args.tz or "UTC"
+        name = "custom"
+    if not -90 <= lat <= 90:
+        raise TimeWarpError(f"latitude {lat} is out of range -90..90")
+    if not -180 <= lon <= 180:
+        raise TimeWarpError(f"longitude {lon} is out of range -180..180")
+    return Place(name, lat, lon, tz)
 
 
 def cmd_sun(args: argparse.Namespace) -> int:
+    assumed = not args.date
     inst = parse_instant(args.date) if args.date else date.today()
     place = _place_from_args(args)
+    _maybe_echo_command(args, as_date(inst).isoformat() if assumed else None)
     result = sun_times(inst, place)
     if args.json:
         return _print_json(result.to_dict())
+    print(f"Body:  {_body_label('sun', color=_want_color(args))}")
     print(f"Date:  {result.date.isoformat()}")
     print(f"Place: {result.place.name} ({result.place.lat}, {result.place.lon}) {result.place.tz}")
     if result.note:
@@ -333,10 +523,13 @@ def cmd_sun(args: argparse.Namespace) -> int:
 
 
 def cmd_moon(args: argparse.Namespace) -> int:
+    assumed = not args.date
     inst = parse_instant(args.date) if args.date else date.today()
+    _maybe_echo_command(args, as_date(inst).isoformat() if assumed else None)
     result = moon_info(inst)
     if args.json:
         return _print_json(result.to_dict())
+    print(f"Body:          {_body_label('moon', color=_want_color(args))}")
     print(f"Date:          {result.date.isoformat()}")
     print(f"Phase:         {result.phase}")
     print(f"Illumination:  {result.illumination:.1%}")
@@ -364,10 +557,26 @@ def _fmt_az(deg: float | None) -> str:
     return f"{deg:6.1f}° {name}"
 
 
-def _print_rise(result) -> None:
+def _alt_rows(result, alt13: bool, alt33: bool) -> tuple[list[tuple[str, tuple]], list[tuple[str, tuple]]]:
+    rows: list[tuple[str, tuple]] = []
+    if alt13:
+        rows.append(("+13°", result.after_rise_13))
+    if alt33:
+        rows.append(("+33°", result.after_rise_33))
+    before: list[tuple[str, tuple]] = []
+    if alt33:
+        before.append(("33°", result.before_set_33))
+    if alt13:
+        before.append(("13°", result.before_set_13))
+    return rows, before
+
+
+def _print_sky_detail(
+    result, *, primary: str, color: bool = False, alt13: bool = False, alt33: bool = False
+) -> None:
     from timewarp.ephem import altitude_azimuth, position as sky_position
 
-    print(f"Body:  {result.body}")
+    print(f"Body:  {_body_label(result.body, color=color)}")
     print(f"Date:  {result.date.isoformat()}  ({result.place.tz})")
     print(f"Place: {result.place.name} ({result.place.lat}, {result.place.lon})")
     pos = result.position
@@ -381,7 +590,18 @@ def _print_rise(result) -> None:
         print(f"Magnitude: {pos.magnitude:.2f}")
     if result.note:
         print(result.note)
-    for label, times in (("Rise", result.rises), ("Transit", result.transits), ("Set", result.sets)):
+    after, before = _alt_rows(result, alt13, alt33)
+    if primary == "set":
+        order = [
+            ("Set", result.sets),
+            *reversed(before),
+            ("Transit", result.transits),
+            ("Rise", result.rises),
+            *after,
+        ]
+    else:
+        order = [("Rise", result.rises), *after, ("Transit", result.transits), *before, ("Set", result.sets)]
+    for label, times in order:
         if not times:
             print(f"{label}:    —")
             continue
@@ -389,48 +609,282 @@ def _print_rise(result) -> None:
             event_pos = sky_position(result.body, when)
             alt, az = altitude_azimuth(event_pos, when, result.place.lat, result.place.lon)
             extra = _fmt_az(az) if label != "Transit" else f"alt {alt:.1f}°"
-            print(f"{label}:    {format_instant(when)}  {extra}")
+            print(f"{label}:    {format_clock(when)}  {extra}")
+
+
+def _fmt_event_times(times) -> str:
+    if not times:
+        return "—"
+    return ", ".join(format_clock(t) for t in times)
+
+
+def _sky_table_cols(primary: str, alt13: bool, alt33: bool) -> list[tuple[str, str]]:
+    after: list[tuple[str, str]] = []
+    before: list[tuple[str, str]] = []
+    if alt13:
+        after.append(("+13°", "after_rise_13"))
+    if alt33:
+        after.append(("+33°", "after_rise_33"))
+    if alt33:
+        before.append(("33°", "before_set_33"))
+    if alt13:
+        before.append(("13°", "before_set_13"))
+    if primary == "set":
+        return [("set", "sets"), *reversed(before), ("rise", "rises"), *after]
+    return [("rise", "rises"), *after, *before, ("set", "sets")]
+
+
+def _print_sky_table(
+    results, *, primary: str, color: bool = False, alt13: bool = False, alt33: bool = False
+) -> None:
+    if not results:
+        print("No visible bodies in that period.")
+        return
+    place = results[0].place
+    dates = sorted({r.date for r in results})
+    if len(dates) == 1:
+        print(f"{place.name}  {place.tz}")
+    else:
+        span = f"{dates[0].isoformat()}/{dates[-1].isoformat()}"
+        print(f"{place.name}  {span}  {place.tz}")
+    multi_day = len(dates) > 1
+    cols = _sky_table_cols(primary, alt13, alt33)
+    clock_w = 8
+    parts = []
+    if multi_day:
+        parts.append(f"{'date':10}")
+    parts.append(f"{'body':12}")
+    parts.extend(f"{title:{clock_w}}" for title, _attr in cols)
+    print("  ".join(parts))
+    for r in results:
+        label = _body_label(r.body, width=12, color=color)
+        cells = []
+        if multi_day:
+            cells.append(f"{r.date.isoformat():10}")
+        cells.append(label)
+        for _title, attr in cols:
+            cells.append(f"{_fmt_event_times(getattr(r, attr)):{clock_w}}")
+        print("  ".join(cells))
+
+
+def _parse_sky_when(args: argparse.Namespace):
+    from timewarp.ephem import normalize_body
+
+    tokens = [t for t in (getattr(args, "body", None), getattr(args, "date", None), getattr(args, "end", None)) if t]
+    body_name = None
+    dates = []
+    for tok in tokens:
+        try:
+            name = normalize_body(tok)
+        except TimeWarpError:
+            dates.append(parse_instant(tok))
+            continue
+        if body_name is not None:
+            raise TimeWarpError("give at most one body name")
+        body_name = name
+    if len(dates) > 2:
+        raise TimeWarpError("give at most a start date and an end date")
+    assumed = not dates
+    if not dates:
+        start = end = date.today()
+    elif len(dates) == 1:
+        start = end = dates[0]
+    else:
+        start, end = dates[0], dates[1]
+    return body_name, start, end, assumed
+
+
+def _primary_times(result, primary: str):
+    return result.sets if primary == "set" else result.rises
+
+
+def _event_sort_key(result, primary: str):
+    """Local date, then first rise (or set), then name. Missing times go last."""
+    times = _primary_times(result, primary)
+    if times:
+        return (result.date, 0, times[0].timestamp(), result.body)
+    return (result.date, 1, 0.0, result.body)
 
 
 def cmd_rise(args: argparse.Namespace) -> int:
-    from timewarp.ephem import normalize_body
-
+    primary = getattr(args, "kind", "rise")
     place = _place_from_args(args)
-    body = args.body
-    inst = parse_instant(args.date) if args.date else None
-    if inst is None and body:
-        try:
-            normalize_body(body)
-        except TimeWarpError:
-            inst = parse_instant(body)
-            body = None
-    if inst is None:
-        inst = date.today()
-    if args.all:
-        bodies = BODIES
+    body_name, start, end, assumed = _parse_sky_when(args)
+    _maybe_echo_command(args, as_date(start).isoformat() if assumed else None)
+    if body_name:
+        bodies = [body_name]
     else:
-        if not body:
-            raise TimeWarpError("rise needs a body (moon, venus, …) or --all")
-        bodies = [body]
-    results = [events_for_day(b, inst, place) for b in bodies]
+        bodies = list(BODIES)
+    results = []
+    for body in bodies:
+        results.extend(events_for_period(body, start, end, place))
+    if not getattr(args, "all", False) and body_name is None:
+        results = [r for r in results if r.visible]
+    results.sort(key=lambda r: _event_sort_key(r, primary))
+    color = _want_color(args)
+    alt13 = getattr(args, "alt13", False)
+    alt33 = getattr(args, "alt33", False)
+
     if args.json:
-        if len(results) == 1:
-            return _print_json(results[0].to_dict())
-        return _print_json({"events": [r.to_dict() for r in results]})
+        payload = {
+            "kind": primary,
+            "start": as_date(start).isoformat(),
+            "end": as_date(end).isoformat(),
+            "events": [r.to_dict() for r in results],
+        }
+        if len(results) == 1 and body_name:
+            payload = results[0].to_dict()
+            payload["kind"] = primary
+        return _print_json(payload)
     if args.quiet:
         for r in results:
-            iso = format_instant(r.rises[0]) if r.rises else "none"
+            times = _primary_times(r, primary)
+            iso = format_instant(times[0]) if times else "none"
             if len(results) == 1:
                 print(iso)
+            elif len({x.date for x in results}) > 1:
+                print(f"{r.date.isoformat()} {_body_label(r.body, width=12, color=color)} {iso}")
             else:
-                print(f"{r.body:8} {iso}")
+                print(f"{_body_label(r.body, width=12, color=color)} {iso}")
         return 0
-    for i, result in enumerate(results):
-        if i:
-            print()
-        if len(results) > 1:
-            print(f"== {result.body} ==")
-        _print_rise(result)
+    if body_name and len({r.date for r in results}) == 1:
+        _print_sky_detail(results[0], primary=primary, color=color, alt13=alt13, alt33=alt33)
+        return 0
+    _print_sky_table(results, primary=primary, color=color, alt13=alt13, alt33=alt33)
+    return 0
+
+
+def cmd_cities(args: argparse.Namespace) -> int:
+    names = place_names()
+    if args.json:
+        rows = []
+        for n in names:
+            p = lookup_place(n)
+            rows.append({"name": p.name, "lat": p.lat, "lon": p.lon, "tz": p.tz})
+        return _print_json({"cities": rows})
+    for n in names:
+        p = lookup_place(n)
+        print(f"{p.name:24} {p.lat:10.5f} {p.lon:11.5f}  {p.tz}")
+    return 0
+
+
+def _apply_cache(args: argparse.Namespace, rest_argv: list[str]) -> list[tuple[str, str | bool]]:
+    data = cache_load()
+    present = flags_on_argv(rest_argv)
+    pulled: list[tuple[str, str | bool]] = []
+
+    def take(attr: str, flag: str) -> None:
+        if not hasattr(args, attr) or attr in present:
+            return
+        if attr not in data:
+            return
+        setattr(args, attr, data[attr])
+        val = data[attr]
+        pulled.append((flag, True if val is True else val))
+
+    take("city", "--city")
+    take("lat", "--lat")
+    take("lon", "--lon")
+    take("tz", "--tz")
+    take("holidays", "--holidays")
+    take("weekend", "--weekend")
+    take("country", "--country")
+    if hasattr(args, "color") and "color" not in present and "no_color" not in present:
+        if data.get("color") and not args.color and not getattr(args, "no_color", False):
+            args.color = True
+            pulled.append(("--color", True))
+        elif data.get("no_color") and not args.color and not getattr(args, "no_color", False):
+            args.no_color = True
+            pulled.append(("--no-color", True))
+    return pulled
+
+
+def cmd_cache(args: argparse.Namespace) -> int:
+    op = getattr(args, "cache_cmd", None) or "load"
+    if op in {"load", "show"}:
+        return cmd_cache_load(args)
+    if op in {"save", "set"}:
+        return cmd_cache_save(args)
+    if op in {"unload", "clear"}:
+        return cmd_cache_unload(args)
+    raise TimeWarpError(f"unknown cache action {op!r}")
+
+
+def cmd_cache_load(args: argparse.Namespace) -> int:
+    data = cache_load()
+    pulled = data_as_pulled(data)
+    if args.json:
+        return _print_json({"path": str(cache_path()), "settings": data})
+    line = format_pulled_cli(pulled, prog="" if args.quiet else "timewarp")
+    if line:
+        print(line)
+    elif not args.quiet:
+        print("timewarp")
+    return 0
+
+
+def cmd_cache_save(args: argparse.Namespace) -> int:
+    data = cache_load()
+    wrote = False
+    if getattr(args, "city", None):
+        data["city"] = lookup_place(args.city).name
+        wrote = True
+    if getattr(args, "lat", None) is not None:
+        data["lat"] = args.lat
+        wrote = True
+    if getattr(args, "lon", None) is not None:
+        data["lon"] = args.lon
+        wrote = True
+    if getattr(args, "tz", None):
+        data["tz"] = args.tz
+        wrote = True
+    if getattr(args, "holidays", None):
+        data["holidays"] = args.holidays
+        wrote = True
+    if getattr(args, "weekend", None):
+        data["weekend"] = args.weekend
+        wrote = True
+    if getattr(args, "country", None):
+        data["country"] = args.country
+        wrote = True
+    if getattr(args, "color", False):
+        data["color"] = True
+        data.pop("no_color", None)
+        wrote = True
+    if getattr(args, "no_color", False):
+        data["no_color"] = True
+        data.pop("color", None)
+        wrote = True
+    if not wrote:
+        raise TimeWarpError("cache save needs a setting, e.g. --city Indianapolis")
+    cache_save(data)
+    line = format_pulled_cli(data_as_pulled(data), prog="" if args.quiet else "timewarp")
+    if line:
+        print(line)
+    return 0
+
+
+def cmd_cache_unload(args: argparse.Namespace) -> int:
+    keys: list[str] = []
+    for raw in getattr(args, "keys", None) or []:
+        name = raw[2:] if raw.startswith("--") else raw
+        name = name.replace("_", "-")
+        if name not in CACHEABLE:
+            raise TimeWarpError(
+                f"unknown cache key {raw!r}; known: {', '.join(sorted(CACHEABLE))}"
+            )
+        keys.append(CACHEABLE[name])
+    for flag, key in CACHEABLE.items():
+        if getattr(args, f"unload_{key}", False):
+            keys.append(key)
+    keys = list(dict.fromkeys(keys))
+    if keys:
+        cache_clear(keys)
+        flags = " ".join(f"--{k.replace('_', '-')}" for k in keys)
+        print(f"timewarp: unloaded {flags}", file=sys.stderr)
+    else:
+        cache_clear()
+        print("timewarp: cache unloaded", file=sys.stderr)
     return 0
 
 
@@ -438,6 +892,10 @@ def cmd_eclipse(args: argparse.Namespace) -> int:
     year = args.year
     after = None
     limit = args.limit
+    if year is not None and not 1 <= year <= 9999:
+        raise TimeWarpError(f"year {year} is out of range 1..9999")
+    if limit is not None and limit < 1:
+        raise TimeWarpError("--limit must be a positive integer")
     if year is None:
         after = date.today()
         if limit is None:
@@ -487,14 +945,27 @@ def _add_work_flags(p: argparse.ArgumentParser) -> None:
     )
 
 
+class _Parser(argparse.ArgumentParser):
+    """Turn argparse failures into TimeWarpError so main() can print them."""
+
+    def error(self, message: str) -> None:
+        self.print_usage(sys.stderr)
+        raise TimeWarpError(message)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _Parser(
         prog=PROG,
         description=HELP,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--version", action="version", version=f"{PROG} {__version__}")
-    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub = parser.add_subparsers(dest="cmd", required=False)
+    parser.set_defaults(func=cmd_help, topic=None)
+
+    p = sub.add_parser("help", aliases=["?"], help="Show help (also: --help, COMMAND --help)")
+    p.add_argument("topic", nargs="?", help="command name (add, rise, count, …)")
+    p.set_defaults(func=cmd_help)
 
     p = sub.add_parser("count", aliases=["between", "duration"], help="Count Days: signed duration")
     _add_common(p)
@@ -505,13 +976,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("add", help="Add Days: add years/months/weeks/days/time")
     _add_common(p)
-    p.add_argument("date", help="ISO 8601 start")
+    p.add_argument("date", nargs="?", help="ISO 8601 start (default: today)")
     p.add_argument("offset", nargs=argparse.REMAINDER, help="7 months 6 days  or  P7M6D")
     p.set_defaults(func=cmd_add, subtract=False)
 
     p = sub.add_parser("sub", aliases=["subtract"], help="Add Days: subtract an offset")
     _add_common(p)
-    p.add_argument("date")
+    p.add_argument("date", nargs="?", help="ISO 8601 start (default: today)")
     p.add_argument("offset", nargs=argparse.REMAINDER)
     p.set_defaults(func=cmd_add, subtract=True)
 
@@ -526,18 +997,18 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("add-workdays", aliases=["add-workday"], help="Add Workdays")
     _add_common(p)
     _add_work_flags(p)
-    p.add_argument("date")
-    p.add_argument("count", help="signed integer or P10D / -P10D")
+    p.add_argument("date", nargs="?", help="ISO 8601 start (default: today)")
+    p.add_argument("count", nargs="?", help="signed integer or P10D / -P10D")
     p.set_defaults(func=cmd_add_workdays)
 
     p = sub.add_parser("weekday", help="Weekday for a date")
     _add_common(p)
-    p.add_argument("date")
+    p.add_argument("date", nargs="?", help="ISO 8601 date (default: today)")
     p.set_defaults(func=cmd_weekday)
 
     p = sub.add_parser("week", aliases=["weekno", "week-number"], help="ISO week number")
     _add_common(p)
-    p.add_argument("date")
+    p.add_argument("date", nargs="?", help="ISO 8601 date (default: today)")
     p.set_defaults(func=cmd_week)
 
     p = sub.add_parser("calendar", help="Year calendar")
@@ -549,7 +1020,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("countdown", help="Signed time from now to a date")
     _add_common(p)
-    p.add_argument("date")
+    p.add_argument("date", nargs="?", help="ISO 8601 date (default: today)")
     p.set_defaults(func=cmd_countdown)
 
     def _add_place(parser: argparse.ArgumentParser) -> None:
@@ -558,33 +1029,139 @@ def build_parser() -> argparse.ArgumentParser:
         parser.add_argument("--lon", type=float)
         parser.add_argument("--tz", help="IANA time zone")
 
+    def _add_color_flags(parser: argparse.ArgumentParser) -> None:
+        g = parser.add_mutually_exclusive_group()
+        g.add_argument("--color", action="store_true", help="color body symbols (even when piped)")
+        g.add_argument("--no-color", action="store_true", help="plain symbols, no ANSI color")
+
+    def _add_cache_save_flags(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("--city")
+        parser.add_argument("--lat", type=float)
+        parser.add_argument("--lon", type=float)
+        parser.add_argument("--tz")
+        parser.add_argument("--holidays")
+        parser.add_argument("--weekend")
+        parser.add_argument("--country")
+        _add_color_flags(parser)
+
+    def _add_cache_unload_flags(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("keys", nargs="*", help="city, tz, color, …")
+        for flag, key in CACHEABLE.items():
+            parser.add_argument(
+                f"--{flag}",
+                dest=f"unload_{key}",
+                action="store_true",
+                help=f"unload --{flag}",
+            )
+
     p = sub.add_parser("sun", help="Sunrise and sunset")
     _add_common(p)
     p.add_argument("date", nargs="?", help="ISO 8601 date (default: today)")
     _add_place(p)
+    _add_color_flags(p)
     p.set_defaults(func=cmd_sun)
 
     p = sub.add_parser("moon", help="Moon phase")
     _add_common(p)
     p.add_argument("date", nargs="?", help="ISO 8601 date (default: today)")
+    _add_color_flags(p)
     p.set_defaults(func=cmd_moon)
 
-    p = sub.add_parser(
-        "rise",
-        help="Rise/set/transit for moon, sun, and planets",
-    )
+    def _add_sky_when(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument(
+            "body",
+            nargs="?",
+            help="moon, sun, mercury, venus, mars, jupiter, saturn, uranus, neptune, pluto (default: all visible)",
+        )
+        parser.add_argument("date", nargs="?", help="ISO 8601 start date (default: today)")
+        parser.add_argument("end", nargs="?", help="ISO 8601 end date (inclusive)")
+        parser.add_argument(
+            "--all",
+            action="store_true",
+            help="include bodies that stay below the horizon",
+        )
+        parser.add_argument(
+            "--13",
+            dest="alt13",
+            action="store_true",
+            help="times at +13° after rise and before set",
+        )
+        parser.add_argument(
+            "--33",
+            dest="alt33",
+            action="store_true",
+            help="times at +33° after rise and before set",
+        )
+
+    p = sub.add_parser("rise", help="Rise times for visible sun, moon, and planets")
     _add_common(p)
-    p.add_argument("body", nargs="?", help="moon, sun, mercury, venus, mars, jupiter, saturn, uranus, neptune, pluto")
-    p.add_argument("date", nargs="?", help="ISO 8601 date (default: today)")
-    p.add_argument("--all", action="store_true", help="print every bundled body")
+    _add_sky_when(p)
     _add_place(p)
-    p.set_defaults(func=cmd_rise)
+    _add_color_flags(p)
+    p.set_defaults(func=cmd_rise, kind="rise")
+
+    p = sub.add_parser("set", help="Set times for visible sun, moon, and planets")
+    _add_common(p)
+    _add_sky_when(p)
+    _add_place(p)
+    _add_color_flags(p)
+    p.set_defaults(func=cmd_rise, kind="set")
 
     p = sub.add_parser("moonrise", help="alias for: rise moon")
     _add_common(p)
     p.add_argument("date", nargs="?", help="ISO 8601 date (default: today)")
+    p.add_argument("end", nargs="?", help="ISO 8601 end date (inclusive)")
+    p.add_argument("--13", dest="alt13", action="store_true", help="times at +13° after rise and before set")
+    p.add_argument("--33", dest="alt33", action="store_true", help="times at +33° after rise and before set")
     _add_place(p)
-    p.set_defaults(func=cmd_rise, body="moon", all=False)
+    _add_color_flags(p)
+    p.set_defaults(func=cmd_rise, body="moon", all=False, kind="rise")
+
+    p = sub.add_parser("moonset", help="alias for: set moon")
+    _add_common(p)
+    p.add_argument("date", nargs="?", help="ISO 8601 date (default: today)")
+    p.add_argument("end", nargs="?", help="ISO 8601 end date (inclusive)")
+    p.add_argument("--13", dest="alt13", action="store_true", help="times at +13° after rise and before set")
+    p.add_argument("--33", dest="alt33", action="store_true", help="times at +33° after rise and before set")
+    _add_place(p)
+    _add_color_flags(p)
+    p.set_defaults(func=cmd_rise, body="moon", all=False, kind="set")
+
+    p = sub.add_parser("cities", help="List named places")
+    _add_common(p)
+    p.set_defaults(func=cmd_cities)
+
+    cache_p = sub.add_parser("cache", help="Save, load, or unload remembered settings")
+    cache_sub = cache_p.add_subparsers(dest="cache_cmd")
+    cache_p.set_defaults(func=cmd_cache, cache_cmd="load")
+
+    load_p = cache_sub.add_parser("load", aliases=["show"], help="print cached flags (scriptable)")
+    _add_common(load_p)
+    load_p.set_defaults(func=cmd_cache, cache_cmd="load")
+
+    save_p = cache_sub.add_parser("save", aliases=["set"], help="store settings")
+    _add_common(save_p)
+    _add_cache_save_flags(save_p)
+    save_p.set_defaults(func=cmd_cache, cache_cmd="save")
+
+    unload_p = cache_sub.add_parser("unload", aliases=["clear"], help="drop cached settings")
+    _add_common(unload_p)
+    _add_cache_unload_flags(unload_p)
+    unload_p.set_defaults(func=cmd_cache, cache_cmd="unload")
+
+    p = sub.add_parser("save", help="store --city and similar flags")
+    _add_common(p)
+    _add_cache_save_flags(p)
+    p.set_defaults(func=cmd_cache, cache_cmd="save")
+
+    p = sub.add_parser("load", aliases=["show"], help="print stored flags")
+    _add_common(p)
+    p.set_defaults(func=cmd_cache, cache_cmd="load")
+
+    p = sub.add_parser("unload", aliases=["clear"], help="drop stored flags")
+    _add_common(p)
+    _add_cache_unload_flags(p)
+    p.set_defaults(func=cmd_cache, cache_cmd="unload")
 
     p = sub.add_parser("eclipse", help="Eclipse catalog 2021–2030")
     _add_common(p)
@@ -592,19 +1169,50 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int)
     p.set_defaults(func=cmd_eclipse)
 
+    parser.tw_commands = dict(sub.choices)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    raw = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
     try:
-        args = parser.parse_args(list(argv) if argv is not None else None)
+        args = parser.parse_args(raw)
+        args.raw_argv = raw
+        args.cache_pulled = []
+        args.help_commands = getattr(parser, "tw_commands", {})
+        if args.func is cmd_help:
+            return cmd_help(args)
+        echo_self = {cmd_rise, cmd_add, cmd_add_workdays, cmd_sun, cmd_moon, cmd_weekday, cmd_week, cmd_countdown, cmd_calendar}
+        if args.func is not cmd_cache:
+            pulled = _apply_cache(args, raw)
+            args.cache_pulled = pulled
+            if pulled and args.func not in echo_self:
+                _echo_cached_command(pulled, raw, args)
         return args.func(args)
     except TimeWarpError as exc:
         print(f"{PROG}: {exc}", file=sys.stderr)
         return 2
     except BrokenPipeError:
         return 0
+    except KeyboardInterrupt:
+        print(f"{PROG}: interrupted", file=sys.stderr)
+        return 130
+    except SystemExit as exc:
+        code = exc.code
+        if code is None or code is True:
+            return 0
+        if code is False:
+            return 1
+        try:
+            return int(code)
+        except (TypeError, ValueError):
+            return 2
+    except Exception as exc:
+        if os.environ.get("TIMEWARP_DEBUG", "").strip() in {"1", "true", "yes"}:
+            traceback.print_exc()
+        print(f"{PROG}: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

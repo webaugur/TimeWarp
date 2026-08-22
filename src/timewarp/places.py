@@ -1,10 +1,18 @@
-"""Named places for sun/moon. Coordinates are WGS84; time zones are IANA names."""
+"""Named places for sun/moon. Coordinates are WGS84; time zones are IANA names.
+
+Python's locale module does not list cities. Coordinates come from:
+- a built-in world list
+- IANA tzdata zone1970.tab (via zoneinfo)
+- US / Canadian / Mexican capitals
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from timewarp.errors import TimeWarpError
+from timewarp.iana_places import iter_na_tz_places
+from timewarp.na_capitals import ALIASES, all_capitals
 
 
 @dataclass(frozen=True)
@@ -15,15 +23,20 @@ class Place:
     tz: str
 
 
-# A short list so `sun`/`moon` work without looking up coordinates.
 PLACES: dict[str, Place] = {}
+_CANONICAL: dict[str, str] = {}
 
 
-def _add(name: str, lat: float, lon: float, tz: str) -> None:
+def _slug(name: str) -> str:
+    return " ".join(name.strip().lower().replace("_", " ").replace(",", " ").split())
+
+
+def _add(name: str, lat: float, lon: float, tz: str, *aliases: str) -> None:
     place = Place(name, lat, lon, tz)
-    PLACES[name.lower()] = place
-    slug = name.lower().replace(",", " ").replace("  ", " ")
-    PLACES[slug] = place
+    keys = [_slug(name), *[_slug(a) for a in aliases]]
+    for key in keys:
+        PLACES[key] = place
+        _CANONICAL[key] = name
 
 
 _add("UTC", 0.0, 0.0, "UTC")
@@ -55,12 +68,30 @@ _add("Mexico City", 19.4326, -99.1332, "America/Mexico_City")
 _add("Toronto", 43.6532, -79.3832, "America/Toronto")
 _add("Vancouver", 49.2827, -123.1207, "America/Vancouver")
 
+for name, lat, lon, tz in iter_na_tz_places():
+    _add(name, lat, lon, tz)
+
+for name, lat, lon, tz in all_capitals():
+    _add(name, lat, lon, tz)
+
+for alias, canonical in ALIASES.items():
+    place = PLACES.get(_slug(canonical))
+    if place is not None:
+        PLACES[_slug(alias)] = place
+        _CANONICAL[_slug(alias)] = place.name
+
+
+def place_names() -> list[str]:
+    return sorted({p.name for p in PLACES.values()}, key=str.casefold)
+
 
 def lookup_place(name: str) -> Place:
-    key = " ".join(name.strip().lower().replace("_", " ").split())
+    key = _slug(name)
     if key in PLACES:
         return PLACES[key]
-    known = sorted({p.name for p in PLACES.values()})
+    names = place_names()
+    sample = ", ".join(names[:8])
     raise TimeWarpError(
-        f"unknown city {name!r}. Pass --lat/--lon/--tz, or one of: {', '.join(known)}"
+        f"unknown city {name!r}. Pass --lat/--lon/--tz, or a named place "
+        f"({len(names)} loaded, e.g. {sample}). List them with: timewarp cities"
     )

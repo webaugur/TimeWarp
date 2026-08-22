@@ -32,6 +32,11 @@ _UNIT = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+# Compact years-months[-days] when it cannot be an ISO date (year is 1–3 digits).
+_HYPHEN_DUR = re.compile(
+    r"^(?P<sign>-)?(?P<years>\d{1,3})-(?P<months>\d{1,2})(?:-(?P<days>\d{1,2}))?$"
+)
+
 _ISO_DUR = re.compile(
     r"""^
     (?P<sign>-)?
@@ -263,12 +268,22 @@ def parse_offset(tokens: Iterable[str] | str) -> Offset:
                 raise OffsetError(f"invalid ISO 8601 duration {text!r}")
         return off
 
+    hyphen = _HYPHEN_DUR.fullmatch(compact)
+    if hyphen:
+        sign = -1 if hyphen.group("sign") else 1
+        days = hyphen.group("days")
+        return Offset(
+            years=sign * int(hyphen.group("years")),
+            months=sign * int(hyphen.group("months")),
+            days=sign * int(days) if days else 0,
+        )
+
     # Human: "7 months 6 days" or "7mo" "+3d" "-2 hours"
     joined = text
     matches = list(_UNIT.finditer(joined))
     if not matches:
         raise OffsetError(
-            f"could not parse offset {text!r}; use '7 months 6 days' or ISO 8601 'P7M6D'"
+            f"could not parse offset {text!r}; use '7 months 6 days', '7-6-13', or ISO 8601 'P7M6D'"
         )
     covered = "".join(joined[m.start() : m.end()] for m in matches)
     leftover = _UNIT.sub(" ", joined)

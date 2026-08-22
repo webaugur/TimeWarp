@@ -1,8 +1,8 @@
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from timewarp.errors import TimeWarpError
-from timewarp.iso import format_instant, parse_instant, weekday_name
+from timewarp.iso import format_clock, format_instant, parse_instant, tz_letter, weekday_name
 
 
 class ParseIsoTests(unittest.TestCase):
@@ -53,6 +53,15 @@ class ParseIsoTests(unittest.TestCase):
 
     def test_format_date(self):
         self.assertEqual(format_instant(date(2026, 7, 4)), "2026-07-04")
+
+    def test_military_zone_letters(self):
+        z = datetime(2026, 7, 4, 13, 0, tzinfo=timezone.utc)
+        self.assertEqual(tz_letter(z), "Z")
+        self.assertEqual(format_clock(z), "13:00Z")
+        q = datetime(2026, 7, 4, 18, 52, tzinfo=timezone(timedelta(hours=-4)))
+        self.assertEqual(format_clock(q), "18:52Q")
+        r = datetime(2026, 1, 4, 17, 52, tzinfo=timezone(timedelta(hours=-5)))
+        self.assertEqual(format_clock(r), "17:52R")
 
 
 if __name__ == "__main__":

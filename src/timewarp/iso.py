@@ -73,6 +73,33 @@ def format_instant(value: Instant) -> str:
     return value.isoformat()
 
 
+# NATO / military zone letters. J is unused (observer's local). Whole hours only;
+# fractional offsets (India +5:30) use the letter of the truncated hour.
+_MIL_EAST = "ZABCDEFGHIKLM"  # UTC+0 .. UTC+12
+_MIL_WEST = "ZNOPQRSTUVWXY"  # UTC+0 .. UTC-12
+
+
+def tz_letter(value: datetime) -> str:
+    """NATO zone letter for a timezone-aware datetime (Q = UTC−4, R = UTC−5, Z = UTC)."""
+    if value.tzinfo is None:
+        return "J"
+    off = value.utcoffset()
+    if off is None:
+        return "J"
+    hours = int(off.total_seconds() / 3600)  # toward zero; +5:30 → E, −3:30 → P
+    if hours >= 0:
+        return _MIL_EAST[min(hours, 12)]
+    return _MIL_WEST[min(-hours, 12)]
+
+
+def format_clock(value: datetime) -> str:
+    """Local time as HH:MM plus zone letter: 17:52R, 18:52Q, 13:00Z."""
+    local = value
+    if value.tzinfo is not None:
+        local = value.astimezone(value.tzinfo)
+    return f"{local:%H:%M}{tz_letter(local)}"
+
+
 def format_labeled(value: Instant) -> str:
     d = value.date() if isinstance(value, datetime) else value
     return f"{format_instant(value)} {weekday_name(d)}"

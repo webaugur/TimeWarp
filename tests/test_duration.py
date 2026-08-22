@@ -25,6 +25,10 @@ class OffsetParseTests(unittest.TestCase):
         off = parse_offset("7mo 6d")
         self.assertEqual(off, Offset(months=7, days=6))
 
+    def test_hyphen_ymd(self):
+        self.assertEqual(parse_offset("7-6-13"), Offset(years=7, months=6, days=13))
+        self.assertEqual(parse_offset("7-6"), Offset(years=7, months=6))
+
 
 class AddTests(unittest.TestCase):
     def test_user_example(self):

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+from timewarp.errors import TimeWarpError
 from timewarp.holidays import holidays_in_range, parse_weekend
 from timewarp.iso import Instant, as_date, weekday_name
 
@@ -74,10 +75,13 @@ def count_workdays(
 
     adj = b
     if include_end:
-        if b >= a:
-            adj = b + timedelta(days=1)
-        else:
-            adj = b - timedelta(days=1)
+        try:
+            if b >= a:
+                adj = b + timedelta(days=1)
+            else:
+                adj = b - timedelta(days=1)
+        except OverflowError as exc:
+            raise TimeWarpError("date overflow counting workdays") from exc
 
     calendar_days = (adj - a).days
 
@@ -144,11 +148,16 @@ def add_workdays(
     ensure(d.year)
     guard = 0
     while remaining:
-        d += timedelta(days=step)
+        try:
+            d += timedelta(days=step)
+        except OverflowError as exc:
+            raise TimeWarpError("date overflow while adding workdays") from exc
         ensure(d.year)
         guard += 1
         if guard > abs(n) * 10 + 400:
-            raise RuntimeError("add_workdays: too many skipped days; check weekend/holiday settings")
+            raise TimeWarpError(
+                "too many skipped days while adding workdays; check --weekend/--holidays"
+            )
         if is_workday(d, weekend, holidays):
             remaining -= 1
     return d
