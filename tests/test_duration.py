@@ -48,7 +48,7 @@ class AddTests(unittest.TestCase):
         self.assertEqual(result, datetime(2026, 7, 4, 3, 15, 0))
 
     def test_larger_units_first(self):
-        # years/months then days, matching timeanddate
+        # years/months then days (larger units first)
         result = apply_offset(date(2026, 1, 31), Offset(months=1, days=1))
         self.assertEqual(result, date(2026, 3, 1))
 

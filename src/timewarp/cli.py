@@ -32,7 +32,7 @@ PROG = "timewarp"
 HELP = f"""\
 {PROG} — local date calculators (ISO 8601 in, ISO 8601 out)
 
-Phase 1 (timeanddate Date Calculator tabs):
+Phase 1 (dates and durations):
   count          Count Days     duration between two instants (signed)
   add            Add Days       add years/months/weeks/days/time
   sub            Add Days       subtract the same offset

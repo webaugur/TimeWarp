@@ -72,7 +72,7 @@ class RiseTests(unittest.TestCase):
     def test_moonrise_new_york_july_4_2026(self):
         place = lookup_place("New York")
         result = events_for_day("moon", datetime(2026, 7, 4).date(), place)
-        # timeanddate New York 2026-07-04 moonset ~09:53. Rise is late evening.
+        # New York 2026-07-04: moonset ~09:53 local. Rise is late evening.
         self.assertTrue(result.sets, msg=result.note)
         self.assertTrue(result.rises, msg=result.note)
         self.assertEqual(result.sets[0].tzinfo.key, "America/New_York")

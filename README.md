@@ -1,6 +1,6 @@
 # TimeWarp
 
-Command-line date calculators for when you want [timeanddate.com](https://www.timeanddate.com/date/duration.html) locally, including **negative** spans (end before start).
+Command-line date calculators, including **negative** spans (end before start).
 
 Every date you type and every date printed is **ISO 8601**. There is no `MM/DD` vs `DD/MM`. Time of day is optional.
 
@@ -26,7 +26,7 @@ Or without installing:
 PYTHONPATH=src python3 -m timewarp --help
 ```
 
-## Phase 1 — Date Calculator tabs
+## Phase 1 — dates and durations
 
 | Tab | Command | What it does |
 |---|---|---|
@@ -66,7 +66,7 @@ Bare `m` is not a unit (months vs minutes). Use `mo` or `min`.
 
 Workdays skip Saturday and Sunday by default. `--weekend Fri,Sat` changes that. `--holidays US` also skips observed US federal holidays.
 
-## Phase 2 — basic set from the other screens
+## Phase 2 — calendar, sky, and countdowns
 
 | Screen | Command | What you get now |
 |---|---|---|
@@ -114,3 +114,5 @@ Rejected (on purpose): `04/31/2025`, `31-04-2025`, `April 31, 2025`.
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
+
+Inspired by timeanddate.com.
