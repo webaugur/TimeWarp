@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "timewarp"
+version = "0.1.0"
+description = "Local date calculators: count days, add time, workdays, weekdays, week numbers, plus a basic calendar, countdown, sun, moon, and eclipse set."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "TimeWarp" }]
+
+[project.scripts]
+timewarp = "timewarp.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
