@@ -11,13 +11,17 @@ if [[ ! -x $TW ]]; then
 fi
 
 # Force emoji even if stdout is a pipe; fixtures so we do not wait on NASA/Nager.
+# Do not pick up ~/.config/timewarp/cache.json (a saved --color would be a global flag).
 export FORCE_COLOR=1
 unset NO_COLOR
+CACHE_FILE=$(mktemp)
+printf '%s\n' '{}' >"$CACHE_FILE"
+export TIMEWARP_CACHE=$CACHE_FILE
 
 HOLIDAY_DIR=$(mktemp -d)
 SBDB_DIR=$(mktemp -d)
 TLE_DIR=$(mktemp -d)
-trap 'rm -rf "$HOLIDAY_DIR" "$SBDB_DIR" "$TLE_DIR"' EXIT
+trap 'rm -rf "$HOLIDAY_DIR" "$SBDB_DIR" "$TLE_DIR" "$CACHE_FILE"' EXIT
 cp "$ROOT/tests/data/holidays-GB-2026.json" "$HOLIDAY_DIR/GB-2026.json"
 cp "$ROOT/tests/data/holidays-DE-2026.json" "$HOLIDAY_DIR/DE-2026.json"
 cp "$ROOT/tests/data/sbdb-ceres.json" "$SBDB_DIR/ceres.json"
@@ -44,10 +48,12 @@ banner() {
 }
 
 run() {
-  banner "$1" "$2"
+  local title=$1
+  shift
+  banner "$title" "$*"
   pause
-  # FORCE_COLOR=1 (set above) turns emoji on even when stdout is not a TTY.
-  bash -c "\"$TW\" $2"
+  # --color belongs *after* the subcommand (sun --color …), never before it.
+  "$TW" "$@" || true
   echo
 }
 
@@ -55,45 +61,45 @@ printf '\n\033[1mTimeWarp emoji reel\033[0m\n'
 printf 'TTY color + emoji. -q / --json stay plain ISO.\n'
 
 run "☀️  Sunrise, twilight, azimuth (New York, Independence Day)" \
-  'sun --city "New York" 2026-07-04'
+  sun --color --city "New York" 2026-07-04
 
 run "🌙  Moon phase and next quarters" \
-  'moon 2026-08-28 --city Indianapolis'
+  moon --color 2026-08-28 --city Indianapolis
 
 run "⬆️  Everything above the horizon that day (planet emoji row)" \
-  'rise --city London 2026-07-04'
+  rise --color --city London 2026-07-04
 
 run "🪨  Ceres (SBDB Kepler)" \
-  'rise ceres --city London 2026-07-04'
+  rise --color ceres --city London 2026-07-04
 
 run "☄️  67P (SBDB Kepler)" \
-  'rise 67p --city London 2026-07-04'
+  rise --color 67p --city London 2026-07-04
 
 run "📅  Month sheet: civil twilight, sun, moon" \
-  'month 2026-07 --city Indianapolis'
+  month --color 2026-07 --city Indianapolis
 
 run "🌃  Same month with nautical + astronomical columns" \
-  'month 2026-07 --city Indianapolis --twilight'
+  month --color 2026-07 --city Indianapolis --twilight
 
 run "🎉  US state holidays (California overlay)" \
-  'holidays 2026 --country US --region CA'
+  holidays 2026 --country US --region CA
 
 run "🎉  Nager subdivision: Bavaria (DE-BY)" \
-  'holidays 2026 --country DE --region BY'
+  holidays 2026 --country DE --region BY
 
 run "☀️  Equinoxes and solstices" \
-  'seasons 2026 --city Indianapolis'
+  seasons --color 2026 --city Indianapolis
 
 run "☀️🌙  Eclipse catalog" \
-  'eclipse 2026'
+  eclipse 2026
 
 run "🛰️  ISS pass vs twilight, moon, visual mag" \
-  "passes ISS --city \"New York\" --tle \"$ROOT/tests/data/iss.tle\" 2019-12-10"
+  passes --color ISS --city "New York" --tle "$ROOT/tests/data/iss.tle" 2019-12-10
 
 run "⏳  Countdown (signed remaining time)" \
-  'countdown 2026-12-31T00:00:00'
+  countdown 2026-12-31T00:00:00
 
 run "❌  Error path (invalid date)" \
-  'count 2026-05-31 2025-04-31 || true'
+  count 2026-05-31 2025-04-31
 
 printf '\033[1mDone.\033[0m Modern terminals should have shown ☀️🌙🪐☄️🛰️🎉⏳❌\n'

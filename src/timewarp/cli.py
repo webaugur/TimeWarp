@@ -1239,6 +1239,9 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--version", action="version", version=f"{PROG} {__version__}")
+    color_g = parser.add_mutually_exclusive_group()
+    color_g.add_argument("--color", action="store_true", help="color / emoji even when piped")
+    color_g.add_argument("--no-color", dest="no_color", action="store_true", help="plain text, no emoji")
     sub = parser.add_subparsers(dest="cmd", required=False)
     parser.set_defaults(func=cmd_help, topic=None)
 

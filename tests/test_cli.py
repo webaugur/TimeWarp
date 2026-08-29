@@ -206,6 +206,11 @@ class CliPhase2Tests(unittest.TestCase):
         self.assertIn("sky", out)
         self.assertRegex(out, r"\d{2}:\d{2}[A-Z]")
 
+    def test_global_color_before_subcommand(self):
+        code, out, err = run("--color", "sun", "--city", "New York", "2026-07-04")
+        self.assertEqual(code, 0, err)
+        self.assertIn("Sunrise:", out)
+
     def test_sun_city(self):
         code, out, err = run("sun", "--city", "New York", "2026-07-04")
         self.assertEqual(code, 0, err)
