@@ -20,8 +20,8 @@ jobs:
             artifact: windows-x86_64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install
@@ -58,7 +58,7 @@ jobs:
           else
             powershell -NoProfile -Command "Compress-Archive -Path dist/timewarp -DestinationPath dist/upload/${NAME}.zip"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: timewarp-${{ matrix.artifact }}
           path: dist/upload/*.zip
