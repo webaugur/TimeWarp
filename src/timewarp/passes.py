@@ -26,10 +26,60 @@ WGS84_A_KM = 6378.137
 WGS84_E2 = 6.69437999014e-3
 CELESTRAK_CATNR = "https://celestrak.org/NORAD/elements/gp.php?CATNR={id}&FORMAT=tle"
 CELESTRAK_NAME = "https://celestrak.org/NORAD/elements/gp.php?NAME={name}&FORMAT=tle"
+CELESTRAK_GROUP = "https://celestrak.org/NORAD/elements/gp.php?GROUP={g}&FORMAT=tle"
+CELESTRAK_SATCAT = "https://celestrak.org/pub/satcat.csv"
 DEFAULT_SAT = "ISS"
 DEFAULT_MIN_ELEV = 10.0
 TLE_MAX_AGE_DAYS = 14
 SCAN_STEP = timedelta(seconds=30)
+AU_KM = 149597870.7
+SATCAT_TTL = timedelta(days=7)
+
+# Celestrak gp.php GROUP= names (aliases → group id).
+CATALOGS = {
+    "visual": "visual",
+    "stations": "stations",
+    "weather": "weather",
+    "noaa": "noaa",
+    "goes": "goes",
+    "resource": "resource",
+    "sarsat": "sarsat",
+    "tdrss": "tdrss",
+    "geo": "geo",
+    "intelsat": "intelsat",
+    "ses": "ses",
+    "iridium": "iridium",
+    "iridium-next": "iridium-NEXT",
+    "starlink": "starlink",
+    "oneweb": "oneweb",
+    "orbcomm": "orbcomm",
+    "globalstar": "globalstar",
+    "swarm": "swarm",
+    "amateur": "amateur",
+    "x-comm": "x-comm",
+    "other-comm": "other-comm",
+    "gnss": "gnss",
+    "gps": "gps-ops",
+    "gps-ops": "gps-ops",
+    "glonass": "glo-ops",
+    "glo-ops": "glo-ops",
+    "galileo": "galileo",
+    "beidou": "beidou",
+    "sbas": "sbas",
+    "science": "science",
+    "geodetic": "geodetic",
+    "engineering": "engineering",
+    "education": "education",
+    "military": "military",
+    "radar": "radar",
+    "cubesat": "cubesat",
+    "active": "active",
+    "analyst": "analyst",
+    "last-30-days": "last-30-days",
+}
+
+_SATCAT: dict[int, float] | None = None
+_SATCAT_KEY: str | None = None
 
 
 def _need_sgp4() -> None:
@@ -140,6 +190,7 @@ class Pass:
     moon_alt_deg: float
     moon_illum: float
     moon_sep_deg: float
+    magnitude: float | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -158,6 +209,7 @@ class Pass:
             "moon_alt_deg": round(self.moon_alt_deg, 1),
             "moon_illumination": round(self.moon_illum, 3),
             "moon_sep_deg": round(self.moon_sep_deg, 1),
+            "magnitude": None if self.magnitude is None else round(self.magnitude, 1),
         }
 
 
@@ -209,16 +261,110 @@ def load_tle_file(path: Path) -> list[TleSat]:
     return parse_tle_text(text)
 
 
-def fetch_tle(query: str, *, timeout: float = 20.0) -> list[TleSat]:
-    """Fetch a TLE from Celestrak. `query` is a name or catalog number."""
+def normalize_catalog(name: str) -> str:
+    key = name.strip().lower()
+    if key in CATALOGS:
+        return CATALOGS[key]
+    known = ", ".join(sorted(CATALOGS))
+    raise TimeWarpError(f"unknown TLE catalog {name!r}; known: {known}")
+
+
+def standard_magnitude(rcs_m2: float) -> float:
+    """Approx. visual mag at 1000 km and 50% illumination from radar cross-section."""
+    return 5.0 - 2.5 * math.log10(max(rcs_m2, 1e-4))
+
+
+def visual_magnitude(range_km: float, phase_deg: float, rcs_m2: float) -> float:
+    """Range/phase correction of standard_magnitude (Lambert-like illumination)."""
+    std = standard_magnitude(rcs_m2)
+    phi = math.radians(phase_deg)
+    illum = max((1.0 + math.cos(phi)) / 2.0, 1e-6)
+    return std + 5.0 * math.log10(max(range_km, 1.0) / 1000.0) - 2.5 * math.log10(illum)
+
+
+def _parse_satcat(text: str) -> dict[int, float]:
+    import csv
+    from io import StringIO
+
+    out: dict[int, float] = {}
+    reader = csv.DictReader(StringIO(text))
+    if not reader.fieldnames or "NORAD_CAT_ID" not in reader.fieldnames:
+        raise TimeWarpError("satcat CSV is missing NORAD_CAT_ID")
+    for row in reader:
+        raw_id = (row.get("NORAD_CAT_ID") or "").strip()
+        raw_rcs = (row.get("RCS") or "").strip()
+        if not raw_id.isdigit() or not raw_rcs:
+            continue
+        try:
+            rcs = float(raw_rcs)
+        except ValueError:
+            continue
+        if rcs > 0.0:
+            out[int(raw_id)] = rcs
+    return out
+
+
+def load_satcat(*, refresh: bool = False) -> dict[int, float]:
+    """NORAD catalog → RCS (m²) from Celestrak satcat.csv. Empty on fetch failure."""
+    global _SATCAT, _SATCAT_KEY
+    dest = tle_dir() / "satcat.csv"
+    key = str(dest)
+    if not refresh and _SATCAT is not None and _SATCAT_KEY == key:
+        return _SATCAT
+    stale: dict[int, float] | None = None
+    if dest.is_file() and not refresh:
+        try:
+            stale = _parse_satcat(dest.read_text(encoding="utf-8"))
+        except (OSError, TimeWarpError):
+            stale = None
+        else:
+            age = datetime.now(timezone.utc) - datetime.fromtimestamp(
+                dest.stat().st_mtime, tz=timezone.utc
+            )
+            if age <= SATCAT_TTL:
+                _SATCAT, _SATCAT_KEY = stale, key
+                return stale
+    try:
+        req = urllib.request.Request(
+            CELESTRAK_SATCAT,
+            headers={"User-Agent": "TimeWarp (https://github.com/webaugur/TimeWarp)"},
+        )
+        with urllib.request.urlopen(req, timeout=30.0) as resp:
+            raw = resp.read()
+        text = raw.decode("utf-8")
+        table = _parse_satcat(text)
+    except (urllib.error.URLError, TimeoutError, OSError, UnicodeDecodeError, TimeWarpError):
+        _SATCAT, _SATCAT_KEY = stale or {}, key
+        return _SATCAT
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(text, encoding="utf-8")
+    except OSError:
+        pass
+    _SATCAT, _SATCAT_KEY = table, key
+    return table
+
+
+def rcs_for(catalog: int) -> float | None:
+    table = load_satcat()
+    return table.get(catalog)
+
+
+def fetch_tle(query: str | None = None, *, catalog: str | None = None, timeout: float = 20.0) -> list[TleSat]:
+    """Fetch a TLE from Celestrak. `query` is a name or catalog number; `catalog` is a GROUP."""
     _need_sgp4()
-    q = query.strip()
-    if q.isdigit():
-        url = CELESTRAK_CATNR.format(id=q)
-        cache_name = f"catnr-{q}.tle"
+    if catalog:
+        g = normalize_catalog(catalog)
+        url = CELESTRAK_GROUP.format(g=urllib.parse.quote(g))
+        cache_name = f"group-{g}.tle"
     else:
-        url = CELESTRAK_NAME.format(name=urllib.parse.quote(q))
-        cache_name = f"name-{q.lower().replace(' ', '_')}.tle"
+        q = (query or DEFAULT_SAT).strip()
+        if q.isdigit():
+            url = CELESTRAK_CATNR.format(id=q)
+            cache_name = f"catnr-{q}.tle"
+        else:
+            url = CELESTRAK_NAME.format(name=urllib.parse.quote(q))
+            cache_name = f"name-{q.lower().replace(' ', '_')}.tle"
     dest = tle_dir() / cache_name
     if dest.is_file():
         age = datetime.now(timezone.utc) - datetime.fromtimestamp(dest.stat().st_mtime, tz=timezone.utc)
@@ -248,7 +394,7 @@ def fetch_tle(query: str, *, timeout: float = 20.0) -> list[TleSat]:
     return parse_tle_text(text)
 
 
-def _sat_look(sat: TleSat, when: datetime, place: Place, obs: tuple[float, float, float]):
+def _sat_state(sat: TleSat, when: datetime):
     utc = when.astimezone(timezone.utc)
     jd, fr = jday(
         utc.year,
@@ -262,7 +408,56 @@ def _sat_look(sat: TleSat, when: datetime, place: Place, obs: tuple[float, float
     if err:
         return None
     ecef = _teme_to_ecef((r[0], r[1], r[2]), jd + fr)
+    return ecef, jd + fr
+
+
+def _sat_look(sat: TleSat, when: datetime, place: Place, obs: tuple[float, float, float]):
+    state = _sat_state(sat, when)
+    if state is None:
+        return None
+    ecef, _jd = state
     return _look(ecef, obs, place.lat, place.lon)
+
+
+def _sun_ecef_km(when: datetime) -> tuple[float, float, float]:
+    from timewarp.ephem import position
+
+    pos = position("sun", when)
+    ra = math.radians(pos.ra_deg)
+    dec = math.radians(pos.dec_deg)
+    dist = pos.distance * AU_KM
+    x = dist * math.cos(dec) * math.cos(ra)
+    y = dist * math.cos(dec) * math.sin(ra)
+    z = dist * math.sin(dec)
+    utc = when.astimezone(timezone.utc)
+    jd, fr = jday(
+        utc.year,
+        utc.month,
+        utc.day,
+        utc.hour,
+        utc.minute,
+        utc.second + utc.microsecond * 1e-6,
+    )
+    return _teme_to_ecef((x, y, z), jd + fr)
+
+
+def _phase_deg(
+    sat_ecef: tuple[float, float, float],
+    obs: tuple[float, float, float],
+    sun_ecef: tuple[float, float, float],
+) -> float:
+    vx = sun_ecef[0] - sat_ecef[0]
+    vy = sun_ecef[1] - sat_ecef[1]
+    vz = sun_ecef[2] - sat_ecef[2]
+    ox = obs[0] - sat_ecef[0]
+    oy = obs[1] - sat_ecef[1]
+    oz = obs[2] - sat_ecef[2]
+    vn = math.hypot(vx, vy, vz)
+    on = math.hypot(ox, oy, oz)
+    if vn < 1e-9 or on < 1e-9:
+        return 0.0
+    c = (vx * ox + vy * oy + vz * oz) / (vn * on)
+    return math.degrees(math.acos(max(-1.0, min(1.0, c))))
 
 
 def _bisect_horizon(sat, t0, t1, place, obs, min_elev, want_up: bool) -> datetime:
@@ -374,6 +569,12 @@ def passes_for_day(
             i = j + 1
             continue
         twilight, sun_alt, moon_alt, illum, sep = _sky_at(tca, place, look_tca[0], look_tca[1])
+        mag = None
+        rcs = rcs_for(sat.catalog)
+        state = _sat_state(sat, tca)
+        if rcs is not None and state is not None and look_tca[2] > 0.0:
+            phase = _phase_deg(state[0], obs, _sun_ecef_km(tca))
+            mag = visual_magnitude(look_tca[2], phase, rcs)
         if start <= tca < end:
             passes.append(
                 Pass(
@@ -391,6 +592,7 @@ def passes_for_day(
                     moon_alt_deg=moon_alt,
                     moon_illum=illum,
                     moon_sep_deg=sep,
+                    magnitude=mag,
                 )
             )
         i = j + 1

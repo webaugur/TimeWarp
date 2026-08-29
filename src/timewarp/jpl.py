@@ -112,6 +112,14 @@ def parse_sbdb(data: object, *, name: str) -> KeplerElements:
     code = data.get("code")
     if code is not None and "orbit" not in data:
         msg = data.get("message") or f"SBDB error {code}"
+        extra = data.get("list")
+        if isinstance(extra, list) and extra:
+            labels = []
+            for row in extra[:8]:
+                if isinstance(row, dict):
+                    labels.append(str(row.get("pdes") or row.get("name") or row.get("fullname") or "?"))
+            if labels:
+                msg += "; matches: " + ", ".join(labels)
         raise TimeWarpError(f"SBDB {name}: {msg}")
     orbit = data.get("orbit")
     if not isinstance(orbit, dict):
@@ -188,15 +196,39 @@ def fetch_sbdb(sstr: str, *, timeout: float = _TIMEOUT) -> dict:
     return data
 
 
-def load_elements(name: str, *, refresh: bool = False) -> KeplerElements | None:
-    """Osculating elements for a named asteroid/comet, or None to use the fallback table."""
-    sstr = SBDB_QUERY.get(name)
-    if sstr is None:
+def query_slug(sstr: str) -> str:
+    raw = sstr.strip().lower().replace(" ", "")
+    chars: list[str] = []
+    for ch in raw:
+        if ch.isalnum() or ch in "-_.":
+            chars.append(ch)
+        elif ch == "/":
+            chars.append("-")
+    return "".join(chars)[:80] or "query"
+
+
+def load_elements(
+    name: str,
+    *,
+    sstr: str | None = None,
+    refresh: bool = False,
+    required: bool = False,
+) -> KeplerElements | None:
+    """Osculating elements, or None to use the fallback table.
+
+    `required=True` raises if SBDB cannot be fetched and there is no cache
+    (used for arbitrary designations). Named extras stay optional.
+    """
+    query = sstr if sstr is not None else SBDB_QUERY.get(name)
+    if query is None:
+        if required:
+            raise TimeWarpError(f"no SBDB query for {name}")
         return None
-    key = f"{sbdb_cache_dir()}::{name}"
+    slug = query_slug(name)
+    key = f"{sbdb_cache_dir()}::{slug}"
     if not refresh and key in _MEMO:
         return _MEMO[key]
-    path = sbdb_cache_dir() / f"{name}.json"
+    path = sbdb_cache_dir() / f"{slug}.json"
     stale: KeplerElements | None = None
     if path.is_file() and not refresh:
         try:
@@ -211,15 +243,32 @@ def load_elements(name: str, *, refresh: bool = False) -> KeplerElements | None:
                 _MEMO[key] = stale
                 return stale
     try:
-        data = fetch_sbdb(sstr)
+        data = fetch_sbdb(query)
         el = parse_sbdb(data, name=name)
     except TimeWarpError:
-        _MEMO[key] = stale
-        return stale
+        if stale is not None:
+            _MEMO[key] = stale
+            return stale
+        if required:
+            raise
+        _MEMO[key] = None
+        return None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     except OSError:
         pass
     _MEMO[key] = el
+    return el
+
+
+def load_query(sstr: str, *, refresh: bool = False) -> KeplerElements:
+    """SBDB elements for an arbitrary search string (number, packed des, name)."""
+    q = sstr.strip()
+    if not q:
+        raise TimeWarpError("empty SBDB query")
+    slug = query_slug(q)
+    el = load_elements(slug, sstr=q, refresh=refresh, required=True)
+    if el is None:
+        raise TimeWarpError(f"SBDB has no elliptical orbit for {q!r}")
     return el

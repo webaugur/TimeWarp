@@ -133,7 +133,9 @@ class RiseTests(unittest.TestCase):
 
         place = lookup_place("London")
         # Frozen Kepler table if SBDB is unreachable (no live JPL in this test).
-        with patch("timewarp.jpl.fetch_sbdb", side_effect=TimeWarpError("offline")):
+        with patch("timewarp.jpl.fetch_sbdb", side_effect=TimeWarpError("offline")), patch(
+            "timewarp.horizons.fetch_horizons", side_effect=TimeWarpError("offline")
+        ):
             for body in ("ceres", "io", "halley"):
                 p = position(body, TEST)
                 self.assertEqual(p.body, body)

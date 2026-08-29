@@ -20,7 +20,19 @@ _TEST_SBDB.mkdir(parents=True, exist_ok=True)
 _CERES_FIXTURE = Path(__file__).resolve().parent / "data" / "sbdb-ceres.json"
 if _CERES_FIXTURE.is_file():
     (_TEST_SBDB / "ceres.json").write_bytes(_CERES_FIXTURE.read_bytes())
+    (_TEST_SBDB / "433.json").write_bytes(_CERES_FIXTURE.read_bytes())
 os.environ["TIMEWARP_SBDB_DIR"] = str(_TEST_SBDB)
+
+_TEST_TLE = Path(tempfile.gettempdir()) / "timewarp-tests-tle"
+_TEST_TLE.mkdir(parents=True, exist_ok=True)
+_SATCAT = Path(__file__).resolve().parent / "data" / "satcat-iss.csv"
+if _SATCAT.is_file():
+    (_TEST_TLE / "satcat.csv").write_bytes(_SATCAT.read_bytes())
+os.environ["TIMEWARP_TLE_DIR"] = str(_TEST_TLE)
+
+_TEST_HORIZONS = Path(tempfile.gettempdir()) / "timewarp-tests-horizons"
+_TEST_HORIZONS.mkdir(parents=True, exist_ok=True)
+os.environ["TIMEWARP_HORIZONS_DIR"] = str(_TEST_HORIZONS)
 
 
 def run(*argv: str) -> tuple[int, str, str]:
@@ -159,6 +171,11 @@ class CliPhase2Tests(unittest.TestCase):
         code, out, err = run("rise", "ceres", "--city", "London", "2026-07-04")
         self.assertEqual(code, 0, err)
         self.assertIn("ceres", out)
+
+    def test_rise_sbdb_number(self):
+        code, out, err = run("rise", "433", "--city", "London", "2026-07-04")
+        self.assertEqual(code, 0, err)
+        self.assertIn("433", out)
 
     def test_moon(self):
         code, out, err = run("moon", "2026-08-28")

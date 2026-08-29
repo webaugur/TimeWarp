@@ -11,8 +11,10 @@ from timewarp.jpl import (
     SBDB_QUERY,
     fetch_sbdb,
     load_elements,
+    load_query,
     mean_anomaly,
     parse_sbdb,
+    query_slug,
 )
 
 DATA = Path(__file__).resolve().parent / "data"
@@ -130,6 +132,34 @@ class LoadElementsTests(unittest.TestCase):
     def test_fetch_fail_without_cache_is_none(self):
         with patch("timewarp.jpl.fetch_sbdb", side_effect=TimeWarpError("offline")):
             self.assertIsNone(load_elements("ceres"))
+
+    def test_query_slug(self):
+        self.assertEqual(query_slug("433"), "433")
+        self.assertEqual(query_slug("67P/C-G"), "67p-c-g")
+
+    def test_load_query_from_cache(self):
+        dest = Path(self.tmp.name) / "433.json"
+        dest.write_bytes(CERES.read_bytes())
+        with patch("timewarp.jpl.fetch_sbdb", side_effect=AssertionError("network")):
+            el = load_query("433")
+        self.assertAlmostEqual(el.a, 2.765552595034094, places=9)
+
+    def test_load_query_required_without_cache(self):
+        with patch("timewarp.jpl.fetch_sbdb", side_effect=TimeWarpError("offline")):
+            with self.assertRaises(TimeWarpError):
+                load_query("433")
+
+    def test_ambiguous_list(self):
+        with self.assertRaises(TimeWarpError) as ctx:
+            parse_sbdb(
+                {
+                    "code": "300",
+                    "message": "specified query matched more than one object",
+                    "list": [{"pdes": "1"}, {"pdes": "2"}],
+                },
+                name="x",
+            )
+        self.assertIn("matches:", str(ctx.exception))
 
 
 class FetchSbdbTests(unittest.TestCase):

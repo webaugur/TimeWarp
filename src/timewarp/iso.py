@@ -157,6 +157,18 @@ def _parse_time_suffix(suffix: str) -> tuple[time, timezone | None] | None:
         raise ParseError(f"invalid time {suffix.strip()!r}: {exc}") from exc
 
 
+def looks_like_instant(text: str) -> bool:
+    """True when `text` is a relative word or an ISO date/week/ordinal (not a body name)."""
+    raw = text.strip()
+    if not raw:
+        return False
+    if raw.lower() in _RELATIVE:
+        return True
+    if _WEEK.fullmatch(raw) or _ORDINAL.fullmatch(raw) or _YMD.match(raw):
+        return True
+    return False
+
+
 def parse_instant(text: str) -> Instant:
     """Parse an ISO 8601 date or date-time. Relative words today/now/yesterday/tomorrow are also accepted."""
     raw = text.strip()

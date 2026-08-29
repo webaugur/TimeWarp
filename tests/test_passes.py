@@ -1,11 +1,29 @@
+import os
+import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
 
-from timewarp.passes import load_tle_file, parse_tle_text, passes_for_day, select_sats, twilight_label
+from timewarp.passes import (
+    load_tle_file,
+    normalize_catalog,
+    parse_tle_text,
+    passes_for_day,
+    select_sats,
+    standard_magnitude,
+    twilight_label,
+    visual_magnitude,
+)
 from timewarp.places import lookup_place
 
 TLE = Path(__file__).resolve().parent / "data" / "iss.tle"
+SATCAT = Path(__file__).resolve().parent / "data" / "satcat-iss.csv"
+
+_TLE_DIR = Path(tempfile.gettempdir()) / "timewarp-tests-tle-passes"
+_TLE_DIR.mkdir(parents=True, exist_ok=True)
+if SATCAT.is_file():
+    (_TLE_DIR / "satcat.csv").write_bytes(SATCAT.read_bytes())
+os.environ["TIMEWARP_TLE_DIR"] = str(_TLE_DIR)
 
 
 class TleParseTests(unittest.TestCase):
@@ -34,6 +52,12 @@ class TwilightLabelTests(unittest.TestCase):
 
 
 class PassGeometryTests(unittest.TestCase):
+    def setUp(self):
+        import timewarp.passes as passes_mod
+
+        passes_mod._SATCAT = None
+        passes_mod._SATCAT_KEY = None
+
     def test_nyc_2019_12_10_has_a_high_pass(self):
         sats = load_tle_file(TLE)
         place = lookup_place("New York")
@@ -47,6 +71,29 @@ class PassGeometryTests(unittest.TestCase):
         self.assertIn(best.twilight, {"day", "civil", "nautical", "astronomical", "night"})
         self.assertGreaterEqual(best.moon_sep_deg, 0.0)
         self.assertLessEqual(best.moon_sep_deg, 180.0)
+        self.assertIsNotNone(best.magnitude)
+        self.assertGreater(best.magnitude, -6.0)
+        self.assertLess(best.magnitude, 8.0)
+
+
+class CatalogTests(unittest.TestCase):
+    def test_aliases(self):
+        self.assertEqual(normalize_catalog("gps"), "gps-ops")
+        self.assertEqual(normalize_catalog("visual"), "visual")
+
+    def test_unknown(self):
+        from timewarp.errors import TimeWarpError
+
+        with self.assertRaises(TimeWarpError):
+            normalize_catalog("not-a-catalog")
+
+
+class MagnitudeTests(unittest.TestCase):
+    def test_iss_rcs_stdmag(self):
+        std = standard_magnitude(399.0524)
+        self.assertAlmostEqual(std, 5.0 - 2.5 * __import__("math").log10(399.0524), places=6)
+        mag = visual_magnitude(400.0, 90.0, 399.0524)
+        self.assertLess(mag, std)
 
 
 if __name__ == "__main__":

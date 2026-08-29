@@ -158,10 +158,12 @@ timewarp rise --all --city "New York" 2026-07-04
 timewarp eclipse 2026
 timewarp eclipse 1919
 timewarp rise ceres --city London
+timewarp rise 433 --city London
 timewarp rise io --city London
 timewarp rise 67p --city London
 timewarp passes --city Indianapolis
 timewarp passes ISS --city "New York" --tle tests/data/iss.tle 2019-12-10
+timewarp passes --catalog visual --city Indianapolis
 timewarp help rise
 ```
 
@@ -171,11 +173,11 @@ timewarp help rise
 
 Eclipse rows are computed with Meeus, *Astronomical Algorithms* ch. 54 (UTC date of greatest eclipse, 1900–2199). `timewarp sun` uses the NOAA/USNO algorithm for rise, set, and civil/nautical/astronomical twilight (sun at −6°/−12°/−18°). `timewarp rise` and moon **event times** (new, quarters, full) use Paul Schlyter’s low-precision ephemeris (about 1–2 arcminutes). The named moon **phase** and illumination on `moon` still come from synodic age. `timewarp seasons` is when solar ecliptic longitude hits 0°/90°/180°/270°.
 
-`timewarp rise` and `timewarp set` default to the sun, moon, and planets (Pluto only 1800–2100). Named extras: asteroids `ceres` `pallas` `juno` `vesta` `hygiea` `eros`; comets `halley` `encke` `tempel1` `67p`; moons `io` `europa` `ganymede` `callisto` `titan` `triton` `phobos` `deimos`. With no body name they list every default object above the horizon that local day. Pass a second ISO date for an inclusive range. `--all` also prints default bodies that stay below the horizon. Asteroids and comets use two-body Keplerian orbits from [JPL SBDB](https://ssd-api.jpl.nasa.gov/doc/sbdb.html) osculating elements (`~/.cache/timewarp/sbdb/`, 7 days, `TIMEWARP_SBDB_DIR` overrides); a frozen table is used if the fetch fails. Moons are circular about the parent. Good for rise/set, not spacecraft navigation.
+`timewarp rise` and `timewarp set` default to the sun, moon, and planets (Pluto only 1800–2100). Named extras: asteroids `ceres` `pallas` `juno` `vesta` `hygiea` `eros`; comets `halley` `encke` `tempel1` `67p`; moons `io` `europa` `ganymede` `callisto` `titan` `triton` `phobos` `deimos`. You can also pass a [JPL SBDB](https://ssd-api.jpl.nasa.gov/doc/sbdb.html) number or designation (`433`, `Bennu`). With no body name they list every default object above the horizon that local day. Pass a second ISO date for an inclusive range. `--all` also prints default bodies that stay below the horizon. Asteroids and comets use two-body Keplerian orbits from SBDB (`~/.cache/timewarp/sbdb/`, 7 days, `TIMEWARP_SBDB_DIR` overrides); a frozen table is used if the named-body fetch fails. Named planetary moons use [JPL Horizons](https://ssd-api.jpl.nasa.gov/doc/horizons.html) osculating elements about the parent (`~/.cache/timewarp/horizons/`, `TIMEWARP_HORIZONS_DIR`); circular orbits if Horizons is unreachable. Good for rise/set, not spacecraft navigation.
 
-`timewarp passes` uses SGP4 on a NORAD TLE (`pip install sgp4`, already in this project’s `.venv`). Default satellite is ISS. Without `--tle`, elements are fetched from Celestrak and cached under `~/.cache/timewarp/tle` for 24 hours. Each pass lists acquisition, max elevation (time, altitude, azimuth), loss, the **sky bin** at max (day / civil / nautical / astronomical / night), moon altitude, and angular **separation from the moon** so you can line a pass up with twilight and lunar alignments. `--min-elev` defaults to 10°. A TLE more than 14 days from the requested date prints a warning.
+`timewarp passes` uses SGP4 on a NORAD TLE (`pip install sgp4`, already in this project’s `.venv`). Default satellite is ISS. Without `--tle`, elements are fetched from Celestrak and cached under `~/.cache/timewarp/tle` for 24 hours. `--catalog visual` (or `stations`, `starlink`, `gps`, …) loads that Celestrak group; omit a sat name to list the whole group. Each pass lists acquisition, max elevation (time, altitude, azimuth), loss, the **sky bin** at max (day / civil / nautical / astronomical / night), moon altitude, angular **separation from the moon**, and an approximate **visual magnitude** from satcat RCS (range and phase). `--min-elev` defaults to 10°. A TLE more than 14 days from the requested date prints a warning.
 
-Later work is tracked in [GitHub issues](https://github.com/webaugur/TimeWarp/issues) and `TODO.md` (live timers, satellite catalogs / magnitude, holiday `--region` for more countries, JPL moons, arbitrary SBDB IDs).
+Later work is tracked in [GitHub issues](https://github.com/webaugur/TimeWarp/issues) and `TODO.md`.
 
 ## Input formats
 

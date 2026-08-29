@@ -2,8 +2,9 @@
 
 Planets: about 1–2 arcminutes in the 20th–21st centuries — enough for rise/set.
 Asteroids and comets: two-body Keplerian from JPL SBDB osculating elements
-(cached; frozen table if SBDB is unreachable). Planetary moons: circular
-orbits about the parent. Not a full JPL numerical ephemeris.
+(cached; frozen table if SBDB is unreachable). Named planetary moons: JPL
+Horizons osculating elements about the parent (circular table if unreachable).
+Not a full JPL numerical ephemeris.
 """
 
 from __future__ import annotations
@@ -207,7 +208,10 @@ _MINOR = {
     "67p": {"a": 3.463, "e": 0.641, "i": 7.04, "N": 50.15, "w": 12.80, "M0": 0.0, "n": 0.1529, "d_peri": 1670.0},
 }
 
-# Circular about parent. a_km, n deg/day, L0 at d=0, i to ecliptic (deg).
+# Extra SBDB slugs resolved at runtime (issue #4), mapping slug → query string.
+_DYNAMIC: dict[str, str] = {}
+
+# Circular about parent (offline fallback). a_km, n deg/day, L0 at d=0, i to ecliptic.
 _MOON = {
     "io": {"parent": "jupiter", "a_km": 421800, "n": 203.4889538, "L0": 106.08, "i": 3.1},
     "europa": {"parent": "jupiter", "a_km": 671100, "n": 101.3747246, "L0": 175.73, "i": 3.4},
@@ -526,9 +530,10 @@ def _pluto(d: float) -> tuple[float, float, float]:
 
 
 def _kepler_heliocentric(name: str, d: float) -> tuple[float, float, float]:
-    from timewarp.jpl import load_elements
+    from timewarp.jpl import SBDB_QUERY, load_elements
 
-    sb = load_elements(name)
+    sstr = SBDB_QUERY.get(name) or _DYNAMIC.get(name)
+    sb = load_elements(name, sstr=sstr)
     if sb is not None:
         e = min(sb.e, 0.99)
         m = rev(sb.M0 + sb.n * (d - sb.d_epoch))
@@ -546,8 +551,14 @@ def _kepler_heliocentric(name: str, d: float) -> tuple[float, float, float]:
 
 
 def _moon_heliocentric(name: str, d: float) -> tuple[float, float, float]:
-    el = _MOON[name]
-    parent = el["parent"]
+    from timewarp.horizons import load_moon_elements, parent_of
+
+    parent = parent_of(name)
+    fallback = _MOON.get(name)
+    if parent is None:
+        if fallback is None:
+            raise TimeWarpError(f"no Kepler elements for moon {name}")
+        parent = fallback["parent"]
     if parent == "pluto":
         plon, plat, pr = _pluto(d)
     else:
@@ -555,9 +566,19 @@ def _moon_heliocentric(name: str, d: float) -> tuple[float, float, float]:
     phx = pr * cosd(plon) * cosd(plat)
     phy = pr * sind(plon) * cosd(plat)
     phz = pr * sind(plat)
-    a = el["a_km"] / _KM_PER_AU
-    arg = rev(el["L0"] + el["n"] * d)
-    mx, my, mz = _ecliptic_xyz(a, 0.0, el["i"], 0.0, arg)
+    hz = load_moon_elements(name)
+    if hz is not None:
+        e = min(hz.e, 0.99)
+        m = rev(hz.M0 + hz.n * (d - hz.d_epoch))
+        ecc = eccentric_anomaly(m, e)
+        v, r = _true_anomaly_r(hz.a, e, ecc)
+        mx, my, mz = _ecliptic_xyz(r, hz.N, hz.i, hz.w, v)
+        return phx + mx, phy + my, phz + mz
+    if fallback is None:
+        raise TimeWarpError(f"no Kepler elements for moon {name}")
+    a = fallback["a_km"] / _KM_PER_AU
+    arg = rev(fallback["L0"] + fallback["n"] * d)
+    mx, my, mz = _ecliptic_xyz(a, 0.0, fallback["i"], 0.0, arg)
     return phx + mx, phy + my, phz + mz
 
 
@@ -643,11 +664,11 @@ def position(body: str, dt: datetime) -> SkyPos:
             heliocentric_au=sun.r,
         )
 
-    if name in ASTEROIDS or name in COMETS:
+    if name in ASTEROIDS or name in COMETS or name in _DYNAMIC:
         xh, yh, zh = _kepler_heliocentric(name, d)
         rhel = math.hypot(xh, yh, zh)
         lon, lat, _rh = _lon_lat_r(xh, yh, zh)
-    elif name in _MOON:
+    elif name in MOONS or name in _MOON:
         xh, yh, zh = _moon_heliocentric(name, d)
         rhel = math.hypot(xh, yh, zh)
         lon, lat, _rh = _lon_lat_r(xh, yh, zh)
@@ -734,6 +755,23 @@ def normalize_body(name: str) -> str:
     key = aliases.get(key, key)
     if key == "earth":
         raise TimeWarpError("Earth is the observer, not a rise/set body")
-    if key not in ALL_BODIES:
-        raise TimeWarpError(f"unknown body {name!r}; known: {', '.join(ALL_BODIES)}")
-    return key
+    if key in ALL_BODIES or key in _DYNAMIC:
+        return key
+    raise TimeWarpError(f"unknown body {name!r}; known: {', '.join(ALL_BODIES)}")
+
+
+def resolve_body(name: str) -> str:
+    """Known body, or an SBDB designation (number / packed des / name)."""
+    try:
+        return normalize_body(name)
+    except TimeWarpError:
+        pass
+    from timewarp.jpl import load_query, query_slug
+
+    q = name.strip()
+    if not q:
+        raise TimeWarpError("missing body name")
+    slug = query_slug(q)
+    load_query(q)
+    _DYNAMIC[slug] = q
+    return slug

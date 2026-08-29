@@ -26,6 +26,7 @@ from timewarp.iso import (
     format_clock,
     format_instant,
     format_labeled,
+    looks_like_instant,
     parse_instant,
     weekday_name,
 )
@@ -74,7 +75,7 @@ Phase 2 (basic):
   sun            sunrise / sunset, twilight, azimuth
   moon           moon phase and next new/full/quarter times
   seasons        equinoxes and solstices
-  passes         satellite passes (TLE / ISS) vs twilight and the moon
+  passes         satellite passes (TLE / catalogs) vs twilight, moon, and mag
   rise           rise times for visible bodies (today, or a date / date range)
   set            set times for the same bodies and period
   moonrise       alias for: rise moon
@@ -110,6 +111,7 @@ Examples:
   {PROG} seasons 2026
   {PROG} passes --city Indianapolis
   {PROG} passes ISS --city "New York" 2019-12-10 --tle path/to/iss.tle
+  {PROG} passes --catalog visual --city Indianapolis
   {PROG} rise --city "New York"
   {PROG} rise --city "New York" 2026-07-04
   {PROG} rise --city Indianapolis --13 --33
@@ -122,6 +124,7 @@ Examples:
   {PROG} eclipse 2026
   {PROG} eclipse 1919
   {PROG} rise ceres --city London
+  {PROG} rise 433 --city London
   {PROG} rise io --city London
   {PROG} rise halley --city London
   {PROG} cities
@@ -726,11 +729,13 @@ def cmd_passes(args: argparse.Namespace) -> int:
     if not 0 <= min_elev <= 90:
         raise TimeWarpError("--min-elev must be in 0..90 degrees")
     tle_path = getattr(args, "tle", None)
+    catalog = getattr(args, "catalog", None)
     if tle_path:
         sats = load_tle_file(Path(tle_path))
     else:
-        sats = fetch_tle(sat_q or "ISS")
-    picked = select_sats(sats, sat_q, all_sats=bool(getattr(args, "all", False)))
+        sats = fetch_tle(sat_q, catalog=catalog)
+    all_sats = bool(getattr(args, "all", False)) or (catalog and not sat_q)
+    picked = select_sats(sats, sat_q, all_sats=all_sats)
     days = each_civil_day(start, end, place)
     note = tle_freshness_note(picked, start)
     rows = []
@@ -756,19 +761,21 @@ def cmd_passes(args: argparse.Namespace) -> int:
         return 0
     if args.quiet:
         for p in rows:
-            print(f"{p.sat.name:12} {format_instant(p.tca)}  {p.max_alt_deg:4.0f}°  {p.twilight}")
+            mag = f"{p.magnitude:4.1f}" if p.magnitude is not None else " —"
+            print(f"{p.sat.name:12} {format_instant(p.tca)}  {p.max_alt_deg:4.0f}°  {p.twilight}  {mag}")
         return 0
     print(
         f"{'sat':12}  {'aos':8}  {'max':8}  {'alt':5}  {'az':12}  {'los':8}  "
-        f"{'sky':13}  {'moon':6}  {'sep':5}"
+        f"{'sky':13}  {'moon':6}  {'sep':5}  {'mag':5}"
     )
     for p in rows:
         moon = f"{p.moon_alt_deg:5.0f}°" if p.moon_alt_deg > -0.5 else "   —"
         az = _fmt_az(p.az_tca).strip()
+        mag = f"{p.magnitude:5.1f}" if p.magnitude is not None else "    —"
         print(
             f"{p.sat.name[:12]:12}  {format_clock(p.aos):8}  {format_clock(p.tca):8}  "
             f"{p.max_alt_deg:4.0f}°  {az:12}  {format_clock(p.los):8}  "
-            f"{p.twilight:13}  {moon:6}  {p.moon_sep_deg:4.0f}°"
+            f"{p.twilight:13}  {moon:6}  {p.moon_sep_deg:4.0f}°  {mag}"
         )
     return 0
 
@@ -902,14 +909,17 @@ def _print_sky_table(
 
 
 def _parse_sky_when(args: argparse.Namespace):
-    from timewarp.ephem import normalize_body
+    from timewarp.ephem import resolve_body
 
     tokens = [t for t in (getattr(args, "body", None), getattr(args, "date", None), getattr(args, "end", None)) if t]
     body_name = None
     dates = []
     for tok in tokens:
+        if looks_like_instant(tok):
+            dates.append(parse_instant(tok))
+            continue
         try:
-            name = normalize_body(tok)
+            name = resolve_body(tok)
         except TimeWarpError:
             dates.append(parse_instant(tok))
             continue
@@ -1346,6 +1356,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("end", nargs="?", help="ISO 8601 end date (inclusive)")
     p.add_argument("--tle", help="TLE file (skip Celestrak)")
     p.add_argument(
+        "--catalog",
+        help="Celestrak TLE group (visual, stations, starlink, gps, …); lists the group unless a sat name is given",
+    )
+    p.add_argument(
         "--min-elev",
         dest="min_elev",
         type=float,
@@ -1361,7 +1375,7 @@ def build_parser() -> argparse.ArgumentParser:
         parser.add_argument(
             "body",
             nargs="?",
-            help="planet, moon, asteroid (ceres, vesta, …), comet (halley, 67p, …), or planetary moon (io, titan, …); default: visible planets",
+            help="planet, moon, asteroid, comet, planetary moon, or SBDB id (433, Bennu, …); default: visible planets",
         )
         parser.add_argument("date", nargs="?", help="ISO 8601 start date (default: today)")
         parser.add_argument("end", nargs="?", help="ISO 8601 end date (inclusive)")

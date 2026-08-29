@@ -11,13 +11,13 @@ _(none)_
 ## Later
 
 - [#5](https://github.com/webaugur/TimeWarp/issues/5) Live countdown timers
-- [#6](https://github.com/webaugur/TimeWarp/issues/6) Planetary moons from JPL (circular fallback today)
-- [#7](https://github.com/webaugur/TimeWarp/issues/7) Satellite passes: more catalogs and visual magnitude
-- [#4](https://github.com/webaugur/TimeWarp/issues/4) SBDB lookup by arbitrary designation
 - [#2](https://github.com/webaugur/TimeWarp/issues/2) Holiday `--region` for more Nager countries
 
 ## Done
 
+- [#7](https://github.com/webaugur/TimeWarp/issues/7) Satellite catalogs / visual magnitude
+- [#4](https://github.com/webaugur/TimeWarp/issues/4) SBDB lookup by arbitrary designation
+- [#6](https://github.com/webaugur/TimeWarp/issues/6) Planetary moons from JPL Horizons
 - [#3](https://github.com/webaugur/TimeWarp/issues/3) Holidays (python-holidays / Nager) + JPL SBDB elements
 
 ## Parked (do not do unless asked)
