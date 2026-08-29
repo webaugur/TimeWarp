@@ -2,7 +2,7 @@
 
 Command-line date calculators, including **negative** spans (end before start).
 
-Dates you **type** are **ISO 8601** only. There is no `MM/DD` vs `DD/MM`. Time of day is optional. `-q` and `--json` also print ISO 8601. Rise/set tables use a short clock (`17:52R`) instead of a full timestamp.
+Dates you **type** are **ISO 8601** only. There is no `MM/DD` vs `DD/MM`. Time of day is optional. `-q` and `--json` also print ISO 8601. Sky clocks (`sun`, rise/set, `moon` event times, `seasons`) use `HH:MM` plus a NATO zone letter (`17:52R`) instead of repeating the calendar date.
 
 ```
 timewarp add P7M6D
@@ -117,8 +117,9 @@ Workdays skip Saturday and Sunday by default. `--weekend Fri,Sat` changes that. 
 |---|---|---|
 | Create calendar | `timewarp calendar [YEAR]` | Year grid, US holidays marked, ISO dates listed |
 | Countdown to Any Date | `timewarp countdown [DATE]` | Signed remaining time (negative if the date is past) |
-| Sunrise & Sunset | `timewarp sun --city "New York" [DATE]` | Rise, noon, set, day length |
-| Moon phases | `timewarp moon [DATE]` | Phase name, illumination, next new/full |
+| Sunrise & Sunset | `timewarp sun --city "New York" [DATE]` | Rise, noon, set, twilight, azimuth, day length |
+| Moon phases | `timewarp moon [DATE]` | Phase, illumination, next new/full/quarter *times* |
+| Seasons | `timewarp seasons [YEAR]` | March/September equinox, June/December solstice |
 | Rise / set | `timewarp rise --city "New York" [DATE]` | Rise times as `HH:MM` + zone letter; `--13` / `--33` add +13°/+33° after rise and before set |
 | Set | `timewarp set --city "New York" [DATE]` | Set times for the same bodies and period |
 | Eclipse lookup | `timewarp eclipse [YEAR]` | Solar and lunar eclipses 2021–2030 |
@@ -131,6 +132,9 @@ timewarp countdown 2026-12-31
 timewarp sun --city "New York" 2026-07-04
 timewarp sun --lat 40.7128 --lon -74.0060 --tz America/New_York
 timewarp moon 2026-08-28
+timewarp moon 2026-08-28 --city Indianapolis
+timewarp seasons 2026
+timewarp seasons 2026 --city Indianapolis
 timewarp rise --city "New York"
 timewarp rise --city "New York" 2026-07-04
 timewarp rise --city Indianapolis --13 --33
@@ -145,13 +149,13 @@ timewarp eclipse 2026
 timewarp help rise
 ```
 
-Rise/set human output is local `HH:MM` plus a NATO zone letter for the UTC offset: **Q** = UTC−4 (EDT), **R** = UTC−5 (EST), **Z** = UTC, and so on (`17:52R`, `18:52Q`, `13:00Z`). The civil date is not repeated on every cell; it is on the command line (yellow if assumed) or in the date column of a multi-day range. `--13` / `--33` are geometric altitudes above the horizon (not twilight). If the body never reaches that height, the cell is `—`. `-q` and `--json` still use full ISO timestamps.
+`sun` and rise/set human output is local `HH:MM` plus a NATO zone letter for the UTC offset: **Q** = UTC−4 (EDT), **R** = UTC−5 (EST), **Z** = UTC, and so on (`17:52R`, `18:52Q`, `13:00Z`). The civil date is not repeated on every rise/set cell; it is on the command line (yellow if assumed) or in the date column of a multi-day range. `--13` / `--33` are geometric altitudes above the horizon (not twilight). If the body never reaches that height, the cell is `—`. `-q` and `--json` still use full ISO timestamps.
 
-Eclipse rows are from Fred Espenak / NASA GSFC decade tables (2021–2030). `timewarp sun` uses the NOAA/USNO sunrise algorithm. `timewarp rise` uses Paul Schlyter’s low-precision ephemeris (about 1–2 arcminutes; rise/set typically within a few minutes of almanac times). Moon phase uses synodic age.
+Eclipse rows are from Fred Espenak / NASA GSFC decade tables (2021–2030). `timewarp sun` uses the NOAA/USNO algorithm for rise, set, and civil/nautical/astronomical twilight (sun at −6°/−12°/−18°). `timewarp rise` and moon **event times** (new, quarters, full) use Paul Schlyter’s low-precision ephemeris (about 1–2 arcminutes). The named moon **phase** and illumination on `moon` still come from synodic age. `timewarp seasons` is when solar ecliptic longitude hits 0°/90°/180°/270°.
 
 `timewarp rise` and `timewarp set` share the same bodies: sun, moon, mercury, venus, mars, jupiter, saturn, uranus, neptune, pluto (Pluto only 1800–2100). With no body name they list every object that is above the horizon during the local day (today if you omit the date). Pass a second ISO date for an inclusive range. `--all` also prints bodies that stay below the horizon. Comets, asteroids, and planetary moons need extra orbital data and are deferred.
 
-Other country holiday packs, live timers, and a 1900–2199 eclipse atlas are later work.
+Later work: other country holiday packs; live timers; a 1900–2199 eclipse atlas; **satellite pass tracking** (TLE / ISS and similar) so a pass can be lined up with twilight, moon phase, season, and rise/set alignments. Comets, asteroids, and planetary moons still need extra orbital data.
 
 ## Input formats
 

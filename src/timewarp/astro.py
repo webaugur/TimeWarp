@@ -1,4 +1,4 @@
-"""Sunrise/sunset and moon phase. NOAA solar; synodic moon age."""
+"""Sunrise/sunset, twilight, seasons, and moon phase. NOAA solar; Schlyter moon."""
 
 from __future__ import annotations
 
@@ -12,9 +12,16 @@ from timewarp.iso import Instant, as_date, format_instant
 from timewarp.places import Place
 
 ZENITH_OFFICIAL = 90.833  # sunrise/sunset with refraction
+ZENITH_CIVIL = 96.0  # sun altitude −6°
+ZENITH_NAUTICAL = 102.0
+ZENITH_ASTRONOMICAL = 108.0
 SYNODIC_DAYS = 29.530588853
 # New moon near 2000-01-06 18:14 UTC ( Meeus-style epoch )
 NEW_MOON_JD = 2451550.1
+
+
+def _iso_or_none(value: datetime | None) -> str | None:
+    return format_instant(value) if value else None
 
 
 @dataclass(frozen=True)
@@ -26,6 +33,14 @@ class SunTimes:
     sunset: datetime | None
     day_length_seconds: int | None
     note: str | None = None
+    sunrise_az: float | None = None
+    sunset_az: float | None = None
+    civil_dawn: datetime | None = None
+    civil_dusk: datetime | None = None
+    nautical_dawn: datetime | None = None
+    nautical_dusk: datetime | None = None
+    astronomical_dawn: datetime | None = None
+    astronomical_dusk: datetime | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -34,9 +49,17 @@ class SunTimes:
             "latitude": self.place.lat,
             "longitude": self.place.lon,
             "tz": self.place.tz,
-            "sunrise": format_instant(self.sunrise) if self.sunrise else None,
-            "solar_noon": format_instant(self.solar_noon) if self.solar_noon else None,
-            "sunset": format_instant(self.sunset) if self.sunset else None,
+            "sunrise": _iso_or_none(self.sunrise),
+            "sunrise_azimuth_deg": None if self.sunrise_az is None else round(self.sunrise_az, 1),
+            "solar_noon": _iso_or_none(self.solar_noon),
+            "sunset": _iso_or_none(self.sunset),
+            "sunset_azimuth_deg": None if self.sunset_az is None else round(self.sunset_az, 1),
+            "civil_dawn": _iso_or_none(self.civil_dawn),
+            "civil_dusk": _iso_or_none(self.civil_dusk),
+            "nautical_dawn": _iso_or_none(self.nautical_dawn),
+            "nautical_dusk": _iso_or_none(self.nautical_dusk),
+            "astronomical_dawn": _iso_or_none(self.astronomical_dawn),
+            "astronomical_dusk": _iso_or_none(self.astronomical_dusk),
             "day_length_iso8601": _seconds_iso(self.day_length_seconds),
             "note": self.note,
         }
@@ -48,8 +71,10 @@ class MoonInfo:
     phase: str
     illumination: float
     age_days: float
-    next_new: date
-    next_full: date
+    next_new: datetime
+    next_full: datetime
+    next_first_quarter: datetime
+    next_last_quarter: datetime
 
     def to_dict(self) -> dict:
         return {
@@ -57,9 +82,20 @@ class MoonInfo:
             "phase": self.phase,
             "illumination": round(self.illumination, 4),
             "age_days": round(self.age_days, 4),
-            "next_new": self.next_new.isoformat(),
-            "next_full": self.next_full.isoformat(),
+            "next_new": format_instant(self.next_new),
+            "next_full": format_instant(self.next_full),
+            "next_first_quarter": format_instant(self.next_first_quarter),
+            "next_last_quarter": format_instant(self.next_last_quarter),
         }
+
+
+@dataclass(frozen=True)
+class SeasonEvent:
+    name: str
+    time: datetime  # UTC
+
+    def to_dict(self) -> dict:
+        return {"name": self.name, "time": format_instant(self.time)}
 
 
 def _seconds_iso(seconds: int | None) -> str | None:
@@ -122,8 +158,32 @@ def _sun_utc_hours(d: date, lat: float, lon: float, rising: bool, zenith: float 
 
 def _hours_to_datetime(d: date, hours: float, tz: ZoneInfo) -> datetime:
     utc = datetime.combine(d, time.min, tzinfo=timezone.utc) + timedelta(hours=hours)
-    # rise/set near midnight can land on the previous/next UTC date; that's correct
-    return utc.astimezone(tz).replace(microsecond=0)
+    local = utc.astimezone(tz).replace(microsecond=0)
+    # NOAA hours are measured from 00:00 UTC of calendar date d. Convert to that
+    # local civil day so an evening event is not shown on the previous evening.
+    if local.date() < d:
+        local += timedelta(days=1)
+    elif local.date() > d:
+        local -= timedelta(days=1)
+    return local
+
+
+def _twilight_pair(day: date, place: Place, tz: ZoneInfo, zenith: float) -> tuple[datetime | None, datetime | None]:
+    dawn_h = _sun_utc_hours(day, place.lat, place.lon, True, zenith)
+    dusk_h = _sun_utc_hours(day, place.lat, place.lon, False, zenith)
+    dawn = _hours_to_datetime(day, dawn_h, tz) if dawn_h is not None else None
+    dusk = _hours_to_datetime(day, dusk_h, tz) if dusk_h is not None else None
+    return dawn, dusk
+
+
+def _sun_azimuth(when: datetime | None, place: Place) -> float | None:
+    if when is None:
+        return None
+    from timewarp.ephem import altitude_azimuth, position
+
+    pos = position("sun", when)
+    _alt, az = altitude_azimuth(pos, when, place.lat, place.lon)
+    return az
 
 
 def sun_times(d: Instant, place: Place) -> SunTimes:
@@ -156,7 +216,26 @@ def sun_times(d: Instant, place: Place) -> SunTimes:
             noon_h = (rise_h + set_h) / 2.0
             noon = _hours_to_datetime(day, noon_h % 24.0, tz)
             length = int(round((set_h - rise_h) * 3600.0))
-    return SunTimes(day, place, sunrise, noon, sunset, length, note)
+    civil_dawn, civil_dusk = _twilight_pair(day, place, tz, ZENITH_CIVIL)
+    nautical_dawn, nautical_dusk = _twilight_pair(day, place, tz, ZENITH_NAUTICAL)
+    astro_dawn, astro_dusk = _twilight_pair(day, place, tz, ZENITH_ASTRONOMICAL)
+    return SunTimes(
+        day,
+        place,
+        sunrise,
+        noon,
+        sunset,
+        length,
+        note,
+        sunrise_az=_sun_azimuth(sunrise, place),
+        sunset_az=_sun_azimuth(sunset, place),
+        civil_dawn=civil_dawn,
+        civil_dusk=civil_dusk,
+        nautical_dawn=nautical_dawn,
+        nautical_dusk=nautical_dusk,
+        astronomical_dawn=astro_dawn,
+        astronomical_dusk=astro_dusk,
+    )
 
 
 def _julian_date(d: date) -> float:
@@ -199,23 +278,110 @@ def _illumination(age: float) -> float:
     return (1.0 - math.cos(2.0 * math.pi * age / SYNODIC_DAYS)) / 2.0
 
 
-def _next_age(d: date, target_age: float) -> date:
-    age = moon_age_days(d)
-    wait = (target_age - age) % SYNODIC_DAYS
-    # if we are essentially there today, still report today
-    if wait < 0.5:
-        return d
-    return d + timedelta(days=int(round(wait)))
+def _utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _ang_diff(value: float, target: float) -> float:
+    return (value - target + 180.0) % 360.0 - 180.0
+
+
+def _next_longitude_crossing(
+    start: datetime,
+    metric,
+    target: float,
+    *,
+    step_hours: float,
+    max_days: float,
+) -> datetime:
+    """Next time metric() increases through target degrees (0–360)."""
+    t0 = _utc(start)
+    end = t0 + timedelta(days=max_days)
+    step = timedelta(hours=step_hours)
+    prev_t = t0
+    prev = _ang_diff(metric(t0), target)
+    t = t0 + step
+    guard = 0
+    while t <= end:
+        cur = _ang_diff(metric(t), target)
+        if prev <= 0 <= cur and not (prev == 0 and cur == 0):
+            lo, hi = prev_t, t
+            for _ in range(40):
+                if (hi - lo).total_seconds() < 0.5:
+                    break
+                mid = lo + (hi - lo) / 2
+                amid = _ang_diff(metric(mid), target)
+                if amid <= 0:
+                    lo = mid
+                else:
+                    hi = mid
+            found = lo + (hi - lo) / 2
+            return found.replace(microsecond=0)
+        prev, prev_t = cur, t
+        t += step
+        guard += 1
+        if guard > 4000:
+            raise TimeWarpError("longitude search exceeded its bound (internal error)")
+    raise TimeWarpError(f"no longitude crossing of {target}° within {max_days:.0f} days of {t0.isoformat()}")
+
+
+def _moon_rel_lon(dt: datetime) -> float:
+    from timewarp.ephem import day_number, position, sun_state
+
+    pos = position("moon", dt)
+    sun = sun_state(day_number(dt))
+    return (pos.ecl_lon - sun.lon) % 360.0
+
+
+def _sun_ecl_lon(dt: datetime) -> float:
+    from timewarp.ephem import day_number, sun_state
+
+    return sun_state(day_number(dt)).lon
 
 
 def moon_info(d: Instant) -> MoonInfo:
     day = as_date(d)
     age = moon_age_days(day)
+    if isinstance(d, datetime):
+        start = _utc(d)
+    else:
+        start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
     return MoonInfo(
         date=day,
         phase=_phase_name(age),
         illumination=_illumination(age),
         age_days=age,
-        next_new=_next_age(day, 0.0),
-        next_full=_next_age(day, SYNODIC_DAYS / 2.0),
+        next_new=_next_longitude_crossing(start, _moon_rel_lon, 0.0, step_hours=6, max_days=40),
+        next_first_quarter=_next_longitude_crossing(start, _moon_rel_lon, 90.0, step_hours=6, max_days=40),
+        next_full=_next_longitude_crossing(start, _moon_rel_lon, 180.0, step_hours=6, max_days=40),
+        next_last_quarter=_next_longitude_crossing(start, _moon_rel_lon, 270.0, step_hours=6, max_days=40),
     )
+
+
+_SEASONS = (
+    (0.0, "March equinox"),
+    (90.0, "June solstice"),
+    (180.0, "September equinox"),
+    (270.0, "December solstice"),
+)
+
+
+def seasons_for_year(year: int) -> list[SeasonEvent]:
+    if not 1 <= year <= 9999:
+        raise TimeWarpError(f"year {year} is out of range 1..9999")
+    # Search each event from a month before its usual window.
+    starts = (
+        datetime(year, 2, 1, tzinfo=timezone.utc),
+        datetime(year, 5, 1, tzinfo=timezone.utc),
+        datetime(year, 8, 1, tzinfo=timezone.utc),
+        datetime(year, 11, 1, tzinfo=timezone.utc),
+    )
+    rows = []
+    for start, (target, name) in zip(starts, _SEASONS, strict=True):
+        when = _next_longitude_crossing(start, _sun_ecl_lon, target, step_hours=12, max_days=80)
+        if when.year != year:
+            raise TimeWarpError(f"{name} for {year} landed on {when.date().isoformat()}")
+        rows.append(SeasonEvent(name, when))
+    return rows

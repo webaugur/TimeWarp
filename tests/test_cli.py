@@ -9,6 +9,11 @@ from pathlib import Path
 
 from timewarp.cli import main
 
+# Do not pick up the developer's ~/.config/timewarp/cache.json.
+_TEST_CACHE = Path(tempfile.gettempdir()) / "timewarp-tests-cache.json"
+_TEST_CACHE.unlink(missing_ok=True)
+os.environ["TIMEWARP_CACHE"] = str(_TEST_CACHE)
+
 
 def run(*argv: str) -> tuple[int, str, str]:
     out = io.StringIO()
@@ -108,12 +113,28 @@ class CliPhase2Tests(unittest.TestCase):
         code, out, err = run("moon", "2026-08-28")
         self.assertEqual(code, 0, err)
         self.assertIn("Phase:", out)
+        self.assertIn("Next full:", out)
+        self.assertRegex(out, r"Next full:\s+\d{2}:\d{2}[A-Z]")
+
+    def test_seasons_2026(self):
+        code, out, err = run("seasons", "2026")
+        self.assertEqual(code, 0, err)
+        self.assertIn("March equinox", out)
+        self.assertIn("December solstice", out)
 
     def test_sun_city(self):
         code, out, err = run("sun", "--city", "New York", "2026-07-04")
         self.assertEqual(code, 0, err)
         self.assertIn("Sunrise:", out)
         self.assertIn("Sunset:", out)
+        self.assertRegex(out, r"Sunrise:\s+\d{2}:\d{2}Q")
+        self.assertRegex(out, r"Sunset:\s+\d{2}:\d{2}Q")
+        self.assertRegex(out, r"Solar noon:\s+\d{2}:\d{2}Q")
+        self.assertIn("Civil dawn", out)
+        self.assertIn("Astronomical dusk", out)
+        self.assertRegex(out, r"Sunrise:.*NE")
+        self.assertRegex(out, r"Sunset:.*NW")
+        self.assertNotIn("2026-07-04T", out)
 
     def test_moonrise(self):
         code, out, err = run("moonrise", "--city", "New York", "2026-07-04")

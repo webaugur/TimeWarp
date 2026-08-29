@@ -12,7 +12,7 @@ from datetime import date, datetime
 from typing import Sequence
 
 from timewarp import __version__
-from timewarp.astro import moon_info, sun_times
+from timewarp.astro import moon_info, seasons_for_year, sun_times
 from timewarp.ephem import BODIES, format_body
 from timewarp.rise import events_for_period
 from timewarp.calendar_view import year_calendar
@@ -59,8 +59,9 @@ Phase 1 (dates and durations):
 Phase 2 (basic):
   calendar       year calendar with optional US holidays
   countdown      signed time from now to a date (negative if past)
-  sun            sunrise / solar noon / sunset
-  moon           moon phase and illumination
+  sun            sunrise / sunset, twilight, azimuth
+  moon           moon phase and next new/full/quarter times
+  seasons        equinoxes and solstices
   rise           rise times for visible bodies (today, or a date / date range)
   set            set times for the same bodies and period
   moonrise       alias for: rise moon
@@ -86,7 +87,8 @@ Examples:
   {PROG} calendar 2026 --country US
   {PROG} countdown 2026-12-31T00:00:00
   {PROG} sun --city "New York" 2026-07-04
-  {PROG} moon 2026-08-28
+  {PROG} moon 2026-08-28 --city Indianapolis
+  {PROG} seasons 2026
   {PROG} rise --city "New York"
   {PROG} rise --city "New York" 2026-07-04
   {PROG} rise --city Indianapolis --13 --33
@@ -108,7 +110,8 @@ Examples:
 Dates are ISO 8601 only: YYYY-MM-DD, YYYY-MM-DDTHH:MM[:SS][Z|+HH:MM],
 YYYY-Www-D, YYYY-DDD. Optional words: today, now, yesterday, tomorrow.
 Omit a date to use today (yellow on the reconstructed command line).
-Rise/set tables print HH:MM plus a zone letter (17:52R); -q and --json stay ISO 8601.
+Sky times print HH:MM plus a zone letter (17:52R); -q and --json stay ISO 8601.
+`sun` includes civil/nautical/astronomical twilight. Satellite passes are not in this phase.
 Negative offsets after the date may need -- so they are not flags:
   {PROG} add 2026-07-04 -- -P7M
 """
@@ -498,6 +501,22 @@ def _place_from_args(args: argparse.Namespace) -> Place:
     return Place(name, lat, lon, tz)
 
 
+def _optional_place(args: argparse.Namespace):
+    if getattr(args, "city", None) or (
+        getattr(args, "lat", None) is not None and getattr(args, "lon", None) is not None
+    ):
+        return _place_from_args(args)
+    return None
+
+
+def _clock_at(when: datetime, tz: str | None) -> str:
+    if tz:
+        from zoneinfo import ZoneInfo
+
+        when = when.astimezone(ZoneInfo(tz))
+    return format_clock(when)
+
+
 def cmd_sun(args: argparse.Namespace) -> int:
     assumed = not args.date
     inst = parse_instant(args.date) if args.date else date.today()
@@ -511,31 +530,76 @@ def cmd_sun(args: argparse.Namespace) -> int:
     print(f"Place: {result.place.name} ({result.place.lat}, {result.place.lon}) {result.place.tz}")
     if result.note:
         print(result.note)
-    if result.sunrise:
-        print(f"Sunrise:    {format_instant(result.sunrise)}")
-    if result.solar_noon:
-        print(f"Solar noon: {format_instant(result.solar_noon)}")
-    if result.sunset:
-        print(f"Sunset:     {format_instant(result.sunset)}")
+
+    def line(label: str, when, az=None) -> None:
+        head = f"{label}:"
+        if not when:
+            print(f"{head:20} —")
+            return
+        extra = f"  {_fmt_az(az)}" if az is not None else ""
+        print(f"{head:20} {format_clock(when)}{extra}")
+
+    line("Astronomical dawn", result.astronomical_dawn)
+    line("Nautical dawn", result.nautical_dawn)
+    line("Civil dawn", result.civil_dawn)
+    line("Sunrise", result.sunrise, result.sunrise_az)
+    line("Solar noon", result.solar_noon)
+    line("Sunset", result.sunset, result.sunset_az)
+    line("Civil dusk", result.civil_dusk)
+    line("Nautical dusk", result.nautical_dusk)
+    line("Astronomical dusk", result.astronomical_dusk)
     if result.day_length_seconds is not None:
-        print(f"Day length: {result.to_dict()['day_length_iso8601']}")
+        print(f"{'Day length:':20} {result.to_dict()['day_length_iso8601']}")
     return 0
 
 
 def cmd_moon(args: argparse.Namespace) -> int:
     assumed = not args.date
     inst = parse_instant(args.date) if args.date else date.today()
+    place = _optional_place(args)
     _maybe_echo_command(args, as_date(inst).isoformat() if assumed else None)
     result = moon_info(inst)
+    tz = place.tz if place else "UTC"
     if args.json:
-        return _print_json(result.to_dict())
+        payload = result.to_dict()
+        if place:
+            payload["place"] = place.name
+            payload["tz"] = place.tz
+        return _print_json(payload)
     print(f"Body:          {_body_label('moon', color=_want_color(args))}")
     print(f"Date:          {result.date.isoformat()}")
+    if place:
+        print(f"Place:         {place.name} ({place.tz})")
     print(f"Phase:         {result.phase}")
     print(f"Illumination:  {result.illumination:.1%}")
     print(f"Age:           {result.age_days:.2f} days")
-    print(f"Next new moon: {result.next_new.isoformat()}")
-    print(f"Next full:     {result.next_full.isoformat()}")
+    print(f"Next new:      {_clock_at(result.next_new, tz)}  {format_instant(result.next_new)}")
+    print(f"Next first Q:  {_clock_at(result.next_first_quarter, tz)}  {format_instant(result.next_first_quarter)}")
+    print(f"Next full:     {_clock_at(result.next_full, tz)}  {format_instant(result.next_full)}")
+    print(f"Next last Q:   {_clock_at(result.next_last_quarter, tz)}  {format_instant(result.next_last_quarter)}")
+    return 0
+
+
+def cmd_seasons(args: argparse.Namespace) -> int:
+    assumed = args.year is None
+    year = date.today().year if args.year is None else args.year
+    if not 1 <= year <= 9999:
+        raise TimeWarpError(f"year {year} is out of range 1..9999")
+    _maybe_echo_command(args, str(year) if assumed else None)
+    rows = seasons_for_year(year)
+    place = _optional_place(args)
+    tz = place.tz if place else "UTC"
+    if args.json:
+        payload = {"year": year, "events": [e.to_dict() for e in rows]}
+        if place:
+            payload["place"] = place.name
+            payload["tz"] = tz
+        return _print_json(payload)
+    print(f"Astronomical seasons {year}")
+    if place:
+        print(f"Place: {place.name} ({tz})")
+    for e in rows:
+        print(f"  {e.name:22} {_clock_at(e.time, tz)}  {format_instant(e.time)}")
     return 0
 
 
@@ -1054,18 +1118,26 @@ def build_parser() -> argparse.ArgumentParser:
                 help=f"unload --{flag}",
             )
 
-    p = sub.add_parser("sun", help="Sunrise and sunset")
+    p = sub.add_parser("sun", help="Sunrise, sunset, twilight, and azimuth")
     _add_common(p)
     p.add_argument("date", nargs="?", help="ISO 8601 date (default: today)")
     _add_place(p)
     _add_color_flags(p)
     p.set_defaults(func=cmd_sun)
 
-    p = sub.add_parser("moon", help="Moon phase")
+    p = sub.add_parser("moon", help="Moon phase and next new/full/quarter times")
     _add_common(p)
     p.add_argument("date", nargs="?", help="ISO 8601 date (default: today)")
+    _add_place(p)
     _add_color_flags(p)
     p.set_defaults(func=cmd_moon)
+
+    p = sub.add_parser("seasons", help="Equinoxes and solstices")
+    _add_common(p)
+    p.add_argument("year", nargs="?", type=int, help="calendar year (default: this year)")
+    _add_place(p)
+    _add_color_flags(p)
+    p.set_defaults(func=cmd_seasons)
 
     def _add_sky_when(parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
@@ -1183,7 +1255,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.help_commands = getattr(parser, "tw_commands", {})
         if args.func is cmd_help:
             return cmd_help(args)
-        echo_self = {cmd_rise, cmd_add, cmd_add_workdays, cmd_sun, cmd_moon, cmd_weekday, cmd_week, cmd_countdown, cmd_calendar}
+        echo_self = {
+            cmd_rise,
+            cmd_add,
+            cmd_add_workdays,
+            cmd_sun,
+            cmd_moon,
+            cmd_seasons,
+            cmd_weekday,
+            cmd_week,
+            cmd_countdown,
+            cmd_calendar,
+        }
         if args.func is not cmd_cache:
             pulled = _apply_cache(args, raw)
             args.cache_pulled = pulled
