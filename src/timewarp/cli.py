@@ -16,7 +16,9 @@ from timewarp.astro import moon_info, seasons_for_year, sun_times
 from timewarp.ephem import BODIES
 from timewarp.ui import (
     body_cell,
+    body_glyph,
     format_body,
+    glyph_pad,
     icon,
     marked,
     print_grid,
@@ -532,9 +534,8 @@ def cmd_holidays(args: argparse.Namespace) -> int:
     party = icon("holiday", emoji=em)
     grid = []
     for d, name in rows:
-        label = f"{party} {name}" if party else name
-        grid.append([d.isoformat(), weekday_name(d), label])
-    print_grid(["date", "weekday", "holiday"], grid, color=em)
+        grid.append([d.isoformat(), weekday_name(d), glyph_pad(party) if party else "", name])
+    print_grid(["date", "weekday", "", "holiday"], grid, color=em, widths={2: 2} if party else None)
     return 0
 
 
@@ -587,7 +588,7 @@ def cmd_countdown(args: argparse.Namespace) -> int:
         [
             ("Now:", format_labeled(result.start)),
             ("Target:", format_labeled(result.end)),
-            (marked("clock", f"Time {when}:", emoji=em), result.human()),
+            (icon("clock", emoji=em), f"Time {when}:", result.human(), ""),
             ("ISO 8601:", result.iso()),
             ("Total days:", str(result.total_days)),
         ],
@@ -657,15 +658,15 @@ def cmd_sun(args: argparse.Namespace) -> int:
     if result.note:
         rows.append((marked("warn", "Note:", emoji=em), result.note))
     events = [
-        (marked("night", "Astronomical dawn:", emoji=em), *clock_az(result.astronomical_dawn)),
-        (marked("night", "Nautical dawn:", emoji=em), *clock_az(result.nautical_dawn)),
-        (marked("dawn", "Civil dawn:", emoji=em), *clock_az(result.civil_dawn)),
-        (marked("rise", "Sunrise:", emoji=em), *clock_az(result.sunrise, result.sunrise_az)),
-        (marked("noon", "Solar noon:", emoji=em), *clock_az(result.solar_noon)),
-        (marked("set", "Sunset:", emoji=em), *clock_az(result.sunset, result.sunset_az)),
-        (marked("dusk", "Civil dusk:", emoji=em), *clock_az(result.civil_dusk)),
-        (marked("dusk", "Nautical dusk:", emoji=em), *clock_az(result.nautical_dusk)),
-        (marked("night", "Astronomical dusk:", emoji=em), *clock_az(result.astronomical_dusk)),
+        (icon("night", emoji=em), "Astronomical dawn:", *clock_az(result.astronomical_dawn)),
+        (icon("night", emoji=em), "Nautical dawn:", *clock_az(result.nautical_dawn)),
+        (icon("dawn", emoji=em), "Civil dawn:", *clock_az(result.civil_dawn)),
+        (icon("rise", emoji=em), "Sunrise:", *clock_az(result.sunrise, result.sunrise_az)),
+        (icon("noon", emoji=em), "Solar noon:", *clock_az(result.solar_noon)),
+        (icon("set", emoji=em), "Sunset:", *clock_az(result.sunset, result.sunset_az)),
+        (icon("dusk", emoji=em), "Civil dusk:", *clock_az(result.civil_dusk)),
+        (icon("dusk", emoji=em), "Nautical dusk:", *clock_az(result.nautical_dusk)),
+        (icon("night", emoji=em), "Astronomical dusk:", *clock_az(result.astronomical_dusk)),
     ]
     rows.extend(events)
     if result.day_length_seconds is not None:
@@ -879,7 +880,7 @@ def _print_sky_detail(
     if pos.magnitude is not None:
         meta.append(("Magnitude:", f"{pos.magnitude:.2f}"))
     if result.note:
-        meta.append((marked("warn", "Note:", emoji=color), result.note))
+        meta.append((icon("warn", emoji=color), "Note:", result.note, ""))
     print_kv(meta, color=color)
     after, before = _alt_rows(result, alt13, alt33)
     if primary == "set":
@@ -900,16 +901,17 @@ def _print_sky_detail(
         ]
     ev_rows = []
     for label, kind, times in order:
-        head = marked(kind, f"{label}:", emoji=color) if kind else f"{label}:"
+        mark = icon(kind, emoji=color) if kind else ""
+        head = f"{label}:"
         if not times:
-            ev_rows.append((head, "—", ""))
+            ev_rows.append((mark, head, "—", ""))
             continue
         for when in times:
             event_pos = sky_position(result.body, when)
             alt, az = altitude_azimuth(event_pos, when, result.place.lat, result.place.lon)
             extra = _fmt_az(az).strip() if label != "Transit" else f"alt {alt:.1f}°"
-            ev_rows.append((head, format_clock(when), extra))
-            head = ""
+            ev_rows.append((mark, head, format_clock(when), extra))
+            mark, head = "", ""
     print_kv(ev_rows, color=color)
 
 
@@ -951,9 +953,11 @@ def _print_sky_table(
     multi_day = len(dates) > 1
     cols = _sky_table_cols(primary, alt13, alt33)
     headers = []
+    glyph_i = 0
     if multi_day:
         headers.append("date")
-    headers.append("body")
+        glyph_i = 1
+    headers.extend(["", "body"])
     for title, _attr in cols:
         if title == "rise":
             headers.append(marked("rise", "rise", emoji=color))
@@ -966,11 +970,12 @@ def _print_sky_table(
         row = []
         if multi_day:
             row.append(r.date.isoformat())
-        row.append(body_cell(r.body, color=color))
+        row.append(body_glyph(r.body, color=color))
+        row.append(r.body)
         for _title, attr in cols:
             row.append(_fmt_event_times(getattr(r, attr)))
         grid.append(row)
-    print_grid(headers, grid, color=color)
+    print_grid(headers, grid, color=color, widths={glyph_i: 2})
 
 
 def _parse_sky_when(args: argparse.Namespace):
@@ -1226,9 +1231,9 @@ def cmd_eclipse(args: argparse.Namespace) -> int:
     print("Greatest eclipse date is UTC. Types from γ and u.")
     grid = []
     for e in rows:
-        kind = marked("solar" if e.kind == "solar" else "lunar", e.kind, emoji=em)
-        grid.append([iso_range(e), kind, e.type])
-    print_grid(["date", "kind", "type"], grid, color=em)
+        mark = icon("solar" if e.kind == "solar" else "lunar", emoji=em)
+        grid.append([iso_range(e), glyph_pad(mark) if mark else "", e.kind, e.type])
+    print_grid(["date", "", "kind", "type"], grid, color=em, widths={1: 2})
     return 0
 
 

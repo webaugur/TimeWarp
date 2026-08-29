@@ -99,14 +99,25 @@ def icon(name: str, *, emoji: bool) -> str:
 def marked(kind: str, label: str, *, emoji: bool) -> str:
     """Always 'emoji label' with a space, or just label."""
     mark = icon(kind, emoji=emoji)
-    return f"{mark} {label}" if mark else label
+    return f"{glyph_pad(mark)} {label}" if mark else label
 
 
 def sky_bin_label(name: str, *, emoji: bool) -> str:
     if not emoji:
         return name
     mark = SKY_BIN.get(name, "")
-    return f"{mark} {name}" if mark else name
+    return f"{glyph_pad(mark)} {name}" if mark else name
+
+
+def glyph_pad(text: str, width: int = 2) -> str:
+    """Force a glyph to `width` terminal cells so columns don't drift."""
+    raw = text or ""
+    try:
+        from rich.cells import set_cell_size
+
+        return set_cell_size(raw, width)
+    except ImportError:
+        return (raw + "  ")[:width]
 
 
 def _cell_len(text: str) -> int:
@@ -186,6 +197,25 @@ def _console(*, color: bool, file: TextIO | None = None):
         return _PlainConsole(stream)
 
 
+def body_glyph(name: str, *, color: bool):
+    """Padded 2-cell body glyph (Rich Text if colored)."""
+    key = name.strip().lower()
+    symbol = (EMOJI.get(key) if color else SYMBOLS.get(key)) or SYMBOLS.get(key) or ""
+    padded = glyph_pad(symbol)
+    if not color:
+        return padded
+    rgb = SYMBOL_RGB.get(key)
+    try:
+        from rich.text import Text
+    except ImportError:
+        return padded
+    text = Text(padded)
+    if symbol and rgb:
+        r, g, b = rgb
+        text.stylize(f"bold rgb({r},{g},{b})")
+    return text
+
+
 def body_cell(name: str, *, color: bool):
     """Body glyph + name as a Rich Text (cell-width safe) or plain string."""
     key = name.strip().lower()
@@ -195,28 +225,21 @@ def body_cell(name: str, *, color: bool):
         from rich.text import Text
     except ImportError:
         return format_body(name, color=True, emoji=True)
-    symbol = EMOJI.get(key) or SYMBOLS.get(key)
-    rgb = SYMBOL_RGB.get(key)
-    text = Text()
-    if symbol and rgb:
-        r, g, b = rgb
-        text.append(f"{symbol} ", style=f"bold rgb({r},{g},{b})")
-    elif symbol:
-        text.append(f"{symbol} ")
-    text.append(key)
+    text = Text.assemble(body_glyph(name, color=True), " ", key)
     return text
 
 
 def print_kv(rows: list[tuple], *, color: bool, file: TextIO | None = None) -> None:
-    """Two/three-column key · value · extra. Keys share one width (emoji-safe)."""
+    """Icon (2 cells) · right-aligned key · value. Optional extra joins the value.
+
+    A 4-tuple is (icon, key, value, extra). Shorter tuples have no icon.
+    """
     try:
         from rich.table import Table
     except ImportError:
         for row in rows:
-            key = row[0]
-            val = row[1] if len(row) > 1 else ""
-            extra = row[2] if len(row) > 2 else ""
-            print(f"{key:22} {val}  {extra}".rstrip(), file=file or sys.stdout)
+            icon_s, key, val, extra = _kv_parts(row)
+            print(f"{glyph_pad(icon_s)} {key:22} {val}  {extra}".rstrip(), file=file or sys.stdout)
         return
     table = Table(
         show_header=False,
@@ -227,22 +250,35 @@ def print_kv(rows: list[tuple], *, color: bool, file: TextIO | None = None) -> N
         show_edge=False,
         expand=False,
     )
+    table.add_column("g", no_wrap=True, min_width=2, max_width=2)
     table.add_column("k", no_wrap=True, justify="right")
     table.add_column("v", no_wrap=True)
     for row in rows:
-        key = row[0]
-        val = row[1] if len(row) > 1 else ""
-        extra = row[2] if len(row) > 2 else ""
+        icon_s, key, val, extra = _kv_parts(row)
         v = "" if val is None else val
-        x = extra if extra not in (None, "") else ""
-        if x:
+        if extra not in (None, ""):
             if isinstance(v, str):
-                v = f"{v}   {x}"
-            else:
-                table.add_row(str(key), v)
-                continue
-        table.add_row(str(key), v)
+                v = f"{v}   {extra}"
+        g = glyph_pad(icon_s)
+        try:
+            from rich.text import Text
+
+            if color and icon_s:
+                g = Text(g)
+        except ImportError:
+            pass
+        table.add_row(g, str(key), v)
     _console(color=color, file=file).print(table)
+
+
+def _kv_parts(row: tuple) -> tuple[str, str, object, object]:
+    if len(row) >= 4:
+        return str(row[0] or ""), str(row[1]), row[2], row[3]
+    if len(row) == 3:
+        return "", str(row[0]), row[1], row[2]
+    if len(row) == 2:
+        return "", str(row[0]), row[1], ""
+    return "", str(row[0]) if row else "", "", ""
 
 
 def print_grid(
@@ -252,6 +288,7 @@ def print_grid(
     color: bool,
     file: TextIO | None = None,
     justify: dict[int, str] | None = None,
+    widths: dict[int, int] | None = None,
 ) -> None:
     """Header + rows; Rich measures emoji so columns stay lined up."""
     try:
@@ -273,8 +310,15 @@ def print_grid(
         expand=False,
     )
     just = justify or {}
+    wmap = widths or {}
     for i, header in enumerate(headers):
-        table.add_column(header, justify=just.get(i, "left"), no_wrap=True, overflow="fold")
+        extra = {}
+        if i in wmap:
+            extra["min_width"] = wmap[i]
+            extra["max_width"] = wmap[i]
+        table.add_column(
+            header, justify=just.get(i, "left"), no_wrap=True, overflow="fold", **extra
+        )
     for row in rows:
         cells = list(row) + [""] * (len(headers) - len(row))
         table.add_row(*cells[: len(headers)])

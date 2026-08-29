@@ -29,6 +29,17 @@ class IconTests(unittest.TestCase):
         self.assertIn("🏙️", sky_bin_label("civil", emoji=True))
 
 
+class GlyphPadTests(unittest.TestCase):
+    def test_fixed_two_cells(self):
+        from rich.cells import cell_len
+
+        from timewarp.ui import glyph_pad
+
+        self.assertEqual(cell_len(glyph_pad("")), 2)
+        self.assertEqual(cell_len(glyph_pad("☀️")), 2)
+        self.assertEqual(cell_len(glyph_pad("♂️")), 2)
+
+
 class GridTests(unittest.TestCase):
     def test_clocks_not_cropped(self):
         from io import StringIO
