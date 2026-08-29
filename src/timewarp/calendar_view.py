@@ -18,6 +18,7 @@ def year_calendar(
     iso_weeks: bool = False,
     refresh: bool = False,
     region: str | None = None,
+    emoji: bool = False,
 ) -> str:
     first = calendar.MONDAY if iso_weeks else calendar.SUNDAY
     cal = calendar.Calendar(firstweekday=first)
@@ -35,7 +36,8 @@ def year_calendar(
         if iso_weeks
         else ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
     )
-    lines = [f"Calendar {year} ({title_country})", ""]
+    title = f"📅 Calendar {year} ({title_country})" if emoji else f"Calendar {year} ({title_country})"
+    lines = [title, ""]
 
     months = []
     for month in range(1, 13):
@@ -69,9 +71,12 @@ def year_calendar(
         lines.append("")
 
     if holiday_map:
-        lines.append("Holidays (*):")
+        hol_h = "Holidays (🎉):" if emoji else "Holidays (*):"
+        lines.append(hol_h)
         for d in sorted(holiday_map):
-            lines.append(f"  {d.isoformat()} {weekday_name(d)}  {holiday_map[d]}")
+            tag = "🎉 " if emoji else ""
+            lines.append(f"  {d.isoformat()} {weekday_name(d)}  {tag}{holiday_map[d]}")
     lines.append("")
-    lines.append("Dates are ISO 8601 (YYYY-MM-DD). * = holiday.")
+    foot = "Dates are ISO 8601 (YYYY-MM-DD). 🎉 = holiday." if emoji else "Dates are ISO 8601 (YYYY-MM-DD). * = holiday."
+    lines.append(foot)
     return "\n".join(lines).rstrip() + "\n"

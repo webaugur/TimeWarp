@@ -14,6 +14,7 @@ _(none)_
 
 ## Done
 
+- [#9](https://github.com/webaugur/TimeWarp/issues/9) Rich human output and emoji (keep argparse)
 - [#2](https://github.com/webaugur/TimeWarp/issues/2) Holiday `--region` for more Nager countries
 - [#7](https://github.com/webaugur/TimeWarp/issues/7) Satellite catalogs / visual magnitude
 - [#4](https://github.com/webaugur/TimeWarp/issues/4) SBDB lookup by arbitrary designation

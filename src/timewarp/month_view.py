@@ -120,21 +120,29 @@ def _len_hm(seconds: int | None) -> str:
     return f"{h:2d}:{m:02d}"
 
 
-def format_month_sheet(rows: list[DaySheet], place: Place, *, twilight: bool = False) -> str:
+def format_month_sheet(rows: list[DaySheet], place: Place, *, twilight: bool = False, emoji: bool = False) -> str:
     if not rows:
         return "No days.\n"
     y, m = rows[0].date.year, rows[0].date.month
     title = f"{place.name}  {y:04d}-{m:02d}  {MONTHS[m - 1]}  {place.tz}"
+    if emoji:
+        dawn, rise, sset, dusk = "🌅dawn", "⬆️rise", "⬇️set", "🌇dusk"
+        moon_up, moon_dn = "🌙↑", "🌙↓"
+        adawn, ndawn, ndusk, adusk = "🌃adawn", "🌃ndawn", "🌃ndusk", "🌃adusk"
+    else:
+        dawn, rise, sset, dusk = "dawn", "rise", "set", "dusk"
+        moon_up, moon_dn = "moon↑", "moon↓"
+        adawn, ndawn, ndusk, adusk = "adawn", "ndawn", "ndusk", "adusk"
     if twilight:
         hdr = (
-            f"{'date':10}  wd  {'adawn':8}  {'ndawn':8}  {'dawn':8}  {'rise':8}  "
-            f"{'set':8}  {'dusk':8}  {'ndusk':8}  {'adusk':8}  {'len':5}  "
-            f"{'moon↑':8}  {'moon↓':8}  ph"
+            f"{'date':10}  wd  {adawn:8}  {ndawn:8}  {dawn:8}  {rise:8}  "
+            f"{sset:8}  {dusk:8}  {ndusk:8}  {adusk:8}  {'len':5}  "
+            f"{moon_up:8}  {moon_dn:8}  ph"
         )
     else:
         hdr = (
-            f"{'date':10}  wd  {'dawn':8}  {'rise':8}  {'set':8}  {'dusk':8}  "
-            f"{'len':5}  {'moon↑':8}  {'moon↓':8}  ph"
+            f"{'date':10}  wd  {dawn:8}  {rise:8}  {sset:8}  {dusk:8}  "
+            f"{'len':5}  {moon_up:8}  {moon_dn:8}  ph"
         )
     lines = [title, hdr]
     for r in rows:

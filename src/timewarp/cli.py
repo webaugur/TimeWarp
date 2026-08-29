@@ -13,7 +13,13 @@ from typing import Sequence
 
 from timewarp import __version__
 from timewarp.astro import moon_info, seasons_for_year, sun_times
-from timewarp.ephem import BODIES, format_body
+from timewarp.ephem import BODIES
+from timewarp.ui import (
+    format_body,
+    icon,
+    sky_bin_label,
+    want_color,
+)
 from timewarp.rise import events_for_period
 from timewarp.calendar_view import year_calendar
 from timewarp.month_view import format_month_sheet, parse_year_month, sheet_for_month
@@ -147,20 +153,13 @@ Negative offsets after the date may need -- so they are not flags:
 
 
 def _want_color(args: argparse.Namespace | None = None) -> bool:
-    if args is not None and getattr(args, "no_color", False):
-        return False
-    if args is not None and getattr(args, "color", False):
-        return True
-    force = os.environ.get("FORCE_COLOR", "").strip().lower()
-    if force in {"1", "true", "yes"}:
-        return True
-    return sys.stdout.isatty()
+    return want_color(args)
 
 
 def _body_label(name: str, width: int = 0, *, color: bool | None = None) -> str:
     if color is None:
         color = _want_color()
-    return format_body(name, color=color, width=width)
+    return format_body(name, color=color, emoji=color, width=width)
 
 
 _PINK = "\033[38;2;255;128;192m"
@@ -170,11 +169,7 @@ _RESET = "\033[0m"
 
 
 def _stderr_color(args: argparse.Namespace | None = None) -> bool:
-    if args is not None and getattr(args, "no_color", False):
-        return False
-    if args is not None and getattr(args, "color", False):
-        return True
-    return sys.stderr.isatty()
+    return want_color(args, stream=sys.stderr)
 
 
 def _paint(text: str, on: str, *, enabled: bool) -> str:
@@ -189,10 +184,15 @@ def _echo_cached_command(
     color = _stderr_color(args)
     user = " ".join(quote_value(a) for a in raw)
     flags = format_pulled_cli(pulled, prog="")
-    head = _paint("timewarp", _WHITE, enabled=color)
+    pin = icon("pin", emoji=color)
+    cal = icon("calendar", emoji=color)
+    head = _paint(f"{pin} timewarp" if pin else "timewarp", _WHITE, enabled=color)
     mid = _paint(flags, _PINK, enabled=color)
     tail = _paint(user, _WHITE, enabled=color)
-    guess = _paint(assumed, _YELLOW, enabled=color) if assumed else ""
+    guess = ""
+    if assumed:
+        shown = f"{cal} {assumed}" if cal else assumed
+        guess = _paint(shown, _YELLOW, enabled=color)
     print(" ".join(p for p in (head, mid, tail, guess) if p), file=sys.stderr)
 
 
@@ -494,6 +494,7 @@ def cmd_calendar(args: argparse.Namespace) -> int:
         iso_weeks=args.iso,
         refresh=getattr(args, "refresh", False),
         region=getattr(args, "region", None),
+        emoji=_want_color(args),
     )
     if args.json:
         hols = [{"date": d.isoformat(), "name": n} for d, n in rows]
@@ -522,9 +523,14 @@ def cmd_holidays(args: argparse.Namespace) -> int:
                 "holidays": [{"date": d.isoformat(), "name": n} for d, n in rows],
             }
         )
-    print(f"Public holidays {year} ({country})")
+    em = _want_color(args)
+    cal = icon("calendar", emoji=em)
+    party = icon("holiday", emoji=em)
+    title = f"{cal} Public holidays {year} ({country})" if cal else f"Public holidays {year} ({country})"
+    print(title)
     for d, name in rows:
-        print(f"  {d.isoformat()}  {weekday_name(d):9}  {name}")
+        mark = f"{party} " if party else ""
+        print(f"  {d.isoformat()}  {weekday_name(d):9}  {mark}{name}")
     return 0
 
 
@@ -551,7 +557,7 @@ def cmd_month(args: argparse.Namespace) -> int:
             sset = format_clock(r.sunset) if r.sunset else "none"
             print(f"{r.date.isoformat()} {rise} {sset}")
         return 0
-    sys.stdout.write(format_month_sheet(rows, place, twilight=twilight))
+    sys.stdout.write(format_month_sheet(rows, place, twilight=twilight, emoji=_want_color(args)))
     return 0
 
 
@@ -572,9 +578,10 @@ def cmd_countdown(args: argparse.Namespace) -> int:
         print(result.iso())
         return 0
     when = "until" if result.sign >= 0 else "since"
+    clock = icon("clock", emoji=_want_color(args))
     print(f"Now:    {format_labeled(result.start)}")
     print(f"Target: {format_labeled(result.end)}")
-    print(f"Time {when}: {result.human()}")
+    print(f"{clock + ' ' if clock else ''}Time {when}: {result.human()}")
     print(f"ISO 8601: {result.iso()}")
     print(f"Total days: {result.total_days}")
     return 0
@@ -630,23 +637,27 @@ def cmd_sun(args: argparse.Namespace) -> int:
     if result.note:
         print(result.note)
 
-    def line(label: str, when, az=None) -> None:
-        head = f"{label}:"
+    em = _want_color(args)
+
+    def line(label: str, when, az=None, kind: str | None = None) -> None:
+        mark = icon(kind, emoji=em) if kind else ""
+        shown = f"{mark} {label}" if mark else label
+        head = f"{shown}:"
         if not when:
-            print(f"{head:20} —")
+            print(f"{head:22} —")
             return
         extra = f"  {_fmt_az(az)}" if az is not None else ""
-        print(f"{head:20} {format_clock(when)}{extra}")
+        print(f"{head:22} {format_clock(when)}{extra}")
 
-    line("Astronomical dawn", result.astronomical_dawn)
-    line("Nautical dawn", result.nautical_dawn)
-    line("Civil dawn", result.civil_dawn)
-    line("Sunrise", result.sunrise, result.sunrise_az)
-    line("Solar noon", result.solar_noon)
-    line("Sunset", result.sunset, result.sunset_az)
-    line("Civil dusk", result.civil_dusk)
-    line("Nautical dusk", result.nautical_dusk)
-    line("Astronomical dusk", result.astronomical_dusk)
+    line("Astronomical dawn", result.astronomical_dawn, kind="night")
+    line("Nautical dawn", result.nautical_dawn, kind="night")
+    line("Civil dawn", result.civil_dawn, kind="dawn")
+    line("Sunrise", result.sunrise, result.sunrise_az, kind="rise")
+    line("Solar noon", result.solar_noon, kind="noon")
+    line("Sunset", result.sunset, result.sunset_az, kind="set")
+    line("Civil dusk", result.civil_dusk, kind="dusk")
+    line("Nautical dusk", result.nautical_dusk, kind="dusk")
+    line("Astronomical dusk", result.astronomical_dusk, kind="night")
     if result.day_length_seconds is not None:
         print(f"{'Day length:':20} {result.to_dict()['day_length_iso8601']}")
     return 0
@@ -694,7 +705,10 @@ def cmd_seasons(args: argparse.Namespace) -> int:
             payload["place"] = place.name
             payload["tz"] = tz
         return _print_json(payload)
-    print(f"Astronomical seasons {year}")
+    em = _want_color(args)
+    sun = icon("solar", emoji=em)
+    head = f"{sun} Astronomical seasons {year}" if sun else f"Astronomical seasons {year}"
+    print(head)
     if place:
         print(f"Place: {place.name} ({tz})")
     for e in rows:
@@ -765,18 +779,22 @@ def cmd_passes(args: argparse.Namespace) -> int:
             mag = f"{p.magnitude:4.1f}" if p.magnitude is not None else " —"
             print(f"{p.sat.name:12} {format_instant(p.tca)}  {p.max_alt_deg:4.0f}°  {p.twilight}  {mag}")
         return 0
+    em = _want_color(args)
+    dish = icon("pass", emoji=em)
+    sat_h = f"{dish} sat" if dish else "sat"
     print(
-        f"{'sat':12}  {'aos':8}  {'max':8}  {'alt':5}  {'az':12}  {'los':8}  "
+        f"{sat_h:12}  {'aos':8}  {'max':8}  {'alt':5}  {'az':12}  {'los':8}  "
         f"{'sky':13}  {'moon':6}  {'sep':5}  {'mag':5}"
     )
     for p in rows:
         moon = f"{p.moon_alt_deg:5.0f}°" if p.moon_alt_deg > -0.5 else "   —"
         az = _fmt_az(p.az_tca).strip()
         mag = f"{p.magnitude:5.1f}" if p.magnitude is not None else "    —"
+        sky = sky_bin_label(p.twilight, emoji=em)
         print(
             f"{p.sat.name[:12]:12}  {format_clock(p.aos):8}  {format_clock(p.tca):8}  "
             f"{p.max_alt_deg:4.0f}°  {az:12}  {format_clock(p.los):8}  "
-            f"{p.twilight:13}  {moon:6}  {p.moon_sep_deg:4.0f}°  {mag}"
+            f"{sky:13}  {moon:6}  {p.moon_sep_deg:4.0f}°  {mag}"
         )
     return 0
 
@@ -896,7 +914,15 @@ def _print_sky_table(
     if multi_day:
         parts.append(f"{'date':10}")
     parts.append(f"{'body':12}")
-    parts.extend(f"{title:{clock_w}}" for title, _attr in cols)
+    for title, _attr in cols:
+        mark = ""
+        if color:
+            if title == "rise":
+                mark = icon("rise", emoji=True)
+            elif title == "set":
+                mark = icon("set", emoji=True)
+        shown = f"{mark}{title}" if mark else title
+        parts.append(f"{shown:{clock_w}}")
     print("  ".join(parts))
     for r in results:
         label = _body_label(r.body, width=12, color=color)
@@ -988,9 +1014,9 @@ def cmd_rise(args: argparse.Namespace) -> int:
             if len(results) == 1:
                 print(iso)
             elif len({x.date for x in results}) > 1:
-                print(f"{r.date.isoformat()} {_body_label(r.body, width=12, color=color)} {iso}")
+                print(f"{r.date.isoformat()} {_body_label(r.body, width=12, color=False)} {iso}")
             else:
-                print(f"{_body_label(r.body, width=12, color=color)} {iso}")
+                print(f"{_body_label(r.body, width=12, color=False)} {iso}")
         return 0
     if body_name and len({r.date for r in results}) == 1:
         _print_sky_detail(results[0], primary=primary, color=color, alt13=alt13, alt33=alt33)
@@ -1157,10 +1183,13 @@ def cmd_eclipse(args: argparse.Namespace) -> int:
     if not rows:
         print("No eclipses in catalog for that query (coverage is 1900–2199).")
         return 0
+    em = _want_color(args)
     print("Eclipses 1900–2199 (Meeus, Astronomical Algorithms ch. 54)")
     print("Greatest eclipse date is UTC. Types from γ and u.")
     for e in rows:
-        print(f"  {iso_range(e):21}  {e.kind:6}  {e.type}")
+        kind_icon = icon("solar" if e.kind == "solar" else "lunar", emoji=em)
+        kind = f"{kind_icon} {e.kind}" if kind_icon else e.kind
+        print(f"  {iso_range(e):21}  {kind:8}  {e.type}")
     return 0
 
 
@@ -1510,12 +1539,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 _echo_cached_command(pulled, raw, args)
         return args.func(args)
     except TimeWarpError as exc:
-        print(f"{PROG}: {exc}", file=sys.stderr)
+        mark = icon("error", emoji=want_color(stream=sys.stderr))
+        print(f"{PROG}: {mark + ' ' if mark else ''}{exc}", file=sys.stderr)
         return 2
     except BrokenPipeError:
         return 0
     except KeyboardInterrupt:
-        print(f"{PROG}: interrupted", file=sys.stderr)
+        mark = icon("error", emoji=want_color(stream=sys.stderr))
+        print(f"{PROG}: {mark + ' ' if mark else ''}interrupted", file=sys.stderr)
         return 130
     except SystemExit as exc:
         code = exc.code

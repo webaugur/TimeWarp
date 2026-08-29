@@ -9,7 +9,7 @@ description = "Local date calculators and sky almanac: durations, holidays, sun/
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "TimeWarp" }]
-dependencies = ["sgp4>=2.23", "holidays>=0.50"]
+dependencies = ["sgp4>=2.23", "holidays>=0.50", "rich>=13.7"]
 
 [project.scripts]
 timewarp = "timewarp.cli:main"

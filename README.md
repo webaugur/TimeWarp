@@ -2,7 +2,7 @@
 
 Command-line date calculators, including **negative** spans (end before start).
 
-Dates you **type** are **ISO 8601** only. There is no `MM/DD` vs `DD/MM`. Time of day is optional. `-q` and `--json` also print ISO 8601. Sky clocks (`sun`, rise/set, `moon` event times, `seasons`) use `HH:MM` plus a NATO zone letter (`17:52R`) instead of repeating the calendar date.
+Dates you **type** are **ISO 8601** only. There is no `MM/DD` vs `DD/MM`. Time of day is optional. `-q` and `--json` also print ISO 8601. Sky clocks (`sun`, rise/set, `moon` event times, `seasons`) use `HH:MM` plus a NATO zone letter (`17:52R`) instead of repeating the calendar date. On a color TTY, human output uses **emoji** (☀️ 🌙 ☄️ 🛰️ 🎉); `NO_COLOR`, `--no-color`, pipes, `-q`, and `--json` stay plain.
 
 ```
 timewarp add P7M6D
@@ -196,7 +196,7 @@ Rejected (on purpose): `04/31/2025`, `31-04-2025`, `April 31, 2025`.
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
-# holidays + satellite tests:  python3 -m venv .venv && .venv/bin/pip install -e .
+# holidays + satellite + Rich tables:  python3 -m venv .venv && .venv/bin/pip install -e .
 ```
 
 Inspired by timeanddate.com.
