@@ -29,6 +29,24 @@ class IconTests(unittest.TestCase):
         self.assertIn("🏙️", sky_bin_label("civil", emoji=True))
 
 
+class GridTests(unittest.TestCase):
+    def test_clocks_not_cropped(self):
+        from io import StringIO
+
+        from timewarp.ui import print_grid
+
+        buf = StringIO()
+        print_grid(
+            ["sat", "aos", "max"],
+            [["ISS (ZARYA)", "10:34R", "10:37R"]],
+            color=False,
+            file=buf,
+        )
+        text = buf.getvalue()
+        self.assertIn("10:34R", text)
+        self.assertIn("ISS (ZARYA)", text)
+
+
 class WantColorTests(unittest.TestCase):
     def test_no_color_env(self):
         import os
