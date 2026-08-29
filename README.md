@@ -2,7 +2,9 @@
 
 Command-line date calculators, including **negative** spans (end before start).
 
-Dates you **type** are **ISO 8601** only. There is no `MM/DD` vs `DD/MM`. Time of day is optional. `-q` and `--json` also print ISO 8601. Sky clocks (`sun`, rise/set, `moon` event times, `seasons`) use `HH:MM` plus a NATO zone letter (`17:52R`) instead of repeating the calendar date. On a color TTY, human output uses **emoji** (☀️ 🌙 ☄️ 🛰️ 🎉); `NO_COLOR`, `--no-color`, pipes, `-q`, and `--json` stay plain.
+Dates you **type** are **ISO 8601** only. There is no `MM/DD` vs `DD/MM`. Time of day is optional. `-q` and `--json` also print ISO 8601. Sky clocks (`sun`, rise/set, `moon` event times, `seasons`) use `HH:MM` plus a NATO zone letter (`17:52R`) instead of repeating the calendar date.
+
+On a color TTY, human output uses **emoji** (🌞 🌙 ☄️ 🛰️ 🎉). Labels and clocks are ASCII so columns line up; glyphs sit at the **end of the line**. Putting ☀️/🌞 in the same cell as a time is what shoved the rest of the row over (terminals disagree with East Asian Width on VS16 sequences). `NO_COLOR`, `--no-color`, pipes, `-q`, and `--json` stay plain (IAU symbols, no emoji). `--color` belongs after the subcommand (`sun --color …`); it is also accepted on the parent parser.
 
 ```
 timewarp add P7M6D
@@ -173,7 +175,7 @@ timewarp passes --catalog visual --city Indianapolis
 timewarp help rise
 ```
 
-`sun` and rise/set human output is local `HH:MM` plus a NATO zone letter for the UTC offset: **Q** = UTC−4 (EDT), **R** = UTC−5 (EST), **Z** = UTC, and so on (`17:52R`, `18:52Q`, `13:00Z`). The civil date is not repeated on every rise/set cell; it is on the command line (yellow if assumed) or in the date column of a multi-day range. `--13` / `--33` are geometric altitudes above the horizon (not twilight). If the body never reaches that height, the cell is `—`. `-q` and `--json` still use full ISO timestamps.
+`sun` and rise/set human output is local `HH:MM` plus a NATO zone letter for the UTC offset: **Q** = UTC−4 (EDT), **R** = UTC−5 (EST), **Z** = UTC, and so on (`17:52R`, `18:52Q`, `13:00Z`). Keys in a view share one right-aligned column (Rise/Transit/Set line up with Body/Date/Place). Clock extras (azimuth, ISO timestamps) are a third column sized only from those rows, so a long Place line cannot stretch `moon`’s next-quarter dates. The civil date is not repeated on every rise/set cell; it is on the command line (yellow if assumed) or in the date column of a multi-day range. `--13` / `--33` are geometric altitudes above the horizon (not twilight). If the body never reaches that height, the cell is `—`. `-q` and `--json` still use full ISO timestamps.
 
 `timewarp month YYYY-MM --city NAME` (alias `almanac`) is a printable month sheet: civil dawn/dusk (sun −6°), sunrise/set, day length, moonrise/set, illumination. `--twilight` adds nautical (−12°) and astronomical (−18°) columns. Omit the month to use this month (yellow on the reconstructed CLI).
 
@@ -202,7 +204,7 @@ Rejected (on purpose): `04/31/2025`, `31-04-2025`, `April 31, 2025`.
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
-# holidays + satellite + Rich tables:  python3 -m venv .venv && .venv/bin/pip install -e .
+# holidays + satellite + color:  python3 -m venv .venv && .venv/bin/pip install -e .
 ```
 
 Inspired by timeanddate.com.

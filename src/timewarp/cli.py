@@ -15,15 +15,14 @@ from timewarp import __version__
 from timewarp.astro import moon_info, seasons_for_year, sun_times
 from timewarp.ephem import BODIES
 from timewarp.ui import (
-    body_cell,
-    body_glyph,
+    body_mark,
     format_body,
-    glyph_pad,
     icon,
     marked,
     print_grid,
     print_kv,
-    sky_bin_label,
+    print_kv_blocks,
+    sky_mark,
     want_color,
 )
 from timewarp.rise import events_for_period
@@ -69,6 +68,7 @@ PROG = "timewarp"
 
 HELP = f"""\
 {PROG} — local date calculators (ISO 8601 in, ISO 8601 out)
+Human views: ASCII columns, emoji at the end of the line (`--color` after the subcommand).
 
 Phase 1 (dates and durations):
   count          Count Days     duration between two instants (signed)
@@ -166,6 +166,13 @@ def _body_label(name: str, width: int = 0, *, color: bool | None = None) -> str:
     if color is None:
         color = _want_color()
     return format_body(name, color=color, emoji=color, width=width)
+
+
+def _body_kv(name: str, *, color: bool) -> tuple:
+    """Body row: IAU in the value when plain; name + trailing emoji when color."""
+    if color:
+        return (body_mark(name, color=True), "Body:", name, "")
+    return ("", "Body:", format_body(name, color=False, emoji=False), "")
 
 
 _PINK = "\033[38;2;255;128;192m"
@@ -531,17 +538,8 @@ def cmd_holidays(args: argparse.Namespace) -> int:
         )
     em = _want_color(args)
     print(marked("calendar", f"Public holidays {year} ({country})", emoji=em))
-    party = icon("holiday", emoji=em)
-    grid = []
-    for d, name in rows:
-        grid.append([d.isoformat(), weekday_name(d), glyph_pad(party) if party else "", name])
-    print_grid(
-        ["date", "weekday", "", "holiday"],
-        grid,
-        color=em,
-        widths={2: 3} if party else None,
-        justify={2: "right"} if party else None,
-    )
+    grid = [[d.isoformat(), weekday_name(d), name] for d, name in rows]
+    print_grid(["date", "weekday", "holiday"], grid, color=em)
     return 0
 
 
@@ -657,12 +655,12 @@ def cmd_sun(args: argparse.Namespace) -> int:
         return format_clock(when), extra
 
     rows = [
-        ("Body:", body_cell("sun", color=em)),
+        _body_kv("sun", color=em),
         ("Date:", result.date.isoformat()),
         ("Place:", f"{result.place.name} ({result.place.lat}, {result.place.lon}) {result.place.tz}"),
     ]
     if result.note:
-        rows.append((marked("warn", "Note:", emoji=em), result.note))
+        rows.append((icon("warn", emoji=em), "Note:", result.note, ""))
     events = [
         (icon("night", emoji=em), "Astronomical dawn:", *clock_az(result.astronomical_dawn)),
         (icon("night", emoji=em), "Nautical dawn:", *clock_az(result.nautical_dawn)),
@@ -674,10 +672,10 @@ def cmd_sun(args: argparse.Namespace) -> int:
         (icon("dusk", emoji=em), "Nautical dusk:", *clock_az(result.nautical_dusk)),
         (icon("night", emoji=em), "Astronomical dusk:", *clock_az(result.astronomical_dusk)),
     ]
-    rows.extend(events)
+    footer: list[tuple] = []
     if result.day_length_seconds is not None:
-        rows.append(("Day length:", result.to_dict()["day_length_iso8601"]))
-    print_kv(rows, color=em)
+        footer.append(("Day length:", result.to_dict()["day_length_iso8601"]))
+    print_kv_blocks([rows, events, footer], color=em)
     return 0
 
 
@@ -695,24 +693,26 @@ def cmd_moon(args: argparse.Namespace) -> int:
             payload["tz"] = place.tz
         return _print_json(payload)
     em = _want_color(args)
-    rows = [
-        ("Body:", body_cell("moon", color=em)),
+    meta: list[tuple] = [
+        _body_kv("moon", color=em),
         ("Date:", result.date.isoformat()),
     ]
     if place:
-        rows.append(("Place:", f"{place.name} ({place.tz})"))
-    rows.extend(
+        meta.append(("Place:", f"{place.name} ({place.tz})"))
+    meta.extend(
         [
             ("Phase:", result.phase),
             ("Illumination:", f"{result.illumination:.1%}"),
             ("Age:", f"{result.age_days:.2f} days"),
-            ("Next new:", _clock_at(result.next_new, tz), format_instant(result.next_new)),
-            ("Next first Q:", _clock_at(result.next_first_quarter, tz), format_instant(result.next_first_quarter)),
-            ("Next full:", _clock_at(result.next_full, tz), format_instant(result.next_full)),
-            ("Next last Q:", _clock_at(result.next_last_quarter, tz), format_instant(result.next_last_quarter)),
         ]
     )
-    print_kv(rows, color=em)
+    quarters = [
+        ("Next new:", _clock_at(result.next_new, tz), format_instant(result.next_new)),
+        ("Next first Q:", _clock_at(result.next_first_quarter, tz), format_instant(result.next_first_quarter)),
+        ("Next full:", _clock_at(result.next_full, tz), format_instant(result.next_full)),
+        ("Next last Q:", _clock_at(result.next_last_quarter, tz), format_instant(result.next_last_quarter)),
+    ]
+    print_kv_blocks([meta, quarters], color=em)
     return 0
 
 
@@ -808,6 +808,7 @@ def cmd_passes(args: argparse.Namespace) -> int:
         return 0
     em = _want_color(args)
     grid = []
+    marks = []
     for p in rows:
         moon = f"{p.moon_alt_deg:.0f}°" if p.moon_alt_deg > -0.5 else "—"
         mag = f"{p.magnitude:.1f}" if p.magnitude is not None else "—"
@@ -819,17 +820,19 @@ def cmd_passes(args: argparse.Namespace) -> int:
                 f"{p.max_alt_deg:.0f}°",
                 _fmt_az(p.az_tca).strip(),
                 format_clock(p.los),
-                sky_bin_label(p.twilight, emoji=em),
+                p.twilight,
                 moon,
                 f"{p.moon_sep_deg:.0f}°",
                 mag,
             ]
         )
+        marks.append(sky_mark(p.twilight, color=em))
     print_grid(
         ["sat", "aos", "max", "alt", "az", "los", "sky", "moon", "sep", "mag"],
         grid,
         color=em,
         justify={3: "right", 7: "right", 8: "right", 9: "right"},
+        marks=marks,
     )
     return 0
 
@@ -873,7 +876,7 @@ def _print_sky_detail(
 
     pos = result.position
     meta = [
-        ("Body:", body_cell(result.body, color=color)),
+        _body_kv(result.body, color=color),
         ("Date:", f"{result.date.isoformat()}  ({result.place.tz})"),
         ("Place:", f"{result.place.name} ({result.place.lat}, {result.place.lon})"),
         ("RA/Dec (noon):", f"{pos.ra_deg:.3f}° / {pos.dec_deg:.3f}°"),
@@ -887,7 +890,6 @@ def _print_sky_detail(
         meta.append(("Magnitude:", f"{pos.magnitude:.2f}"))
     if result.note:
         meta.append((icon("warn", emoji=color), "Note:", result.note, ""))
-    print_kv(meta, color=color)
     after, before = _alt_rows(result, alt13, alt33)
     if primary == "set":
         order = [
@@ -918,7 +920,7 @@ def _print_sky_detail(
             extra = _fmt_az(az).strip() if label != "Transit" else f"alt {alt:.1f}°"
             ev_rows.append((mark, head, format_clock(when), extra))
             mark, head = "", ""
-    print_kv(ev_rows, color=color)
+    print_kv_blocks([meta, ev_rows], color=color)
 
 
 def _fmt_event_times(times) -> str:
@@ -959,35 +961,22 @@ def _print_sky_table(
     multi_day = len(dates) > 1
     cols = _sky_table_cols(primary, alt13, alt33)
     headers = []
-    glyph_i = 0
     if multi_day:
         headers.append("date")
-        glyph_i = 1
-    headers.extend(["", "body"])
-    for title, _attr in cols:
-        if title == "rise":
-            headers.append(marked("rise", "rise", emoji=color))
-        elif title == "set":
-            headers.append(marked("set", "set", emoji=color))
-        else:
-            headers.append(title)
+    headers.append("body")
+    headers.extend(title for title, _attr in cols)
     grid = []
+    marks = []
     for r in results:
         row = []
         if multi_day:
             row.append(r.date.isoformat())
-        row.append(body_glyph(r.body, color=color))
         row.append(r.body)
         for _title, attr in cols:
             row.append(_fmt_event_times(getattr(r, attr)))
         grid.append(row)
-    print_grid(
-        headers,
-        grid,
-        color=color,
-        widths={glyph_i: 3},
-        justify={glyph_i: "right"},
-    )
+        marks.append(body_mark(r.body, color=color))
+    print_grid(headers, grid, color=color, marks=marks)
 
 
 def _parse_sky_when(args: argparse.Namespace):
@@ -1242,16 +1231,11 @@ def cmd_eclipse(args: argparse.Namespace) -> int:
     print("Eclipses 1900–2199 (Meeus, Astronomical Algorithms ch. 54)")
     print("Greatest eclipse date is UTC. Types from γ and u.")
     grid = []
+    marks = []
     for e in rows:
-        mark = icon("solar" if e.kind == "solar" else "lunar", emoji=em)
-        grid.append([iso_range(e), glyph_pad(mark) if mark else "", e.kind, e.type])
-    print_grid(
-        ["date", "", "kind", "type"],
-        grid,
-        color=em,
-        widths={1: 3},
-        justify={1: "right"},
-    )
+        grid.append([iso_range(e), e.kind, e.type])
+        marks.append(icon("solar" if e.kind == "solar" else "lunar", emoji=em))
+    print_grid(["date", "kind", "type"], grid, color=em, marks=marks)
     return 0
 
 
@@ -1355,6 +1339,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("date", nargs="?", help="ISO 8601 date (default: today)")
     p.set_defaults(func=cmd_week)
 
+    def _add_place(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("--city", help="named city (New York, London, Tokyo, ...)")
+        parser.add_argument("--lat", type=float)
+        parser.add_argument("--lon", type=float)
+        parser.add_argument("--tz", help="IANA time zone")
+
+    def _add_color_flags(parser: argparse.ArgumentParser) -> None:
+        g = parser.add_mutually_exclusive_group()
+        g.add_argument("--color", action="store_true", help="color body symbols (even when piped)")
+        g.add_argument("--no-color", action="store_true", help="plain symbols, no ANSI color")
+
     p = sub.add_parser("calendar", help="Year calendar")
     _add_common(p)
     p.add_argument("year", nargs="?", type=int)
@@ -1362,6 +1357,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--region", help="subdivision: US-IN / Indiana; Nager ISO 3166-2 (DE-BY / BY / Bavaria). GB defaults to GB-ENG")
     p.add_argument("--refresh", action="store_true", help="refetch the holiday calendar")
     p.add_argument("--iso", action="store_true", help="Monday-first weeks (ISO)")
+    _add_color_flags(p)
     p.set_defaults(func=cmd_calendar)
 
     p = sub.add_parser("holidays", help="List public holidays for a country and year")
@@ -1373,23 +1369,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="subdivision: US-IN / Indiana; Nager ISO 3166-2 (DE-BY / BY / Bavaria). GB defaults to GB-ENG",
     )
     p.add_argument("--refresh", action="store_true", help="refetch the holiday calendar")
+    _add_color_flags(p)
     p.set_defaults(func=cmd_holidays)
 
     p = sub.add_parser("countdown", help="Signed time from now to a date")
     _add_common(p)
     p.add_argument("date", nargs="?", help="ISO 8601 date (default: today)")
+    _add_color_flags(p)
     p.set_defaults(func=cmd_countdown)
-
-    def _add_place(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--city", help="named city (New York, London, Tokyo, ...)")
-        parser.add_argument("--lat", type=float)
-        parser.add_argument("--lon", type=float)
-        parser.add_argument("--tz", help="IANA time zone")
-
-    def _add_color_flags(parser: argparse.ArgumentParser) -> None:
-        g = parser.add_mutually_exclusive_group()
-        g.add_argument("--color", action="store_true", help="color body symbols (even when piped)")
-        g.add_argument("--no-color", action="store_true", help="plain symbols, no ANSI color")
 
     def _add_cache_save_flags(parser: argparse.ArgumentParser) -> None:
         parser.add_argument("--city")
@@ -1566,6 +1553,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p)
     p.add_argument("year", nargs="?", type=int)
     p.add_argument("--limit", type=int)
+    _add_color_flags(p)
     p.set_defaults(func=cmd_eclipse)
 
     parser.tw_commands = dict(sub.choices)

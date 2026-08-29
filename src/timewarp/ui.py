@@ -1,6 +1,9 @@
-"""Human terminal output: Rich console, emoji when color is on.
+"""Human terminal output: ASCII columns, emoji only as trailing marks.
 
 -q / --json / NO_COLOR / --no-color / non-TTY stay plain text (IAU symbols, no emoji).
+Emoji in the same cell as a label or clock is what made ☀️/🌞 shove the rest of the
+line over; terminals disagree with East Asian Width on VS16 sequences. Measure
+columns with len() on ASCII and park the glyph after the aligned text.
 """
 
 from __future__ import annotations
@@ -97,28 +100,16 @@ def icon(name: str, *, emoji: bool) -> str:
 
 
 def marked(kind: str, label: str, *, emoji: bool) -> str:
-    """Always 'emoji label' with a space, or just label."""
+    """Title line: 'emoji label', or just label. Not for table cells."""
     mark = icon(kind, emoji=emoji)
-    return f"{glyph_pad(mark)} {label}" if mark else label
+    return f"{mark} {label}" if mark else label
 
 
 def sky_bin_label(name: str, *, emoji: bool) -> str:
     if not emoji:
         return name
     mark = SKY_BIN.get(name, "")
-    return f"{glyph_pad(mark)} {name}" if mark else name
-
-
-GLYPH_CELLS = 3
-
-
-def glyph_pad(text: str, width: int = GLYPH_CELLS) -> str:
-    """Pad a glyph to `width` cells. Never crop — cropping ☀️ made it overflow."""
-    raw = text or ""
-    n = _cell_len(raw)
-    if n >= width:
-        return raw
-    return raw + (" " * (width - n))
+    return f"{mark} {name}" if mark else name
 
 
 def _cell_len(text: str) -> int:
@@ -152,134 +143,111 @@ def format_body(name: str, *, color: bool = False, width: int = 0, emoji: bool |
     return _format_body_iau(name, color=color, width=width)
 
 
-def console(*, color: bool, file: TextIO | None = None):
-    """Rich Console; falls back to a tiny printer if rich is missing."""
-    stream = file if file is not None else sys.stdout
-    try:
-        from rich.console import Console
-
-        return Console(
-            file=stream,
-            force_terminal=color,
-            no_color=not color,
-            highlight=False,
-            emoji=False,
-            color_system="truecolor" if color else None,
-        )
-    except ImportError:
-        return _PlainConsole(stream)
-
-
-class _PlainConsole:
-    def __init__(self, file: TextIO) -> None:
-        self.file = file
-
-    def print(self, *args, **kwargs) -> None:
-        print(*args, file=self.file)
-
-
-def _console(*, color: bool, file: TextIO | None = None):
-    stream = file if file is not None else sys.stdout
-    try:
-        from rich.console import Console
-
-        return Console(
-            file=stream,
-            force_terminal=True,
-            no_color=not color,
-            highlight=False,
-            emoji=False,
-            color_system="truecolor" if color else None,
-            width=160,
-            height=50,
-            legacy_windows=False,
-        )
-    except ImportError:
-        return _PlainConsole(stream)
-
-
-def body_glyph(name: str, *, color: bool):
-    """Padded body glyph (Rich Text if colored)."""
-    key = name.strip().lower()
-    symbol = (EMOJI.get(key) if color else SYMBOLS.get(key)) or SYMBOLS.get(key) or ""
-    padded = glyph_pad(symbol)
+def body_mark(name: str, *, color: bool) -> str:
+    """Trailing body emoji, tinted. Empty when color is off."""
     if not color:
-        return padded
+        return ""
+    key = name.strip().lower()
+    symbol = EMOJI.get(key) or ""
+    if not symbol:
+        return ""
     rgb = SYMBOL_RGB.get(key)
-    try:
-        from rich.text import Text
-    except ImportError:
-        return padded
-    text = Text(padded)
-    if symbol and rgb:
-        r, g, b = rgb
-        text.stylize(f"bold rgb({r},{g},{b})")
-    return text
+    if rgb:
+        return _color_symbol(symbol, rgb)
+    return symbol
 
 
-def body_cell(name: str, *, color: bool):
-    """Body glyph + name as a Rich Text (cell-width safe) or plain string."""
-    key = name.strip().lower()
+def sky_mark(name: str, *, color: bool) -> str:
     if not color:
-        return _format_body_iau(name, color=False)
-    try:
-        from rich.text import Text
-    except ImportError:
-        return format_body(name, color=True, emoji=True)
-    text = Text.assemble(body_glyph(name, color=True), " ", key)
-    return text
+        return ""
+    return SKY_BIN.get(name, "")
 
 
-def print_kv(rows: list[tuple], *, color: bool, file: TextIO | None = None) -> None:
-    """Icon (2 cells) · right-aligned key · value. Optional extra joins the value.
-
-    A 4-tuple is (icon, key, value, extra). Shorter tuples have no icon.
-    """
-    try:
-        from rich.table import Table
-    except ImportError:
-        for row in rows:
-            icon_s, key, val, extra = _kv_parts(row)
-            print(f"{glyph_pad(icon_s)} {key:22} {val}  {extra}".rstrip(), file=file or sys.stdout)
-        return
-    table = Table(
-        show_header=False,
-        box=None,
-        pad_edge=False,
-        padding=(0, 1),
-        collapse_padding=False,
-        show_edge=False,
-        expand=False,
-    )
-    table.add_column("g", no_wrap=True, min_width=GLYPH_CELLS, justify="right")
-    table.add_column("k", no_wrap=True, justify="right")
-    table.add_column("v", no_wrap=True)
-    for row in rows:
-        icon_s, key, val, extra = _kv_parts(row)
-        v = "" if val is None else val
-        if extra not in (None, ""):
-            if isinstance(v, str):
-                v = f"{v}   {extra}"
-        g = glyph_pad(icon_s)
-        try:
-            from rich.text import Text
-
-            if color and icon_s:
-                g = Text(g)
-        except ImportError:
-            pass
-        table.add_row(g, str(key), v)
-    _console(color=color, file=file).print(table)
+def _plain(cell: object) -> str:
+    if cell is None:
+        return ""
+    plain = getattr(cell, "plain", None)
+    if isinstance(plain, str):
+        return plain
+    return str(cell)
 
 
-def _kv_parts(row: tuple) -> tuple[str, str, object, object]:
+def _kv_parts(row: tuple) -> tuple[str, str, str, str]:
+    """(mark, key, val, extra). 2-tuple = no icon; 4-tuple = icon first."""
     if len(row) >= 4:
-        return str(row[0] or ""), str(row[1]), row[2], row[3]
-    if len(row) == 3:
-        return "", str(row[0]), row[1], row[2]
-    if len(row) == 2:
-        return "", str(row[0]), row[1], ""
-    return "", str(row[0]) if row else "", "", ""
+        mark, key, val, extra = row[0], row[1], row[2], row[3]
+    elif len(row) == 3:
+        mark, key, val, extra = "", row[0], row[1], row[2]
+    elif len(row) == 2:
+        mark, key, val, extra = "", row[0], row[1], ""
+    else:
+        mark, key, val, extra = "", row[0] if row else "", "", ""
+    return str(mark or ""), str(key), _plain(val), _plain(extra)
+
+
+def _emit(line: str, mark: str = "", *, file: TextIO | None) -> None:
+    out = file or sys.stdout
+    if mark:
+        # Keep value/extra padding so trailing glyphs share a column.
+        print(f"{line}  {mark}", file=out)
+        return
+    print(line.rstrip(), file=out)
+
+
+def print_kv(
+    rows: list[tuple],
+    *,
+    color: bool,
+    file: TextIO | None = None,
+    key_width: int | None = None,
+) -> int:
+    """Right-aligned keys, left-aligned values/extras. Emoji trail the line.
+
+    Extra (azimuth, ISO timestamp) is a third column sized only from rows that
+    have one, so a long Place line cannot shove Next-full dates across the
+    screen. Pass key_width to line colons up across several blocks.
+    """
+    parsed = [_kv_parts(row) for row in rows]
+    return _print_kv_parsed(parsed, color=color, file=file, key_width=key_width)
+
+
+def print_kv_blocks(
+    blocks: list[list[tuple]],
+    *,
+    color: bool,
+    file: TextIO | None = None,
+) -> None:
+    """Several kv blocks that share one key column (colons line up)."""
+    parsed_blocks = [[_kv_parts(row) for row in block] for block in blocks if block]
+    key_w = 0
+    for parsed in parsed_blocks:
+        key_w = max(key_w, max((len(k) for _m, k, _v, _x in parsed), default=0))
+    for parsed in parsed_blocks:
+        _print_kv_parsed(parsed, color=color, file=file, key_width=key_w)
+
+
+def _print_kv_parsed(
+    parsed: list[tuple[str, str, str, str]],
+    *,
+    color: bool,
+    file: TextIO | None,
+    key_width: int | None,
+) -> int:
+    key_w = max(key_width or 0, max((len(k) for _m, k, _v, _x in parsed), default=0))
+    extra_rows = [(v, x) for _m, _k, v, x in parsed if x]
+    val_w = max((len(v) for v, _x in extra_rows), default=0)
+    extra_w = max((len(x) for _v, x in extra_rows), default=0)
+    align_marks = extra_w > 0 and sum(1 for m, _k, _v, _x in parsed if m) >= 2
+    for mark, key, val, extra in parsed:
+        if extra_w:
+            core = f"{key:>{key_w}}  {val:<{val_w}}  {extra:<{extra_w}}"
+        else:
+            core = f"{key:>{key_w}}  {val}"
+        glyph = mark if color else ""
+        if glyph and not align_marks:
+            core = core.rstrip()
+        _emit(core, glyph, file=file)
+    return key_w
 
 
 def print_grid(
@@ -290,36 +258,41 @@ def print_grid(
     file: TextIO | None = None,
     justify: dict[int, str] | None = None,
     widths: dict[int, int] | None = None,
+    marks: list[str] | None = None,
 ) -> None:
-    """Header + rows; Rich measures emoji so columns stay lined up."""
-    try:
-        from rich import box
-        from rich.table import Table
-    except ImportError:
-        print("  ".join(headers), file=file or sys.stdout)
-        for row in rows:
-            print("  ".join(str(c) for c in row), file=file or sys.stdout)
-        return
-    table = Table(
-        box=box.SIMPLE,
-        show_header=True,
-        header_style="bold" if color else None,
-        pad_edge=False,
-        padding=(0, 1),
-        collapse_padding=False,
-        show_edge=False,
-        expand=False,
-    )
+    """ASCII columns (len() == cells) plus optional trailing emoji per row."""
     just = justify or {}
     wmap = widths or {}
-    for i, header in enumerate(headers):
-        extra = {}
-        if i in wmap:
-            extra["min_width"] = wmap[i]
-        table.add_column(
-            header, justify=just.get(i, "left"), no_wrap=True, overflow="fold", **extra
-        )
+    n = len(headers)
+    plain_rows = []
     for row in rows:
-        cells = list(row) + [""] * (len(headers) - len(row))
-        table.add_row(*cells[: len(headers)])
-    _console(color=color, file=file).print(table)
+        cells = [_plain(c) for c in row]
+        if len(cells) < n:
+            cells.extend([""] * (n - len(cells)))
+        plain_rows.append(cells[:n])
+    col_w = []
+    for i in range(n):
+        w = len(headers[i])
+        for row in plain_rows:
+            w = max(w, len(row[i]))
+        if i in wmap:
+            w = max(w, wmap[i])
+        col_w.append(w)
+
+    def fmt_row(cells: list[str]) -> str:
+        parts = []
+        for i, cell in enumerate(cells):
+            if just.get(i) == "right":
+                parts.append(cell.rjust(col_w[i]))
+            else:
+                parts.append(cell.ljust(col_w[i]))
+        return "  ".join(parts)
+
+    header_line = fmt_row(headers)
+    _emit(header_line, file=file)
+    _emit("─" * len(header_line), file=file)
+    for i, row in enumerate(plain_rows):
+        mark = ""
+        if color and marks and i < len(marks):
+            mark = marks[i]
+        _emit(fmt_row(row), mark, file=file)
