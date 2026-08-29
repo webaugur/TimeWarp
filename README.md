@@ -121,16 +121,16 @@ Workdays skip Saturday and Sunday by default. `--weekend Fri,Sat` changes that.
 
 | Screen | Command | What you get now |
 |---|---|---|
-| Create calendar | `timewarp calendar [YEAR]` | Year grid, US holidays marked, ISO dates listed |
+| Create calendar | `timewarp calendar [YEAR]` | Year grid; US: python-holidays (federal or `--region` state); others: Nager.Date |
 | Month sheet | `timewarp month [YYYY-MM] --city NAME` | One row per day: civil twilight, sunrise/set, moonrise/set, illumination |
 | Countdown to Any Date | `timewarp countdown [DATE]` | Signed remaining time (negative if the date is past) |
 | Sunrise & Sunset | `timewarp sun --city "New York" [DATE]` | Rise, noon, set, twilight, azimuth, day length |
 | Moon phases | `timewarp moon [DATE]` | Phase, illumination, next new/full/quarter *times* |
 | Seasons | `timewarp seasons [YEAR]` | March/September equinox, June/December solstice |
-| Rise / set | `timewarp rise --city "New York" [DATE]` | Rise times as `HH:MM` + zone letter; `--13` / `--33` add +13°/+33° after rise and before set |
+| Rise / set | `timewarp rise --city "New York" [DATE]` | Rise times as `HH:MM` + zone letter; `--13` / `--33` add +13°/+33° after rise and before set. Named extras plus SBDB ids (`433`) |
 | Set | `timewarp set --city "New York" [DATE]` | Set times for the same bodies and period |
 | Eclipse lookup | `timewarp eclipse [YEAR]` | Solar and lunar eclipses 1900–2199 |
-| Satellite passes | `timewarp passes [SAT] [DATE] --city NAME` | AOS / max / LOS vs twilight and the moon (TLE / SGP4) |
+| Satellite passes | `timewarp passes [SAT] [DATE] --city NAME` | AOS / max / LOS vs twilight, moon, and visual mag; `--catalog visual` (Celestrak groups) |
 | Help | `timewarp help [COMMAND]` | Overview, or one command’s usage (`--help` works too) |
 
 ```bash
@@ -196,7 +196,7 @@ Rejected (on purpose): `04/31/2025`, `31-04-2025`, `April 31, 2025`.
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
-# satellite tests need sgp4:  python3 -m venv .venv && .venv/bin/pip install -e .
+# holidays + satellite tests:  python3 -m venv .venv && .venv/bin/pip install -e .
 ```
 
 Inspired by timeanddate.com.

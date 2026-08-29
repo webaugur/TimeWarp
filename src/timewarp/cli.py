@@ -1349,7 +1349,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_color_flags(p)
     p.set_defaults(func=cmd_seasons)
 
-    p = sub.add_parser("passes", help="Satellite passes vs twilight and the moon")
+    p = sub.add_parser("passes", help="Satellite passes vs twilight, moon, and visual mag")
     _add_common(p)
     p.add_argument("sat", nargs="?", help="name or catalog number (default: ISS)")
     p.add_argument("date", nargs="?", help="ISO 8601 start date (default: today)")
