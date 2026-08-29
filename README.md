@@ -122,7 +122,7 @@ Workdays skip Saturday and Sunday by default. `--weekend Fri,Sat` changes that. 
 | Seasons | `timewarp seasons [YEAR]` | March/September equinox, June/December solstice |
 | Rise / set | `timewarp rise --city "New York" [DATE]` | Rise times as `HH:MM` + zone letter; `--13` / `--33` add +13°/+33° after rise and before set |
 | Set | `timewarp set --city "New York" [DATE]` | Set times for the same bodies and period |
-| Eclipse lookup | `timewarp eclipse [YEAR]` | Solar and lunar eclipses 2021–2030 |
+| Eclipse lookup | `timewarp eclipse [YEAR]` | Solar and lunar eclipses 1900–2199 |
 | Satellite passes | `timewarp passes [SAT] [DATE] --city NAME` | AOS / max / LOS vs twilight and the moon (TLE / SGP4) |
 | Help | `timewarp help [COMMAND]` | Overview, or one command’s usage (`--help` works too) |
 
@@ -147,6 +147,10 @@ timewarp set venus --city London
 timewarp moonset --city London 2026-08-28
 timewarp rise --all --city "New York" 2026-07-04
 timewarp eclipse 2026
+timewarp eclipse 1919
+timewarp rise ceres --city London
+timewarp rise io --city London
+timewarp rise 67p --city London
 timewarp passes --city Indianapolis
 timewarp passes ISS --city "New York" --tle tests/data/iss.tle 2019-12-10
 timewarp help rise
@@ -154,13 +158,13 @@ timewarp help rise
 
 `sun` and rise/set human output is local `HH:MM` plus a NATO zone letter for the UTC offset: **Q** = UTC−4 (EDT), **R** = UTC−5 (EST), **Z** = UTC, and so on (`17:52R`, `18:52Q`, `13:00Z`). The civil date is not repeated on every rise/set cell; it is on the command line (yellow if assumed) or in the date column of a multi-day range. `--13` / `--33` are geometric altitudes above the horizon (not twilight). If the body never reaches that height, the cell is `—`. `-q` and `--json` still use full ISO timestamps.
 
-Eclipse rows are from Fred Espenak / NASA GSFC decade tables (2021–2030). `timewarp sun` uses the NOAA/USNO algorithm for rise, set, and civil/nautical/astronomical twilight (sun at −6°/−12°/−18°). `timewarp rise` and moon **event times** (new, quarters, full) use Paul Schlyter’s low-precision ephemeris (about 1–2 arcminutes). The named moon **phase** and illumination on `moon` still come from synodic age. `timewarp seasons` is when solar ecliptic longitude hits 0°/90°/180°/270°.
+Eclipse rows are computed with Meeus, *Astronomical Algorithms* ch. 54 (UTC date of greatest eclipse, 1900–2199). `timewarp sun` uses the NOAA/USNO algorithm for rise, set, and civil/nautical/astronomical twilight (sun at −6°/−12°/−18°). `timewarp rise` and moon **event times** (new, quarters, full) use Paul Schlyter’s low-precision ephemeris (about 1–2 arcminutes). The named moon **phase** and illumination on `moon` still come from synodic age. `timewarp seasons` is when solar ecliptic longitude hits 0°/90°/180°/270°.
 
-`timewarp rise` and `timewarp set` share the same bodies: sun, moon, mercury, venus, mars, jupiter, saturn, uranus, neptune, pluto (Pluto only 1800–2100). With no body name they list every object that is above the horizon during the local day (today if you omit the date). Pass a second ISO date for an inclusive range. `--all` also prints bodies that stay below the horizon. Comets, asteroids, and planetary moons need extra orbital data and are deferred.
+`timewarp rise` and `timewarp set` default to the sun, moon, and planets (Pluto only 1800–2100). Named extras: asteroids `ceres` `pallas` `juno` `vesta` `hygiea` `eros`; comets `halley` `encke` `tempel1` `67p`; moons `io` `europa` `ganymede` `callisto` `titan` `triton` `phobos` `deimos`. With no body name they list every default object above the horizon that local day. Pass a second ISO date for an inclusive range. `--all` also prints default bodies that stay below the horizon. Asteroids/comets are two-body Keplerian; moons are circular about the parent — good for rise/set, not spacecraft navigation.
 
 `timewarp passes` uses SGP4 on a NORAD TLE (`pip install sgp4`, already in this project’s `.venv`). Default satellite is ISS. Without `--tle`, elements are fetched from Celestrak and cached under `~/.cache/timewarp/tle` for 24 hours. Each pass lists acquisition, max elevation (time, altitude, azimuth), loss, the **sky bin** at max (day / civil / nautical / astronomical / night), moon altitude, and angular **separation from the moon** so you can line a pass up with twilight and lunar alignments. `--min-elev` defaults to 10°. A TLE more than 14 days from the requested date prints a warning.
 
-Later work: other country holiday packs; live timers; a 1900–2199 eclipse atlas; more satellite catalogs / visual magnitude. Comets, asteroids, and planetary moons still need extra orbital data.
+Later work: other country holiday packs; live timers; more satellite catalogs / visual magnitude.
 
 ## Input formats
 

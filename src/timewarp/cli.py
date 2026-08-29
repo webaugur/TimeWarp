@@ -81,7 +81,7 @@ Phase 2 (basic):
   load           print stored flags (scriptable)
   unload         drop stored flags
   cache          same as save/load/unload, nested: cache save|load|unload
-  eclipse        solar/lunar eclipses 2021–2030 (NASA / Espenak)
+  eclipse        solar/lunar eclipses 1900–2199 (Meeus)
   help           this overview, or help for one command (--help works too)
 
 Examples:
@@ -111,6 +111,10 @@ Examples:
   {PROG} set venus --city London
   {PROG} moonset --city London 2026-08-28
   {PROG} eclipse 2026
+  {PROG} eclipse 1919
+  {PROG} rise ceres --city London
+  {PROG} rise io --city London
+  {PROG} rise halley --city London
   {PROG} cities
   {PROG} save --city Indianapolis
   {PROG} load
@@ -1055,16 +1059,16 @@ def cmd_eclipse(args: argparse.Namespace) -> int:
     if args.json:
         return _print_json(
             {
-                "source": "Eclipse Predictions by Fred Espenak, NASA GSFC",
-                "coverage": "2021-01-01/2030-12-31",
+                "source": "Meeus, Astronomical Algorithms, ch. 54",
+                "coverage": "1900-01-01/2199-12-31",
                 "eclipses": [eclipse_to_dict(e) for e in rows],
             }
         )
     if not rows:
-        print("No eclipses in catalog for that query (coverage is 2021–2030).")
+        print("No eclipses in catalog for that query (coverage is 1900–2199).")
         return 0
-    print("Eclipse Predictions by Fred Espenak, NASA GSFC")
-    print("Catalog coverage: 2021-01-01/2030-12-31")
+    print("Eclipses 1900–2199 (Meeus, Astronomical Algorithms ch. 54)")
+    print("Greatest eclipse date is UTC. Types from γ and u.")
     for e in rows:
         print(f"  {iso_range(e):21}  {e.kind:6}  {e.type}")
     return 0
@@ -1248,7 +1252,7 @@ def build_parser() -> argparse.ArgumentParser:
         parser.add_argument(
             "body",
             nargs="?",
-            help="moon, sun, mercury, venus, mars, jupiter, saturn, uranus, neptune, pluto (default: all visible)",
+            help="planet, moon, asteroid (ceres, vesta, …), comet (halley, 67p, …), or planetary moon (io, titan, …); default: visible planets",
         )
         parser.add_argument("date", nargs="?", help="ISO 8601 start date (default: today)")
         parser.add_argument("end", nargs="?", help="ISO 8601 end date (inclusive)")
@@ -1340,7 +1344,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_cache_unload_flags(p)
     p.set_defaults(func=cmd_cache, cache_cmd="unload")
 
-    p = sub.add_parser("eclipse", help="Eclipse catalog 2021–2030")
+    p = sub.add_parser("eclipse", help="Eclipse catalog 1900–2199")
     _add_common(p)
     p.add_argument("year", nargs="?", type=int)
     p.add_argument("--limit", type=int)

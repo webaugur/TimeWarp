@@ -92,6 +92,12 @@ class EclipseTests(unittest.TestCase):
         rows = list_eclipses(year=2027)
         self.assertTrue(any(e.date.isoformat() == "2027-02-06" and e.type == "annular" for e in rows))
 
+    def test_coverage_1900_and_2199(self):
+        self.assertTrue(list_eclipses(year=1900))
+        self.assertTrue(list_eclipses(year=2199))
+        self.assertFalse(list_eclipses(year=1899))
+        self.assertFalse(list_eclipses(year=2200))
+
 
 if __name__ == "__main__":
     unittest.main()

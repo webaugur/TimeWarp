@@ -1,7 +1,8 @@
 """Low-precision solar-system positions (Schlyter / van Flandern–Pulkkinen).
 
-Good to about 1–2 arcminutes in the 20th–21st centuries — enough for rise/set.
-Not a JPL ephemeris. Comets, asteroids, and planetary moons are out of scope.
+Planets: about 1–2 arcminutes in the 20th–21st centuries — enough for rise/set.
+Asteroids and comets: two-body Keplerian elements (J2000-ish). Planetary moons:
+circular orbits about the parent. Not a JPL ephemeris.
 """
 
 from __future__ import annotations
@@ -24,6 +25,10 @@ BODIES = (
     "neptune",
     "pluto",
 )
+ASTEROIDS = ("ceres", "pallas", "juno", "vesta", "hygiea", "eros")
+COMETS = ("halley", "encke", "tempel1", "67p")
+MOONS = ("io", "europa", "ganymede", "callisto", "titan", "triton", "phobos", "deimos")
+ALL_BODIES = BODIES + ASTEROIDS + COMETS + MOONS
 
 # IAU/astronomical symbols (Unicode Miscellaneous Symbols).
 SYMBOLS = {
@@ -37,6 +42,24 @@ SYMBOLS = {
     "uranus": "♅",
     "neptune": "♆",
     "pluto": "♇",
+    "ceres": "⚳",
+    "pallas": "⚴",
+    "juno": "⚵",
+    "vesta": "⚶",
+    "hygiea": "⚙",
+    "eros": "♡",
+    "halley": "☄",
+    "encke": "☄",
+    "tempel1": "☄",
+    "67p": "☄",
+    "io": "I",
+    "europa": "E",
+    "ganymede": "G",
+    "callisto": "C",
+    "titan": "T",
+    "triton": "t",
+    "phobos": "p",
+    "deimos": "d",
 }
 
 # Approximate visual colors for a color terminal (not albedo-accurate).
@@ -51,6 +74,24 @@ SYMBOL_RGB = {
     "uranus": (110, 220, 228),
     "neptune": (56, 96, 230),
     "pluto": (186, 150, 118),
+    "ceres": (168, 164, 156),
+    "pallas": (160, 150, 140),
+    "juno": (176, 156, 132),
+    "vesta": (196, 176, 140),
+    "hygiea": (150, 160, 150),
+    "eros": (200, 120, 100),
+    "halley": (180, 220, 255),
+    "encke": (180, 220, 255),
+    "tempel1": (180, 220, 255),
+    "67p": (180, 220, 255),
+    "io": (255, 200, 80),
+    "europa": (220, 210, 190),
+    "ganymede": (186, 170, 140),
+    "callisto": (120, 110, 100),
+    "titan": (210, 160, 80),
+    "triton": (180, 190, 200),
+    "phobos": (160, 130, 110),
+    "deimos": (150, 130, 110),
 }
 
 _RESET = "\033[0m"
@@ -148,6 +189,34 @@ _PLANET = {
         "M": (260.2471, 0.005995147),
     },
 }
+
+# Keplerian heliocentric, J2000. a AU, angles deg, n deg/day, M0 at d=0 (2000 Jan 0.0 TT≈UT).
+_MINOR = {
+    "ceres": {"a": 2.766, "e": 0.0758, "i": 10.59, "N": 80.31, "w": 73.47, "M0": 95.99, "n": 0.214023},
+    "pallas": {"a": 2.772, "e": 0.2306, "i": 34.85, "N": 173.09, "w": 310.05, "M0": 144.96, "n": 0.213737},
+    "juno": {"a": 2.670, "e": 0.2562, "i": 12.99, "N": 169.87, "w": 247.93, "M0": 257.69, "n": 0.2258},
+    "vesta": {"a": 2.362, "e": 0.0887, "i": 7.14, "N": 103.81, "w": 151.74, "M0": 169.42, "n": 0.271439},
+    "hygiea": {"a": 3.142, "e": 0.1116, "i": 3.83, "N": 283.20, "w": 312.32, "M0": 241.69, "n": 0.1767},
+    "eros": {"a": 1.458, "e": 0.2229, "i": 10.83, "N": 304.40, "w": 178.82, "M0": 320.60, "n": 0.559},
+    # Periodic comets: M=0 at perihelion (d_peri is Schlyter d).
+    "halley": {"a": 17.834, "e": 0.9671, "i": 162.26, "N": 58.42, "w": 111.33, "M0": 0.0, "n": 0.01296, "d_peri": -5072.56},
+    "encke": {"a": 2.215, "e": 0.8483, "i": 11.78, "N": 334.57, "w": 186.55, "M0": 0.0, "n": 0.2981, "d_peri": 91.0},
+    "tempel1": {"a": 3.122, "e": 0.509, "i": 10.47, "N": 68.76, "w": 179.19, "M0": 0.0, "n": 0.1786, "d_peri": 2005.0},
+    "67p": {"a": 3.463, "e": 0.641, "i": 7.04, "N": 50.15, "w": 12.80, "M0": 0.0, "n": 0.1529, "d_peri": 1670.0},
+}
+
+# Circular about parent. a_km, n deg/day, L0 at d=0, i to ecliptic (deg).
+_MOON = {
+    "io": {"parent": "jupiter", "a_km": 421800, "n": 203.4889538, "L0": 106.08, "i": 3.1},
+    "europa": {"parent": "jupiter", "a_km": 671100, "n": 101.3747246, "L0": 175.73, "i": 3.4},
+    "ganymede": {"parent": "jupiter", "a_km": 1070400, "n": 50.3176092, "L0": 120.56, "i": 3.1},
+    "callisto": {"parent": "jupiter", "a_km": 1882700, "n": 21.5710715, "L0": 84.44, "i": 3.0},
+    "titan": {"parent": "saturn", "a_km": 1221870, "n": 22.577015, "L0": 261.6, "i": 0.3},
+    "triton": {"parent": "neptune", "a_km": 354800, "n": -61.2573, "L0": 70.0, "i": 157.0},
+    "phobos": {"parent": "mars", "a_km": 9376, "n": 1128.844, "L0": 40.0, "i": 1.1},
+    "deimos": {"parent": "mars", "a_km": 23463, "n": 285.162, "L0": 80.0, "i": 1.8},
+}
+_KM_PER_AU = 149597870.7
 
 
 def sind(x: float) -> float:
@@ -454,6 +523,31 @@ def _pluto(d: float) -> tuple[float, float, float]:
     return rev(lon), lat, r
 
 
+def _kepler_heliocentric(name: str, d: float) -> tuple[float, float, float]:
+    el = _MINOR[name]
+    e = min(el["e"], 0.99)
+    m = rev(el["M0"] + el["n"] * (d - el.get("d_peri", 0.0)))
+    ecc = eccentric_anomaly(m, e)
+    v, r = _true_anomaly_r(el["a"], e, ecc)
+    return _ecliptic_xyz(r, el["N"], el["i"], el["w"], v)
+
+
+def _moon_heliocentric(name: str, d: float) -> tuple[float, float, float]:
+    el = _MOON[name]
+    parent = el["parent"]
+    if parent == "pluto":
+        plon, plat, pr = _pluto(d)
+    else:
+        plon, plat, pr, _m = _planet_heliocentric(parent, d)
+    phx = pr * cosd(plon) * cosd(plat)
+    phy = pr * sind(plon) * cosd(plat)
+    phz = pr * sind(plat)
+    a = el["a_km"] / _KM_PER_AU
+    arg = rev(el["L0"] + el["n"] * d)
+    mx, my, mz = _ecliptic_xyz(a, 0.0, el["i"], 0.0, arg)
+    return phx + mx, phy + my, phz + mz
+
+
 def _magnitude(name: str, r: float, R: float, fv: float, sun: _Sun, ecl_lon: float, ecl_lat: float, d: float) -> float | None:
     logterm = 5.0 * math.log10(max(1e-12, r * R))
     if name == "mercury":
@@ -481,9 +575,7 @@ def _magnitude(name: str, r: float, R: float, fv: float, sun: _Sun, ecl_lon: flo
 
 
 def position(body: str, dt: datetime) -> SkyPos:
-    name = body.strip().lower()
-    if name not in BODIES:
-        raise TimeWarpError(f"unknown body {body!r}; known: {', '.join(BODIES)}")
+    name = normalize_body(body)
     if name == "pluto":
         year = dt.astimezone(timezone.utc).year
         if not 1800 <= year <= 2100:
@@ -538,19 +630,33 @@ def position(body: str, dt: datetime) -> SkyPos:
             heliocentric_au=sun.r,
         )
 
-    if name == "pluto":
+    if name in _MINOR:
+        xh, yh, zh = _kepler_heliocentric(name, d)
+        rhel = math.hypot(xh, yh, zh)
+        lon, lat, _rh = _lon_lat_r(xh, yh, zh)
+    elif name in _MOON:
+        xh, yh, zh = _moon_heliocentric(name, d)
+        rhel = math.hypot(xh, yh, zh)
+        lon, lat, _rh = _lon_lat_r(xh, yh, zh)
+    elif name == "pluto":
         lon, lat, r = _pluto(d)
+        xh = r * cosd(lon) * cosd(lat)
+        yh = r * sind(lon) * cosd(lat)
+        zh = r * sind(lat)
+        rhel = r
     else:
         lon, lat, r, _M = _planet_heliocentric(name, d)
+        xh = r * cosd(lon) * cosd(lat)
+        yh = r * sind(lon) * cosd(lat)
+        zh = r * sind(lat)
+        rhel = r
 
-    xh = r * cosd(lon) * cosd(lat)
-    yh = r * sind(lon) * cosd(lat)
-    zh = r * sind(lat)
+    # heliocentric ecliptic → geocentric (sun.xs, sun.ys are ecliptic)
     xg = xh + sun.xs
     yg = yh + sun.ys
     zg = zh
     ra, dec, dist = _equatorial(xg, yg, zg, sun.ecl)
-    s, Rgeo, rh = sun.r, dist, r
+    s, Rgeo, rh = sun.r, dist, rhel
     elong = acosd((s * s + Rgeo * Rgeo - rh * rh) / (2.0 * s * Rgeo)) if s * Rgeo else None
     fv = acosd((rh * rh + Rgeo * Rgeo - s * s) / (2.0 * rh * Rgeo)) if rh * Rgeo else 0.0
     phase = (1.0 + cosd(fv)) / 2.0
@@ -596,11 +702,25 @@ def altitude_azimuth(pos: SkyPos, dt: datetime, lat: float, lon: float) -> tuple
 
 
 def normalize_body(name: str) -> str:
-    key = name.strip().lower()
-    aliases = {"sol": "sun", "luna": "moon", "terra": "earth"}
+    key = name.strip().lower().replace(" ", "")
+    aliases = {
+        "sol": "sun",
+        "luna": "moon",
+        "terra": "earth",
+        "1p": "halley",
+        "1p/halley": "halley",
+        "2p": "encke",
+        "2p/encke": "encke",
+        "9p": "tempel1",
+        "tempel": "tempel1",
+        "tempel-1": "tempel1",
+        "67p/churyumov-gerasimenko": "67p",
+        "churyumov": "67p",
+        "1ceres": "ceres",
+    }
     key = aliases.get(key, key)
     if key == "earth":
         raise TimeWarpError("Earth is the observer, not a rise/set body")
-    if key not in BODIES:
-        raise TimeWarpError(f"unknown body {name!r}; known: {', '.join(BODIES)}")
+    if key not in ALL_BODIES:
+        raise TimeWarpError(f"unknown body {name!r}; known: {', '.join(ALL_BODIES)}")
     return key

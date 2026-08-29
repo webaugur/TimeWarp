@@ -108,6 +108,17 @@ class CliPhase2Tests(unittest.TestCase):
         self.assertIn("solar", out)
         self.assertIn("2026-08-27/2026-08-28", out)
         self.assertIn("lunar", out)
+        self.assertIn("1900", out)
+
+    def test_eclipse_1919(self):
+        code, out, err = run("eclipse", "1919")
+        self.assertEqual(code, 0, err)
+        self.assertIn("solar", out)
+
+    def test_rise_ceres(self):
+        code, out, err = run("rise", "ceres", "--city", "London", "2026-07-04")
+        self.assertEqual(code, 0, err)
+        self.assertIn("ceres", out)
 
     def test_moon(self):
         code, out, err = run("moon", "2026-08-28")

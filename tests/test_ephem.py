@@ -122,7 +122,19 @@ class RiseTests(unittest.TestCase):
 
         place = lookup_place("UTC")
         with self.assertRaises(TimeWarpError):
-            events_for_day("ceres", datetime(2026, 7, 4).date(), place)
+            events_for_day("sedna", datetime(2026, 7, 4).date(), place)
+
+    def test_ceres_and_io_return(self):
+        from timewarp.places import lookup_place
+        from timewarp.rise import events_for_day
+
+        place = lookup_place("London")
+        for body in ("ceres", "io", "halley"):
+            p = position(body, TEST)
+            self.assertEqual(p.body, body)
+            self.assertTrue(0 <= p.ra_deg < 360)
+            ev = events_for_day(body, datetime(2026, 7, 4).date(), place)
+            self.assertTrue(ev.rises or ev.sets or ev.note)
 
     def test_period_two_days(self):
         from datetime import date
