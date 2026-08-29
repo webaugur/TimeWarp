@@ -94,6 +94,19 @@ class CliPhase1Tests(unittest.TestCase):
 
 
 class CliPhase2Tests(unittest.TestCase):
+    def test_month_sheet_july_2026(self):
+        code, out, err = run("month", "2026-07", "--city", "Indianapolis")
+        self.assertEqual(code, 0, err)
+        self.assertIn("2026-07-01", out)
+        self.assertIn("2026-07-31", out)
+        self.assertIn("dawn", out)
+        self.assertIn("moon↑", out)
+        self.assertRegex(out, r"2026-07-04\s+\w{2}\s+\d{2}:\d{2}Q")
+        self.assertNotIn("adawn", out)
+        code, out, err = run("month", "2026-07", "--city", "Indianapolis", "--twilight")
+        self.assertEqual(code, 0, err)
+        self.assertIn("adawn", out)
+
     def test_calendar_2026(self):
         code, out, err = run("calendar", "2026")
         self.assertEqual(code, 0, err)
@@ -364,6 +377,11 @@ class HelpAndErrorTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("timewarp:", err)
         self.assertNotIn("Traceback", err)
+
+    def test_month_bad_value(self):
+        code, _, err = run("month", "2026-13", "--city", "Indianapolis")
+        self.assertEqual(code, 2)
+        self.assertIn("month", err.lower())
 
     def test_help_unknown_topic(self):
         code, _, err = run("help", "frobnicate")

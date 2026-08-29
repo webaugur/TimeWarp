@@ -16,6 +16,7 @@ from timewarp.astro import moon_info, seasons_for_year, sun_times
 from timewarp.ephem import BODIES, format_body
 from timewarp.rise import events_for_period
 from timewarp.calendar_view import year_calendar
+from timewarp.month_view import format_month_sheet, parse_year_month, sheet_for_month
 from timewarp.duration import OffsetError, apply_offset, parse_offset, span
 from timewarp.eclipses import eclipse_to_dict, iso_range, list_eclipses
 from timewarp.errors import TimeWarpError
@@ -67,6 +68,7 @@ Phase 1 (dates and durations):
 
 Phase 2 (basic):
   calendar       year calendar with optional US holidays
+  month          month sheet of sun/moon/twilight times
   countdown      signed time from now to a date (negative if past)
   sun            sunrise / sunset, twilight, azimuth
   moon           moon phase and next new/full/quarter times
@@ -95,6 +97,8 @@ Examples:
   {PROG} weekday 2026-07-04
   {PROG} week 2026-07-04
   {PROG} calendar 2026 --country US
+  {PROG} month 2026-07 --city Indianapolis
+  {PROG} month --city Indianapolis --twilight
   {PROG} countdown 2026-12-31T00:00:00
   {PROG} sun --city "New York" 2026-07-04
   {PROG} moon 2026-08-28 --city Indianapolis
@@ -469,6 +473,33 @@ def cmd_calendar(args: argparse.Namespace) -> int:
             hols = [{"date": d.isoformat(), "name": n} for d, n in us_federal_holidays(year)]
         return _print_json({"year": year, "country": args.country, "holidays": hols, "text": text})
     sys.stdout.write(text)
+    return 0
+
+
+def cmd_month(args: argparse.Namespace) -> int:
+    year, month, assumed = parse_year_month(getattr(args, "when", None))
+    place = _place_from_args(args)
+    _maybe_echo_command(args, f"{year:04d}-{month:02d}" if assumed else None)
+    rows = sheet_for_month(year, month, place)
+    twilight = bool(getattr(args, "twilight", False))
+    if args.json:
+        return _print_json(
+            {
+                "year": year,
+                "month": month,
+                "place": place.name,
+                "tz": place.tz,
+                "twilight": twilight,
+                "days": [r.to_dict() for r in rows],
+            }
+        )
+    if args.quiet:
+        for r in rows:
+            rise = format_clock(r.sunrise) if r.sunrise else "none"
+            sset = format_clock(r.sunset) if r.sunset else "none"
+            print(f"{r.date.isoformat()} {rise} {sset}")
+        return 0
+    sys.stdout.write(format_month_sheet(rows, place, twilight=twilight))
     return 0
 
 
@@ -1209,6 +1240,18 @@ def build_parser() -> argparse.ArgumentParser:
                 help=f"unload --{flag}",
             )
 
+    p = sub.add_parser("month", aliases=["almanac"], help="Month sheet of sun, moon, and twilight times")
+    _add_common(p)
+    p.add_argument("when", nargs="?", help="YYYY-MM (default: this month)")
+    p.add_argument(
+        "--twilight",
+        action="store_true",
+        help="also print nautical and astronomical dawn/dusk",
+    )
+    _add_place(p)
+    _add_color_flags(p)
+    p.set_defaults(func=cmd_month)
+
     p = sub.add_parser("sun", help="Sunrise, sunset, twilight, and azimuth")
     _add_common(p)
     p.add_argument("date", nargs="?", help="ISO 8601 date (default: today)")
@@ -1376,6 +1419,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             cmd_week,
             cmd_countdown,
             cmd_calendar,
+            cmd_month,
         }
         if args.func is not cmd_cache:
             pulled = _apply_cache(args, raw)

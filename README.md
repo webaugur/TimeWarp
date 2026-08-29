@@ -116,6 +116,7 @@ Workdays skip Saturday and Sunday by default. `--weekend Fri,Sat` changes that. 
 | Screen | Command | What you get now |
 |---|---|---|
 | Create calendar | `timewarp calendar [YEAR]` | Year grid, US holidays marked, ISO dates listed |
+| Month sheet | `timewarp month [YYYY-MM] --city NAME` | One row per day: civil twilight, sunrise/set, moonrise/set, illumination |
 | Countdown to Any Date | `timewarp countdown [DATE]` | Signed remaining time (negative if the date is past) |
 | Sunrise & Sunset | `timewarp sun --city "New York" [DATE]` | Rise, noon, set, twilight, azimuth, day length |
 | Moon phases | `timewarp moon [DATE]` | Phase, illumination, next new/full/quarter *times* |
@@ -129,6 +130,8 @@ Workdays skip Saturday and Sunday by default. `--weekend Fri,Sat` changes that. 
 ```bash
 timewarp calendar 2026 --country US
 timewarp calendar 2026 --iso          # Monday-first weeks
+timewarp month 2026-07 --city Indianapolis
+timewarp month --city Indianapolis --twilight
 timewarp countdown 2026-12-31
 timewarp sun --city "New York" 2026-07-04
 timewarp sun --lat 40.7128 --lon -74.0060 --tz America/New_York
@@ -158,6 +161,8 @@ timewarp help rise
 
 `sun` and rise/set human output is local `HH:MM` plus a NATO zone letter for the UTC offset: **Q** = UTC−4 (EDT), **R** = UTC−5 (EST), **Z** = UTC, and so on (`17:52R`, `18:52Q`, `13:00Z`). The civil date is not repeated on every rise/set cell; it is on the command line (yellow if assumed) or in the date column of a multi-day range. `--13` / `--33` are geometric altitudes above the horizon (not twilight). If the body never reaches that height, the cell is `—`. `-q` and `--json` still use full ISO timestamps.
 
+`timewarp month YYYY-MM --city NAME` (alias `almanac`) is a printable month sheet: civil dawn/dusk (sun −6°), sunrise/set, day length, moonrise/set, illumination. `--twilight` adds nautical (−12°) and astronomical (−18°) columns. Omit the month to use this month (yellow on the reconstructed CLI).
+
 Eclipse rows are computed with Meeus, *Astronomical Algorithms* ch. 54 (UTC date of greatest eclipse, 1900–2199). `timewarp sun` uses the NOAA/USNO algorithm for rise, set, and civil/nautical/astronomical twilight (sun at −6°/−12°/−18°). `timewarp rise` and moon **event times** (new, quarters, full) use Paul Schlyter’s low-precision ephemeris (about 1–2 arcminutes). The named moon **phase** and illumination on `moon` still come from synodic age. `timewarp seasons` is when solar ecliptic longitude hits 0°/90°/180°/270°.
 
 `timewarp rise` and `timewarp set` default to the sun, moon, and planets (Pluto only 1800–2100). Named extras: asteroids `ceres` `pallas` `juno` `vesta` `hygiea` `eros`; comets `halley` `encke` `tempel1` `67p`; moons `io` `europa` `ganymede` `callisto` `titan` `triton` `phobos` `deimos`. With no body name they list every default object above the horizon that local day. Pass a second ISO date for an inclusive range. `--all` also prints default bodies that stay below the horizon. Asteroids/comets are two-body Keplerian; moons are circular about the parent — good for rise/set, not spacecraft navigation.
@@ -170,6 +175,7 @@ Later work: other country holiday packs; live timers; more satellite catalogs / 
 
 Accepted:
 
+- `YYYY-MM` (month sheet)
 - `YYYY-MM-DD`
 - `YYYY-MM-DDTHH:MM[:SS][Z|+HH:MM]` (space instead of `T` is also accepted)
 - `YYYY-Www-D` (ISO week date)
