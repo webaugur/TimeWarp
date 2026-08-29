@@ -7,8 +7,9 @@ name = "timewarp"
 version = "1.0.0"
 description = "Local date calculators and sky almanac: durations, holidays, sun/moon/planets, SBDB bodies, and satellite passes."
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.11"
-authors = [{ name = "TimeWarp" }]
+authors = [{ name = "David L Norris", email = "dave@webaugur.com" }]
 dependencies = ["sgp4>=2.23", "holidays>=0.50", "rich>=13.7"]
 
 [project.scripts]

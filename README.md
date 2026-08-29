@@ -207,4 +207,4 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 # holidays + satellite + color:  python3 -m venv .venv && .venv/bin/pip install -e .
 ```
 
-Inspired by timeanddate.com.
+MIT License — see `LICENSE`. Inspired by timeanddate.com.
