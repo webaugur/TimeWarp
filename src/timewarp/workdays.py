@@ -55,6 +55,8 @@ def count_workdays(
     weekend: frozenset[int] | None = None,
     holidays: set[date] | None = None,
     holiday_country: str | None = None,
+    holiday_refresh: bool = False,
+    holiday_region: str | None = None,
 ) -> WorkdaySpan:
     """Count workdays the same way Count Days counts calendar days: half-open, signed.
 
@@ -68,7 +70,9 @@ def count_workdays(
     if holidays is None:
         holidays = set()
         if holiday_country:
-            holidays = holidays_in_range(a, b, holiday_country)
+            holidays = holidays_in_range(
+                a, b, holiday_country, refresh=holiday_refresh, region=holiday_region
+            )
             names = (holiday_country,)
     else:
         names = ("custom",)
@@ -129,6 +133,8 @@ def add_workdays(
     weekend: frozenset[int] | None = None,
     holidays: set[date] | None = None,
     holiday_country: str | None = None,
+    holiday_refresh: bool = False,
+    holiday_region: str | None = None,
 ) -> date:
     d = as_date(start)
     weekend = weekend if weekend is not None else parse_weekend(None)
@@ -142,7 +148,15 @@ def add_workdays(
 
     def ensure(year: int) -> None:
         if holiday_country and year not in loaded:
-            holidays.update(holidays_in_range(date(year, 1, 1), date(year, 12, 31), holiday_country))
+            holidays.update(
+                holidays_in_range(
+                    date(year, 1, 1),
+                    date(year, 12, 31),
+                    holiday_country,
+                    refresh=holiday_refresh,
+                    region=holiday_region,
+                )
+            )
             loaded.add(year)
 
     ensure(d.year)

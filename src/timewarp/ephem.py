@@ -1,8 +1,9 @@
 """Low-precision solar-system positions (Schlyter / van Flandern–Pulkkinen).
 
 Planets: about 1–2 arcminutes in the 20th–21st centuries — enough for rise/set.
-Asteroids and comets: two-body Keplerian elements (J2000-ish). Planetary moons:
-circular orbits about the parent. Not a JPL ephemeris.
+Asteroids and comets: two-body Keplerian from JPL SBDB osculating elements
+(cached; frozen table if SBDB is unreachable). Planetary moons: circular
+orbits about the parent. Not a full JPL numerical ephemeris.
 """
 
 from __future__ import annotations
@@ -190,7 +191,8 @@ _PLANET = {
     },
 }
 
-# Keplerian heliocentric, J2000. a AU, angles deg, n deg/day, M0 at d=0 (2000 Jan 0.0 TT≈UT).
+# Frozen Keplerian heliocentric fallback if JPL SBDB is unreachable.
+# a AU, angles deg, n deg/day, M0 at d=0 (2000 Jan 0.0 TT≈UT); comets M=0 at d_peri.
 _MINOR = {
     "ceres": {"a": 2.766, "e": 0.0758, "i": 10.59, "N": 80.31, "w": 73.47, "M0": 95.99, "n": 0.214023},
     "pallas": {"a": 2.772, "e": 0.2306, "i": 34.85, "N": 173.09, "w": 310.05, "M0": 144.96, "n": 0.213737},
@@ -524,7 +526,18 @@ def _pluto(d: float) -> tuple[float, float, float]:
 
 
 def _kepler_heliocentric(name: str, d: float) -> tuple[float, float, float]:
-    el = _MINOR[name]
+    from timewarp.jpl import load_elements
+
+    sb = load_elements(name)
+    if sb is not None:
+        e = min(sb.e, 0.99)
+        m = rev(sb.M0 + sb.n * (d - sb.d_epoch))
+        ecc = eccentric_anomaly(m, e)
+        v, r = _true_anomaly_r(sb.a, e, ecc)
+        return _ecliptic_xyz(r, sb.N, sb.i, sb.w, v)
+    el = _MINOR.get(name)
+    if el is None:
+        raise TimeWarpError(f"no Kepler elements for {name}")
     e = min(el["e"], 0.99)
     m = rev(el["M0"] + el["n"] * (d - el.get("d_peri", 0.0)))
     ecc = eccentric_anomaly(m, e)
@@ -630,7 +643,7 @@ def position(body: str, dt: datetime) -> SkyPos:
             heliocentric_au=sun.r,
         )
 
-    if name in _MINOR:
+    if name in ASTEROIDS or name in COMETS:
         xh, yh, zh = _kepler_heliocentric(name, d)
         rhel = math.hypot(xh, yh, zh)
         lon, lat, _rh = _lon_lat_r(xh, yh, zh)

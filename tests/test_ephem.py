@@ -125,16 +125,21 @@ class RiseTests(unittest.TestCase):
             events_for_day("sedna", datetime(2026, 7, 4).date(), place)
 
     def test_ceres_and_io_return(self):
+        from unittest.mock import patch
+
+        from timewarp.errors import TimeWarpError
         from timewarp.places import lookup_place
         from timewarp.rise import events_for_day
 
         place = lookup_place("London")
-        for body in ("ceres", "io", "halley"):
-            p = position(body, TEST)
-            self.assertEqual(p.body, body)
-            self.assertTrue(0 <= p.ra_deg < 360)
-            ev = events_for_day(body, datetime(2026, 7, 4).date(), place)
-            self.assertTrue(ev.rises or ev.sets or ev.note)
+        # Frozen Kepler table if SBDB is unreachable (no live JPL in this test).
+        with patch("timewarp.jpl.fetch_sbdb", side_effect=TimeWarpError("offline")):
+            for body in ("ceres", "io", "halley"):
+                p = position(body, TEST)
+                self.assertEqual(p.body, body)
+                self.assertTrue(0 <= p.ra_deg < 360)
+                ev = events_for_day(body, datetime(2026, 7, 4).date(), place)
+                self.assertTrue(ev.rises or ev.sets or ev.note)
 
     def test_period_two_days(self):
         from datetime import date

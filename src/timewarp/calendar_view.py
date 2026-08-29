@@ -5,24 +5,30 @@ from __future__ import annotations
 import calendar
 from datetime import date
 
-from timewarp.holidays import us_federal_holidays
+from timewarp.holidays import holidays_for_year
 from timewarp.iso import MONTHS, weekday_name
 
 # Screenshot uses Sunday-first US layout; --iso switches to Monday-first.
 
 
-def year_calendar(year: int, *, country: str = "US", iso_weeks: bool = False) -> str:
+def year_calendar(
+    year: int,
+    *,
+    country: str = "US",
+    iso_weeks: bool = False,
+    refresh: bool = False,
+    region: str | None = None,
+) -> str:
     first = calendar.MONDAY if iso_weeks else calendar.SUNDAY
     cal = calendar.Calendar(firstweekday=first)
     holiday_map = {}
-    country_key = country.strip().upper() if country else ""
-    if country_key in {"US", "USA", "UNITED STATES"}:
-        holiday_map = {d: name for d, name in us_federal_holidays(year)}
-        title_country = "United States"
-    elif not country_key:
+    country_key = country.strip() if country else ""
+    if not country_key:
         title_country = "no holidays"
     else:
-        title_country = f"{country} (holidays not bundled; showing no holidays)"
+        rows, _note = holidays_for_year(year, country_key, refresh=refresh, region=region)
+        holiday_map = {d: name for d, name in rows}
+        title_country = country_key.strip().upper()
 
     header_days = (
         ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]

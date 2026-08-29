@@ -14,6 +14,14 @@ _TEST_CACHE = Path(tempfile.gettempdir()) / "timewarp-tests-cache.json"
 _TEST_CACHE.unlink(missing_ok=True)
 os.environ["TIMEWARP_CACHE"] = str(_TEST_CACHE)
 
+# Named asteroid/comet elements from fixtures, not a live JPL fetch.
+_TEST_SBDB = Path(tempfile.gettempdir()) / "timewarp-tests-sbdb"
+_TEST_SBDB.mkdir(parents=True, exist_ok=True)
+_CERES_FIXTURE = Path(__file__).resolve().parent / "data" / "sbdb-ceres.json"
+if _CERES_FIXTURE.is_file():
+    (_TEST_SBDB / "ceres.json").write_bytes(_CERES_FIXTURE.read_bytes())
+os.environ["TIMEWARP_SBDB_DIR"] = str(_TEST_SBDB)
+
 
 def run(*argv: str) -> tuple[int, str, str]:
     out = io.StringIO()
@@ -81,6 +89,25 @@ class CliPhase1Tests(unittest.TestCase):
         code, out, _ = run("week", "-q", "2026-07-04")
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), "2026-W27-6")
+
+    def test_holidays_gb_from_cache(self):
+        src = Path(__file__).resolve().parent / "data" / "holidays-GB-2026.json"
+        tmp = tempfile.TemporaryDirectory()
+        try:
+            dest = Path(tmp.name) / "GB-2026.json"
+            dest.write_bytes(src.read_bytes())
+            old = os.environ.get("TIMEWARP_HOLIDAY_DIR")
+            os.environ["TIMEWARP_HOLIDAY_DIR"] = tmp.name
+            code, out, err = run("holidays", "2026", "--country", "GB")
+            self.assertEqual(code, 0, err)
+            self.assertIn("Christmas Day", out)
+            self.assertIn("2026-12-28", out)
+        finally:
+            if old is None:
+                os.environ.pop("TIMEWARP_HOLIDAY_DIR", None)
+            else:
+                os.environ["TIMEWARP_HOLIDAY_DIR"] = old
+            tmp.cleanup()
 
     def test_add_workdays(self):
         code, out, _ = run("add-workdays", "-q", "2026-07-03", "1")

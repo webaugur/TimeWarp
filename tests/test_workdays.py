@@ -7,19 +7,19 @@ from timewarp.workdays import add_workdays, count_workdays
 
 class HolidayTests(unittest.TestCase):
     def test_2026_us_observed(self):
-        names = {name: d for d, name in us_federal_holidays(2026)}
-        self.assertEqual(names["New Year's Day"], date(2026, 1, 1))
-        self.assertEqual(names["Martin Luther King Jr. Day"], date(2026, 1, 19))
-        self.assertEqual(names["Presidents' Day"], date(2026, 2, 16))
-        self.assertEqual(names["Memorial Day"], date(2026, 5, 25))
-        self.assertEqual(names["Juneteenth National Independence Day"], date(2026, 6, 19))
+        by_date = {d: n for d, n in us_federal_holidays(2026)}
+        self.assertIn("New Year", by_date[date(2026, 1, 1)])
+        self.assertIn("Martin Luther King", by_date[date(2026, 1, 19)])
+        self.assertIn("Washington", by_date[date(2026, 2, 16)])  # Presidents' Day
+        self.assertIn("Memorial", by_date[date(2026, 5, 25)])
+        self.assertIn("Juneteenth", by_date[date(2026, 6, 19)])
         # 4 July 2026 is Saturday → observed Friday 3 July
-        self.assertEqual(names["Independence Day"], date(2026, 7, 3))
-        self.assertEqual(names["Labor Day"], date(2026, 9, 7))
-        self.assertEqual(names["Columbus Day"], date(2026, 10, 12))
-        self.assertEqual(names["Veterans Day"], date(2026, 11, 11))
-        self.assertEqual(names["Thanksgiving Day"], date(2026, 11, 26))
-        self.assertEqual(names["Christmas Day"], date(2026, 12, 25))
+        self.assertIn("Independence", by_date[date(2026, 7, 3)])
+        self.assertIn("Labor", by_date[date(2026, 9, 7)])
+        self.assertIn("Columbus", by_date[date(2026, 10, 12)])
+        self.assertIn("Veterans", by_date[date(2026, 11, 11)])
+        self.assertIn("Thanksgiving", by_date[date(2026, 11, 26)])
+        self.assertIn("Christmas", by_date[date(2026, 12, 25)])
 
 
 class WorkdayCountTests(unittest.TestCase):

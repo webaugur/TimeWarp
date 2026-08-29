@@ -20,7 +20,7 @@ from timewarp.month_view import format_month_sheet, parse_year_month, sheet_for_
 from timewarp.duration import OffsetError, apply_offset, parse_offset, span
 from timewarp.eclipses import eclipse_to_dict, iso_range, list_eclipses
 from timewarp.errors import TimeWarpError
-from timewarp.holidays import parse_weekend
+from timewarp.holidays import holidays_for_year, parse_weekend
 from timewarp.iso import (
     as_date,
     format_clock,
@@ -61,13 +61,14 @@ Phase 1 (dates and durations):
   count          Count Days     duration between two instants (signed)
   add            Add Days       add years/months/weeks/days/time
   sub            Add Days       subtract the same offset
-  workdays       Workdays       count Mon–Fri (signed; optional US holidays)
+  workdays       Workdays       count Mon–Fri (signed; optional holidays)
   add-workdays   Add Workdays   add or subtract business days
   weekday        Weekday        ISO weekday for a date
   week           Week №         ISO 8601 week date (YYYY-Www-D)
 
 Phase 2 (basic):
-  calendar       year calendar with optional US holidays
+  calendar       year calendar with optional holidays
+  holidays       list public holidays (US: python-holidays; others: Nager.Date cache)
   month          month sheet of sun/moon/twilight times
   countdown      signed time from now to a date (negative if past)
   sun            sunrise / sunset, twilight, azimuth
@@ -93,10 +94,14 @@ Examples:
   {PROG} add 2026-07-04T09:00:00 P7M6DT3H
   {PROG} count 2026-05-31 2025-04-30
   {PROG} workdays 2026-01-01 2026-01-31 --holidays US
+  {PROG} workdays 2026-01-01 2026-01-31 --holidays GB
   {PROG} add-workdays 2026-07-04 10 --holidays US
   {PROG} weekday 2026-07-04
   {PROG} week 2026-07-04
   {PROG} calendar 2026 --country US
+  {PROG} calendar 2026 --country GB
+  {PROG} holidays 2026 --country GB
+  {PROG} holidays 2026 --country US --region CA
   {PROG} month 2026-07 --city Indianapolis
   {PROG} month --city Indianapolis --twilight
   {PROG} countdown 2026-12-31T00:00:00
@@ -350,6 +355,8 @@ def cmd_workdays(args: argparse.Namespace) -> int:
         include_end=args.include_end,
         weekend=weekend,
         holiday_country=args.holidays,
+        holiday_refresh=getattr(args, "refresh", False),
+        holiday_region=getattr(args, "region", None),
     )
     if args.json:
         return _print_json(result.to_dict())
@@ -383,7 +390,14 @@ def cmd_add_workdays(args: argparse.Namespace) -> int:
         n = parse_workday_count(count_tok)
     except ValueError as exc:
         raise TimeWarpError(str(exc)) from exc
-    result = add_workdays(start, n, holiday_country=args.holidays, weekend=parse_weekend(args.weekend))
+    result = add_workdays(
+        start,
+        n,
+        holiday_country=args.holidays,
+        weekend=parse_weekend(args.weekend),
+        holiday_refresh=getattr(args, "refresh", False),
+        holiday_region=getattr(args, "region", None),
+    )
     if args.json:
         return _print_json(
             {
@@ -464,15 +478,49 @@ def cmd_calendar(args: argparse.Namespace) -> int:
     _maybe_echo_command(args, str(year) if assumed else None)
     if not 1 <= year <= 9999:
         raise TimeWarpError(f"year {year} is out of range 1..9999")
-    text = year_calendar(year, country=args.country, iso_weeks=args.iso)
+    country = args.country or "US"
+    rows, note = holidays_for_year(
+        year, country, refresh=getattr(args, "refresh", False), region=getattr(args, "region", None)
+    )
+    if note:
+        print(note, file=sys.stderr)
+    text = year_calendar(
+        year,
+        country=country,
+        iso_weeks=args.iso,
+        refresh=getattr(args, "refresh", False),
+        region=getattr(args, "region", None),
+    )
     if args.json:
-        from timewarp.holidays import us_federal_holidays
-
-        hols = []
-        if args.country.strip().upper() in {"US", "USA", "UNITED STATES"}:
-            hols = [{"date": d.isoformat(), "name": n} for d, n in us_federal_holidays(year)]
-        return _print_json({"year": year, "country": args.country, "holidays": hols, "text": text})
+        hols = [{"date": d.isoformat(), "name": n} for d, n in rows]
+        return _print_json({"year": year, "country": country, "holidays": hols, "text": text})
     sys.stdout.write(text)
+    return 0
+
+
+def cmd_holidays(args: argparse.Namespace) -> int:
+    assumed = args.year is None
+    year = date.today().year if args.year is None else args.year
+    if not 1 <= year <= 9999:
+        raise TimeWarpError(f"year {year} is out of range 1..9999")
+    country = args.country or "US"
+    _maybe_echo_command(args, str(year) if assumed else None)
+    rows, note = holidays_for_year(
+        year, country, refresh=getattr(args, "refresh", False), region=getattr(args, "region", None)
+    )
+    if note:
+        print(note, file=sys.stderr)
+    if args.json:
+        return _print_json(
+            {
+                "year": year,
+                "country": country,
+                "holidays": [{"date": d.isoformat(), "name": n} for d, n in rows],
+            }
+        )
+    print(f"Public holidays {year} ({country})")
+    for d, name in rows:
+        print(f"  {d.isoformat()}  {weekday_name(d):9}  {name}")
     return 0
 
 
@@ -1127,8 +1175,13 @@ def _add_work_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--holidays",
         metavar="COUNTRY",
-        help="skip public holidays (US is the bundled calendar)",
+        help="skip public holidays (US: python-holidays; others: Nager.Date ISO country code)",
     )
+    p.add_argument(
+        "--region",
+        help="subdivision: US-IN / IN / Indiana, or GB-SCT; GB defaults to GB-ENG",
+    )
+    p.add_argument("--refresh", action="store_true", help="refetch the holiday calendar")
 
 
 class _Parser(argparse.ArgumentParser):
@@ -1200,9 +1253,22 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("calendar", help="Year calendar")
     _add_common(p)
     p.add_argument("year", nargs="?", type=int)
-    p.add_argument("--country", default="US", help="holiday calendar (US bundled)")
+    p.add_argument("--country", default="US", help="ISO country code (US: python-holidays; others: Nager.Date cache)")
+    p.add_argument("--region", help="subdivision: US-IN / IN / Indiana, or GB-SCT")
+    p.add_argument("--refresh", action="store_true", help="refetch the holiday calendar")
     p.add_argument("--iso", action="store_true", help="Monday-first weeks (ISO)")
     p.set_defaults(func=cmd_calendar)
+
+    p = sub.add_parser("holidays", help="List public holidays for a country and year")
+    _add_common(p)
+    p.add_argument("year", nargs="?", type=int, help="calendar year (default: this year)")
+    p.add_argument("--country", default="US", help="ISO country code (US: python-holidays; others: Nager.Date)")
+    p.add_argument(
+        "--region",
+        help="subdivision: US-IN / IN / Indiana, or GB-SCT; GB defaults to GB-ENG",
+    )
+    p.add_argument("--refresh", action="store_true", help="refetch the holiday calendar")
+    p.set_defaults(func=cmd_holidays)
 
     p = sub.add_parser("countdown", help="Signed time from now to a date")
     _add_common(p)
@@ -1419,6 +1485,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             cmd_week,
             cmd_countdown,
             cmd_calendar,
+            cmd_holidays,
             cmd_month,
         }
         if args.func is not cmd_cache:
