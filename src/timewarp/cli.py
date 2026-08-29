@@ -29,7 +29,7 @@ from timewarp.rise import events_for_period
 from timewarp.calendar_view import year_calendar
 from timewarp.month_view import format_month_sheet, parse_year_month, sheet_for_month
 from timewarp.duration import OffsetError, apply_offset, parse_offset, span
-from timewarp.cycle import format_note, to_dict as cycle_to_dict
+from timewarp.cycle import format_color_period, format_note, to_dict as cycle_to_dict
 from timewarp.eclipses import eclipse_to_dict, iso_range, list_eclipses
 from timewarp.errors import TimeWarpError
 from timewarp.holidays import holidays_for_year, parse_weekend
@@ -786,6 +786,7 @@ def cmd_cycle(args: argparse.Namespace) -> int:
     now_rows = [
         (body_mark(daily["planet"], color=em), "Daily period:", str(daily["period"]), daily["time"]),
         ("", "Note:", letter, daily["weekday"]),
+        ("", "Color:", format_color_period(daily["letter"], color=em), ""),
         ("", "Planet:", daily["planet"], ""),
     ]
     lewis_rows: list[tuple] = []
@@ -796,7 +797,7 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         lewis_rows = [
             ("Born:", payload["born"]),
             ("Life period:", f"{L['life_period']}  ages {L['life_span']}  ({L['age_years']} y)"),
-            ("Yearly:", f"{L['yearly_period']} {ylet}  {L['yearly_key']}"),
+            ("Yearly:", f"{L['yearly_period']} {ylet}  {L['yearly_key']}  {format_color_period(L['yearly_letter'], color=em)}"),
             ("Business:", f"{L['business_period']} (Lewis ch. 7; same fold as yearly)"),
             ("Health:", f"{L['health_period']} (Lewis ch. 9; same fold as yearly)"),
             ("Soul:", f"{L['soul_period']} {slet}  (from 22 March)"),

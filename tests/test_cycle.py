@@ -95,6 +95,8 @@ class LewisTests(unittest.TestCase):
         self.assertIn(row["letter"], "ABCDEFG")
         self.assertGreaterEqual(row["period"], 1)
         self.assertLessEqual(row["period"], 7)
+        self.assertIn(row["color"], ("gold", "green", "orange", "orchid", "periwinkle", "sky", "coral"))
+        self.assertTrue(row["color_hex"].startswith("#"))
 
 
 class CliCycleTests(unittest.TestCase):
@@ -109,6 +111,8 @@ class CliCycleTests(unittest.TestCase):
         payload = json.loads(out)
         self.assertEqual(payload["stamp"], "3379.162")
         self.assertEqual(payload["cycle_1690"]["index"], 0)
+        self.assertIn("color", payload["daily"])
+        self.assertIn("color_hex", payload["daily"])
 
     def test_born_adds_lewis(self):
         code, out, err = run("cycle", "--json", "2026-08-29", "--born", "1960-03-22")
@@ -126,6 +130,7 @@ class CliCycleTests(unittest.TestCase):
         code, out, err = run("cycle", "--no-color", "2026-08-29")
         self.assertEqual(code, 0, err)
         self.assertIn("Star Date:", out)
+        self.assertIn("Color:", out)
         self.assertNotIn("Stamp:", out)
         self.assertNotIn("🎼", out)
         self.assertNotIn("🎵", out)
@@ -138,6 +143,8 @@ class CliCycleTests(unittest.TestCase):
         self.assertNotIn("🎼", star)
         self.assertNotIn("🎵", star)
         self.assertIn("🎵", note)
+        color = next(ln for ln in out.splitlines() if "Color:" in ln)
+        self.assertIn("\033[48;2;", color)
 
 
 if __name__ == "__main__":

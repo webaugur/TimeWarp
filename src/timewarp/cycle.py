@@ -44,6 +44,16 @@ NOTE_COLOR = {
     "G": (238, 111, 111),
 }
 NOTE_HEX = {k: f"#{r:02x}{g:02x}{b:02x}" for k, (r, g, b) in NOTE_COLOR.items()}
+# Names for the same hex values (cycles.amorc.org has no English labels).
+NOTE_NAME = {
+    "A": "gold",
+    "B": "green",
+    "C": "orange",
+    "D": "orchid",
+    "E": "periwinkle",
+    "F": "sky",
+    "G": "coral",
+}
 
 # Daily 24h / 7 (AMORC minute widths, counted from local sunrise).
 DAILY_SLICES = (
@@ -297,6 +307,7 @@ def daily_period(when: Instant, place: Place | None = None) -> dict:
         "time": f"{format_clock(span_lo)}–{format_clock(span_hi)}",
         "weekday": d.strftime("%A"),
         "planet": DAILY_PLANET[period],
+        "color": NOTE_NAME[letter],
         "color_hex": NOTE_HEX[letter],
         "color_rgb": NOTE_COLOR[letter],
         "day_start": format_instant(start),
@@ -335,6 +346,18 @@ def format_note(letter: str, *, color: bool) -> str:
     r, g, b = NOTE_COLOR[letter]
     tinted = f"\033[1;38;2;{r};{g};{b}m{letter}\033[0m"
     return f"🎵 {tinted}"
+
+
+def format_color_period(letter: str, *, color: bool) -> str:
+    """Color period that belongs to this note (AMORC hex, named)."""
+    name = NOTE_NAME[letter]
+    hex_s = NOTE_HEX[letter]
+    r, g, b = NOTE_COLOR[letter]
+    if not color:
+        return f"{name}  {hex_s}"
+    swatch = f"\033[48;2;{r};{g};{b}m      \033[0m"
+    tinted = f"\033[1;38;2;{r};{g};{b}m{name}\033[0m"
+    return f"{tinted}  {swatch}  {hex_s}"
 
 
 def to_dict(
