@@ -122,6 +122,22 @@ class CliPhase2Tests(unittest.TestCase):
         self.assertIn("March equinox", out)
         self.assertIn("December solstice", out)
 
+    def test_passes_iss_fixture(self):
+        tle = Path(__file__).resolve().parent / "data" / "iss.tle"
+        code, out, err = run(
+            "passes",
+            "ISS",
+            "--city",
+            "New York",
+            "--tle",
+            str(tle),
+            "2019-12-10",
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("ISS", out)
+        self.assertIn("sky", out)
+        self.assertRegex(out, r"\d{2}:\d{2}[A-Z]")
+
     def test_sun_city(self):
         code, out, err = run("sun", "--city", "New York", "2026-07-04")
         self.assertEqual(code, 0, err)

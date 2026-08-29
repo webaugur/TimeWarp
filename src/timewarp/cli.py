@@ -39,7 +39,16 @@ from timewarp.cache import (
     quote_value,
     save as cache_save,
 )
+from timewarp.passes import (
+    DEFAULT_MIN_ELEV,
+    fetch_tle,
+    load_tle_file,
+    passes_for_day,
+    select_sats,
+    tle_freshness_note,
+)
 from timewarp.places import Place, lookup_place, place_names
+from timewarp.rise import each_civil_day
 from timewarp.workdays import add_workdays, count_workdays, parse_workday_count
 
 PROG = "timewarp"
@@ -62,6 +71,7 @@ Phase 2 (basic):
   sun            sunrise / sunset, twilight, azimuth
   moon           moon phase and next new/full/quarter times
   seasons        equinoxes and solstices
+  passes         satellite passes (TLE / ISS) vs twilight and the moon
   rise           rise times for visible bodies (today, or a date / date range)
   set            set times for the same bodies and period
   moonrise       alias for: rise moon
@@ -89,6 +99,8 @@ Examples:
   {PROG} sun --city "New York" 2026-07-04
   {PROG} moon 2026-08-28 --city Indianapolis
   {PROG} seasons 2026
+  {PROG} passes --city Indianapolis
+  {PROG} passes ISS --city "New York" 2019-12-10 --tle path/to/iss.tle
   {PROG} rise --city "New York"
   {PROG} rise --city "New York" 2026-07-04
   {PROG} rise --city Indianapolis --13 --33
@@ -111,7 +123,7 @@ Dates are ISO 8601 only: YYYY-MM-DD, YYYY-MM-DDTHH:MM[:SS][Z|+HH:MM],
 YYYY-Www-D, YYYY-DDD. Optional words: today, now, yesterday, tomorrow.
 Omit a date to use today (yellow on the reconstructed command line).
 Sky times print HH:MM plus a zone letter (17:52R); -q and --json stay ISO 8601.
-`sun` includes civil/nautical/astronomical twilight. Satellite passes are not in this phase.
+`sun` includes civil/nautical/astronomical twilight. `passes` needs sgp4 and a TLE.
 Negative offsets after the date may need -- so they are not flags:
   {PROG} add 2026-07-04 -- -P7M
 """
@@ -600,6 +612,81 @@ def cmd_seasons(args: argparse.Namespace) -> int:
         print(f"Place: {place.name} ({tz})")
     for e in rows:
         print(f"  {e.name:22} {_clock_at(e.time, tz)}  {format_instant(e.time)}")
+    return 0
+
+
+def cmd_passes(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    place = _place_from_args(args)
+    tokens = [t for t in (getattr(args, "sat", None), getattr(args, "date", None), getattr(args, "end", None)) if t]
+    sat_q = None
+    dates = []
+    for tok in tokens:
+        try:
+            dates.append(parse_instant(tok))
+        except TimeWarpError:
+            if sat_q is not None:
+                raise TimeWarpError("give at most one satellite name")
+            sat_q = tok
+    if len(dates) > 2:
+        raise TimeWarpError("give at most a start date and an end date")
+    assumed = not dates
+    if not dates:
+        start = end = date.today()
+    elif len(dates) == 1:
+        start = end = dates[0]
+    else:
+        start, end = dates[0], dates[1]
+    _maybe_echo_command(args, as_date(start).isoformat() if assumed else None)
+    min_elev = float(getattr(args, "min_elev", DEFAULT_MIN_ELEV))
+    if not 0 <= min_elev <= 90:
+        raise TimeWarpError("--min-elev must be in 0..90 degrees")
+    tle_path = getattr(args, "tle", None)
+    if tle_path:
+        sats = load_tle_file(Path(tle_path))
+    else:
+        sats = fetch_tle(sat_q or "ISS")
+    picked = select_sats(sats, sat_q, all_sats=bool(getattr(args, "all", False)))
+    days = each_civil_day(start, end, place)
+    note = tle_freshness_note(picked, start)
+    rows = []
+    for sat in picked:
+        for day in days:
+            rows.extend(passes_for_day(sat, day, place, min_elev=min_elev))
+    rows.sort(key=lambda p: (p.tca, p.sat.name))
+    if args.json:
+        payload = {
+            "start": as_date(start).isoformat(),
+            "end": as_date(end).isoformat(),
+            "min_elev_deg": min_elev,
+            "note": note,
+            "passes": [p.to_dict() for p in rows],
+        }
+        return _print_json(payload)
+    if note:
+        print(note)
+    span = as_date(start).isoformat() if as_date(start) == as_date(end) else f"{as_date(start).isoformat()}/{as_date(end).isoformat()}"
+    print(f"{place.name}  {span}  {place.tz}  min {min_elev:.0f}°")
+    if not rows:
+        print("No passes above the minimum elevation.")
+        return 0
+    if args.quiet:
+        for p in rows:
+            print(f"{p.sat.name:12} {format_instant(p.tca)}  {p.max_alt_deg:4.0f}°  {p.twilight}")
+        return 0
+    print(
+        f"{'sat':12}  {'aos':8}  {'max':8}  {'alt':5}  {'az':12}  {'los':8}  "
+        f"{'sky':13}  {'moon':6}  {'sep':5}"
+    )
+    for p in rows:
+        moon = f"{p.moon_alt_deg:5.0f}°" if p.moon_alt_deg > -0.5 else "   —"
+        az = _fmt_az(p.az_tca).strip()
+        print(
+            f"{p.sat.name[:12]:12}  {format_clock(p.aos):8}  {format_clock(p.tca):8}  "
+            f"{p.max_alt_deg:4.0f}°  {az:12}  {format_clock(p.los):8}  "
+            f"{p.twilight:13}  {moon:6}  {p.moon_sep_deg:4.0f}°"
+        )
     return 0
 
 
@@ -1139,6 +1226,24 @@ def build_parser() -> argparse.ArgumentParser:
     _add_color_flags(p)
     p.set_defaults(func=cmd_seasons)
 
+    p = sub.add_parser("passes", help="Satellite passes vs twilight and the moon")
+    _add_common(p)
+    p.add_argument("sat", nargs="?", help="name or catalog number (default: ISS)")
+    p.add_argument("date", nargs="?", help="ISO 8601 start date (default: today)")
+    p.add_argument("end", nargs="?", help="ISO 8601 end date (inclusive)")
+    p.add_argument("--tle", help="TLE file (skip Celestrak)")
+    p.add_argument(
+        "--min-elev",
+        dest="min_elev",
+        type=float,
+        default=DEFAULT_MIN_ELEV,
+        help="minimum max-elevation in degrees (default: 10)",
+    )
+    p.add_argument("--all", action="store_true", help="every satellite in the TLE set")
+    _add_place(p)
+    _add_color_flags(p)
+    p.set_defaults(func=cmd_passes)
+
     def _add_sky_when(parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
             "body",
@@ -1262,6 +1367,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             cmd_sun,
             cmd_moon,
             cmd_seasons,
+            cmd_passes,
             cmd_weekday,
             cmd_week,
             cmd_countdown,

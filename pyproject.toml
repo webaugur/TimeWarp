@@ -5,10 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "timewarp"
 version = "0.1.0"
-description = "Local date calculators: count days, add time, workdays, weekdays, week numbers, plus a basic calendar, countdown, sun, moon, and eclipse set."
+description = "Local date calculators and sky almanac: durations, calendar, sun/moon/planets, seasons, and satellite passes."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "TimeWarp" }]
+dependencies = ["sgp4>=2.23"]
 
 [project.scripts]
 timewarp = "timewarp.cli:main"

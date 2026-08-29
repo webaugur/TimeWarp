@@ -123,6 +123,7 @@ Workdays skip Saturday and Sunday by default. `--weekend Fri,Sat` changes that. 
 | Rise / set | `timewarp rise --city "New York" [DATE]` | Rise times as `HH:MM` + zone letter; `--13` / `--33` add +13°/+33° after rise and before set |
 | Set | `timewarp set --city "New York" [DATE]` | Set times for the same bodies and period |
 | Eclipse lookup | `timewarp eclipse [YEAR]` | Solar and lunar eclipses 2021–2030 |
+| Satellite passes | `timewarp passes [SAT] [DATE] --city NAME` | AOS / max / LOS vs twilight and the moon (TLE / SGP4) |
 | Help | `timewarp help [COMMAND]` | Overview, or one command’s usage (`--help` works too) |
 
 ```bash
@@ -146,6 +147,8 @@ timewarp set venus --city London
 timewarp moonset --city London 2026-08-28
 timewarp rise --all --city "New York" 2026-07-04
 timewarp eclipse 2026
+timewarp passes --city Indianapolis
+timewarp passes ISS --city "New York" --tle tests/data/iss.tle 2019-12-10
 timewarp help rise
 ```
 
@@ -155,7 +158,9 @@ Eclipse rows are from Fred Espenak / NASA GSFC decade tables (2021–2030). `tim
 
 `timewarp rise` and `timewarp set` share the same bodies: sun, moon, mercury, venus, mars, jupiter, saturn, uranus, neptune, pluto (Pluto only 1800–2100). With no body name they list every object that is above the horizon during the local day (today if you omit the date). Pass a second ISO date for an inclusive range. `--all` also prints bodies that stay below the horizon. Comets, asteroids, and planetary moons need extra orbital data and are deferred.
 
-Later work: other country holiday packs; live timers; a 1900–2199 eclipse atlas; **satellite pass tracking** (TLE / ISS and similar) so a pass can be lined up with twilight, moon phase, season, and rise/set alignments. Comets, asteroids, and planetary moons still need extra orbital data.
+`timewarp passes` uses SGP4 on a NORAD TLE (`pip install sgp4`, already in this project’s `.venv`). Default satellite is ISS. Without `--tle`, elements are fetched from Celestrak and cached under `~/.cache/timewarp/tle` for 24 hours. Each pass lists acquisition, max elevation (time, altitude, azimuth), loss, the **sky bin** at max (day / civil / nautical / astronomical / night), moon altitude, and angular **separation from the moon** so you can line a pass up with twilight and lunar alignments. `--min-elev` defaults to 10°. A TLE more than 14 days from the requested date prints a warning.
+
+Later work: other country holiday packs; live timers; a 1900–2199 eclipse atlas; more satellite catalogs / visual magnitude. Comets, asteroids, and planetary moons still need extra orbital data.
 
 ## Input formats
 
@@ -173,6 +178,7 @@ Rejected (on purpose): `04/31/2025`, `31-04-2025`, `April 31, 2025`.
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
+# satellite tests need sgp4:  python3 -m venv .venv && .venv/bin/pip install -e .
 ```
 
 Inspired by timeanddate.com.
