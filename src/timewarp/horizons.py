@@ -10,7 +10,6 @@ from __future__ import annotations
 import csv
 import io
 import json
-import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -19,6 +18,7 @@ from pathlib import Path
 
 from timewarp.errors import TimeWarpError
 from timewarp.jpl import KeplerElements, _SCHLYTER_JD0, _as_float, _rev
+from timewarp.paths import cache_subdir
 
 HORIZONS_URL = "https://ssd.jpl.nasa.gov/api/horizons.api"
 CACHE_TTL = timedelta(days=7)
@@ -40,12 +40,7 @@ _MEMO: dict[str, KeplerElements | None] = {}
 
 
 def horizons_cache_dir() -> Path:
-    env = os.environ.get("TIMEWARP_HORIZONS_DIR")
-    if env:
-        return Path(env)
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    root = Path(xdg) if xdg else Path.home() / ".cache"
-    return root / "timewarp" / "horizons"
+    return cache_subdir("TIMEWARP_HORIZONS_DIR", "horizons")
 
 
 def parent_of(name: str) -> str | None:

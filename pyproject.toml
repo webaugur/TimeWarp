@@ -10,7 +10,10 @@ readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
 authors = [{ name = "David L Norris", email = "dave@webaugur.com" }]
-dependencies = ["sgp4>=2.23", "holidays>=0.50", "rich>=13.7"]
+dependencies = ["sgp4>=2.23", "holidays>=0.50", "rich>=13.7", "tzdata>=2024.1"]
+
+[project.optional-dependencies]
+portable = ["pyinstaller>=6.0"]
 
 [project.scripts]
 timewarp = "timewarp.cli:main"

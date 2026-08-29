@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
 
 from timewarp.errors import TimeWarpError
+from timewarp.paths import config_file
 
 # Flag name (without --) → cache key
 CACHEABLE = {
@@ -25,12 +24,7 @@ CACHE_KEYS = tuple(dict.fromkeys(CACHEABLE.values()))
 
 
 def cache_path() -> Path:
-    env = os.environ.get("TIMEWARP_CACHE")
-    if env:
-        return Path(env)
-    xdg = os.environ.get("XDG_CONFIG_HOME")
-    root = Path(xdg) if xdg else Path.home() / ".config"
-    return root / "timewarp" / "cache.json"
+    return config_file("TIMEWARP_CACHE", "cache.json")
 
 
 def load() -> dict:

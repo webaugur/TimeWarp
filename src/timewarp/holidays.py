@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-import os
 import urllib.error
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from timewarp.errors import TimeWarpError
+from timewarp.paths import cache_subdir
 
 NAGER_URL = "https://date.nager.at/api/v3/PublicHolidays/{year}/{cc}"
 CACHE_TTL = timedelta(days=30)
@@ -312,12 +312,7 @@ def _country_code(country: str) -> str:
 
 
 def holiday_cache_dir() -> Path:
-    env = os.environ.get("TIMEWARP_HOLIDAY_DIR")
-    if env:
-        return Path(env)
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    root = Path(xdg) if xdg else Path.home() / ".cache"
-    return root / "timewarp" / "holidays"
+    return cache_subdir("TIMEWARP_HOLIDAY_DIR", "holidays")
 
 
 def _cache_path(cc: str, year: int) -> Path:

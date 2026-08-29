@@ -11,6 +11,7 @@ _(none)_
 ## Later
 
 - [#5](https://github.com/webaugur/TimeWarp/issues/5) Live countdown timers
+- Portable zips (PyInstaller onedir + GHA); Apple notarization / Authenticode later
 
 ## Done
 

@@ -60,6 +60,7 @@ from timewarp.passes import (
     select_sats,
     tle_freshness_note,
 )
+from timewarp.paths import ensure_zoneinfo
 from timewarp.places import Place, lookup_place, place_names
 from timewarp.rise import each_civil_day
 from timewarp.workdays import add_workdays, count_workdays, parse_workday_count
@@ -1561,6 +1562,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    ensure_zoneinfo()
     raw = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
     try:

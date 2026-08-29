@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -14,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 from timewarp.errors import TimeWarpError
 from timewarp.iso import Instant, as_date, format_clock, format_instant
+from timewarp.paths import cache_subdir
 from timewarp.places import Place
 
 try:
@@ -245,12 +245,7 @@ def parse_tle_text(text: str) -> list[TleSat]:
 
 
 def tle_dir() -> Path:
-    env = os.environ.get("TIMEWARP_TLE_DIR")
-    if env:
-        return Path(env)
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    root = Path(xdg) if xdg else Path.home() / ".cache"
-    return root / "timewarp" / "tle"
+    return cache_subdir("TIMEWARP_TLE_DIR", "tle")
 
 
 def load_tle_file(path: Path) -> list[TleSat]:

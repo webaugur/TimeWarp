@@ -11,6 +11,8 @@ import re
 from pathlib import Path
 from zoneinfo import TZPATH
 
+from timewarp.paths import tzdata_zoneinfo_dir
+
 # ISO 6709 as used by zone.tab: ±DDMM[SS]±DDDMM[SS]
 _COORDS = re.compile(
     r"^([+-])(\d{2})(\d{2})(\d{2})?([+-])(\d{3})(\d{2})(\d{2})?$"
@@ -45,8 +47,12 @@ def _city_from_zone(zone: str) -> str:
 
 
 def zone1970_tab() -> Path | None:
-    for root in TZPATH:
-        path = Path(root) / "zone1970.tab"
+    roots = [Path(p) for p in TZPATH]
+    extra = tzdata_zoneinfo_dir()
+    if extra is not None and extra not in roots:
+        roots.append(extra)
+    for root in roots:
+        path = root / "zone1970.tab"
         if path.is_file():
             return path
     return None

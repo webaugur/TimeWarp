@@ -7,7 +7,6 @@ Cache: ~/.cache/timewarp/sbdb/{name}.json (7 days). TIMEWARP_SBDB_DIR overrides.
 from __future__ import annotations
 
 import json
-import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -16,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from timewarp.errors import TimeWarpError
+from timewarp.paths import cache_subdir
 
 SBDB_URL = "https://ssd-api.jpl.nasa.gov/sbdb.api?sstr={sstr}&full-prec=1"
 CACHE_TTL = timedelta(days=7)
@@ -61,12 +61,7 @@ class KeplerElements:
 
 
 def sbdb_cache_dir() -> Path:
-    env = os.environ.get("TIMEWARP_SBDB_DIR")
-    if env:
-        return Path(env)
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    root = Path(xdg) if xdg else Path.home() / ".cache"
-    return root / "timewarp" / "sbdb"
+    return cache_subdir("TIMEWARP_SBDB_DIR", "sbdb")
 
 
 def _rev(deg: float) -> float:

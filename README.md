@@ -47,6 +47,26 @@ Editable install is still available:
 python3 -m pip install -e /path/to/TimeWarp
 ```
 
+### Portable zip (no Python install)
+
+GitHub Actions builds an **onedir** folder per OS (`timewarp` + `_internal/`). Unzip and run `timewarp` / `timewarp.exe`. Same CLI; no Python on the machine.
+
+```bash
+python3 -m pip install -e ".[portable]"
+python3 -m PyInstaller --noconfirm --clean timewarp.spec
+dist/timewarp/timewarp --version
+```
+
+Artifacts: **Actions → portable** (manual run or a `v*` tag). Names look like `timewarp-1.0.0-linux-x86_64.zip`.
+
+- **Windows:** `tzdata` is bundled so `--city` and `ZoneInfo` work. Settings go under `%APPDATA%\timewarp`; caches under `%LOCALAPPDATA%\timewarp`. SmartScreen may warn (unsigned).
+- **macOS:** unsigned; first launch may need right-click → Open, or `xattr -d com.apple.quarantine timewarp`. arm64 from `macos-latest`.
+- **Linux:** x86_64 glibc runner binary.
+
+Nager / JPL / Celestrak still need a network (or a cache you already filled). US holidays, sun/moon/planets, and eclipses work offline.
+
+`TIMEWARP_CACHE` and `TIMEWARP_*_DIR` still override paths (USB stick, etc.).
+
 ### Remembered settings
 
 `--city`, `--tz`, `--lat`/`--lon`, `--color`/`--no-color`, `--holidays`, `--weekend`, and `--country` are stored with the `cache` command (scriptable load/unload):
@@ -73,7 +93,7 @@ timewarp unload            # drop every stored setting
 
 Python's `locale` module does not list cities. Named places come from IANA tzdata (`zoneinfo` / `zone1970.tab`) plus US state capitals, Canadian provincial/territorial capitals, Mexican state capitals, and extras such as San Jose, CA. `timewarp cities` prints the full list.
 
-Cache file: `$XDG_CONFIG_HOME/timewarp/cache.json` (or `~/.config/timewarp/cache.json`). Override with `TIMEWARP_CACHE`.
+Cache file: `$XDG_CONFIG_HOME/timewarp/cache.json` (or `~/.config/timewarp/cache.json`; on Windows `%APPDATA%\timewarp\cache.json`). Override with `TIMEWARP_CACHE`. JSON caches (Nager, SBDB, Horizons, TLE) live under `~/.cache/timewarp/` or `%LOCALAPPDATA%\timewarp\`.
 
 ## Phase 1 — dates and durations
 
