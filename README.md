@@ -158,6 +158,7 @@ Workdays skip Saturday and Sunday by default. `--weekend Fri,Sat` changes that.
 | Rise / set | `timewarp rise --city "New York" [DATE]` | Rise times as `HH:MM` + zone letter; `--13` / `--33` add +13°/+33° after rise and before set. Named extras plus SBDB ids (`433`) |
 | Set | `timewarp set --city "New York" [DATE]` | Set times for the same bodies and period |
 | Eclipse lookup | `timewarp eclipse [YEAR]` | Solar and lunar eclipses 1900–2199 |
+| Rosicrucian cycle | `timewarp cycle [DATE]` | Year CE+1353 from the March equinox (`3379.162`); 1690-year cycle from 337 CE. `--born` adds Lewis periods. Alias: `rosicrucian` |
 | Satellite passes | `timewarp passes [SAT] [DATE] --city NAME` | AOS / max / LOS vs twilight, moon, and visual mag; `--catalog visual` (Celestrak groups) |
 | Help | `timewarp help [COMMAND]` | Overview, or one command’s usage (`--help` works too) |
 
@@ -185,6 +186,8 @@ timewarp moonset --city London 2026-08-28
 timewarp rise --all --city "New York" 2026-07-04
 timewarp eclipse 2026
 timewarp eclipse 1919
+timewarp cycle 2026-08-29
+timewarp cycle --born 1960-03-22 --city Indianapolis
 timewarp rise ceres --city London
 timewarp rise 433 --city London
 timewarp rise io --city London
@@ -194,6 +197,8 @@ timewarp passes ISS --city "New York" --tle tests/data/iss.tle 2019-12-10
 timewarp passes --catalog visual --city Indianapolis
 timewarp help rise
 ```
+
+`timewarp cycle` (alias `rosicrucian`) prints the **Rosicrucian year**: Common Era + **1353**. The year is the **March equinox date**, but the RC **day** (and that new year) starts at **local sunrise**, not at the equinox instant and not at midnight. Default place is Greenwich. The stamp is `YEAR.DDD` — sunrise-days since the equinox sunrise (`2026-08-29` → `3379.162`). A **1690-year** cycle starts at sunrise on the **337 CE** equinox date (proleptic Gregorian) and rolls at the 2027 equinox sunrise. Daily A–G letters follow the public [AMORC cycles clock](https://cycles.amorc.org/en/cycles), counted from sunrise. `--born` adds H. Spencer Lewis period *numbers* (7-year life, ~52-day yearly, soul grid from 22 March); the book’s essays are not copied. `-q` prints the stamp.
 
 `sun` and rise/set human output is local `HH:MM` plus a NATO zone letter for the UTC offset: **Q** = UTC−4 (EDT), **R** = UTC−5 (EST), **Z** = UTC, and so on (`17:52R`, `18:52Q`, `13:00Z`). Keys in a view share one right-aligned column (Rise/Transit/Set line up with Body/Date/Place). Clock extras (azimuth, ISO timestamps) are a third column sized only from those rows, so a long Place line cannot stretch `moon`’s next-quarter dates. The civil date is not repeated on every rise/set cell; it is on the command line (yellow if assumed) or in the date column of a multi-day range. `--13` / `--33` are geometric altitudes above the horizon (not twilight). If the body never reaches that height, the cell is `—`. `-q` and `--json` still use full ISO timestamps.
 

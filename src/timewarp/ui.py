@@ -70,6 +70,7 @@ ICON = {
     "pass": "🛰️",
     "solar": "🌞",
     "lunar": "🌙",
+    "cycle": "🎼",
 }
 
 _RESET = "\033[0m"

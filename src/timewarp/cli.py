@@ -29,6 +29,7 @@ from timewarp.rise import events_for_period
 from timewarp.calendar_view import year_calendar
 from timewarp.month_view import format_month_sheet, parse_year_month, sheet_for_month
 from timewarp.duration import OffsetError, apply_offset, parse_offset, span
+from timewarp.cycle import format_note, to_dict as cycle_to_dict
 from timewarp.eclipses import eclipse_to_dict, iso_range, list_eclipses
 from timewarp.errors import TimeWarpError
 from timewarp.holidays import holidays_for_year, parse_weekend
@@ -99,6 +100,7 @@ Phase 2 (basic):
   unload         drop stored flags
   cache          same as save/load/unload, nested: cache save|load|unload
   eclipse        solar/lunar eclipses 1900–2199 (Meeus)
+  cycle          Rosicrucian year (CE+1353; day starts at sunrise) and Lewis periods
   help           this overview, or help for one command (--help works too)
 
 Examples:
@@ -137,6 +139,8 @@ Examples:
   {PROG} moonset --city London 2026-08-28
   {PROG} eclipse 2026
   {PROG} eclipse 1919
+  {PROG} cycle 2026-08-29
+  {PROG} cycle --born 1960-03-22 --city Indianapolis
   {PROG} rise ceres --city London
   {PROG} rise 433 --city London
   {PROG} rise io --city London
@@ -741,6 +745,71 @@ def cmd_seasons(args: argparse.Namespace) -> int:
         [[e.name, _clock_at(e.time, tz), format_instant(e.time)] for e in rows],
         color=em,
     )
+    return 0
+
+
+def cmd_cycle(args: argparse.Namespace) -> int:
+    from zoneinfo import ZoneInfo
+
+    from timewarp.cycle import GREENWICH
+
+    place = _optional_place(args) or GREENWICH
+    tz = place.tz
+    assumed = not args.date
+    if args.date:
+        inst = parse_instant(args.date)
+    else:
+        inst = datetime.now(ZoneInfo(tz)).replace(microsecond=0)
+    _maybe_echo_command(args, as_date(inst).isoformat() if assumed else None)
+    born = parse_instant(args.born) if getattr(args, "born", None) else None
+    payload = cycle_to_dict(inst, place=place, born=born)
+    if args.json:
+        return _print_json(payload)
+    if args.quiet:
+        print(payload["stamp"])
+        return 0
+    em = _want_color(args)
+    daily = payload["daily"]
+    letter = format_note(daily["letter"], color=em)
+    cyc = payload["cycle_1690"]
+    meta = [
+        (icon("cycle", emoji=em), "Stamp:", payload["stamp"], ""),
+        ("Place:", f"{payload['place']} ({payload['tz']})"),
+        ("CE year:", str(payload["ce_year"])),
+        ("RC day from:", payload["day_start"]),
+        ("Equinox sunrise:", payload["equinox_sunrise"]),
+        ("Next equinox sunrise:", payload["next_equinox_sunrise"]),
+        ("1690-cycle:", f"#{cyc['index']}  {cyc['elapsed_days']} d in, {cyc['remaining_days']} d left"),
+        ("Cycle start:", cyc["start"]),
+        ("Cycle end:", cyc["end"]),
+    ]
+    now_rows = [
+        (body_mark(daily["planet"], color=em), "Daily period:", str(daily["period"]), daily["time"]),
+        ("", "Note:", letter, daily["weekday"]),
+        ("", "Planet:", daily["planet"], ""),
+    ]
+    lewis_rows: list[tuple] = []
+    if "lewis" in payload:
+        L = payload["lewis"]
+        ylet = format_note(L["yearly_letter"], color=em)
+        slet = format_note(L["soul_letter"], color=em)
+        lewis_rows = [
+            ("Born:", payload["born"]),
+            ("Life period:", f"{L['life_period']}  ages {L['life_span']}  ({L['age_years']} y)"),
+            ("Yearly:", f"{L['yearly_period']} {ylet}  {L['yearly_key']}"),
+            ("Business:", f"{L['business_period']} (Lewis ch. 7; same fold as yearly)"),
+            ("Health:", f"{L['health_period']} (Lewis ch. 9; same fold as yearly)"),
+            ("Soul:", f"{L['soul_period']} {slet}  (from 22 March)"),
+            ("Incarnation:", f"{L['incarnation_interval_years']} years (Lewis ch. 17)"),
+        ]
+    cite = [
+        ("Calendar:", "CE+1353; RC day and equinox year start at local sunrise"),
+        ("Cycle:", "1690 years from sunrise on the 337 CE equinox date"),
+        ("Lewis:", "Self-Mastery and Fate with the Cycles of Life (1929)"),
+        ("Clock:", "https://cycles.amorc.org/en/cycles"),
+    ]
+    print(marked("cycle", "Rosicrucian cycle", emoji=em))
+    print_kv_blocks([meta, now_rows, lewis_rows, cite], color=em)
     return 0
 
 
@@ -1432,6 +1501,21 @@ def build_parser() -> argparse.ArgumentParser:
     _add_color_flags(p)
     p.set_defaults(func=cmd_seasons)
 
+    p = sub.add_parser(
+        "cycle",
+        aliases=["rosicrucian"],
+        help="Rosicrucian year (CE+1353; RC day starts at sunrise) and Lewis cycle periods",
+    )
+    _add_common(p)
+    p.add_argument("date", nargs="?", help="ISO 8601 date or instant (default: now)")
+    p.add_argument(
+        "--born",
+        help="birth date (ISO 8601) for Lewis personal cycles",
+    )
+    _add_place(p)
+    _add_color_flags(p)
+    p.set_defaults(func=cmd_cycle)
+
     p = sub.add_parser("passes", help="Satellite passes vs twilight, moon, and visual mag")
     _add_common(p)
     p.add_argument("sat", nargs="?", help="name or catalog number (default: ISS)")
@@ -1580,6 +1664,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             cmd_sun,
             cmd_moon,
             cmd_seasons,
+            cmd_cycle,
             cmd_passes,
             cmd_weekday,
             cmd_week,
