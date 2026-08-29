@@ -113,9 +113,9 @@ Workdays skip Saturday and Sunday by default. `--weekend Fri,Sat` changes that.
 
 - `--holidays US` — US **federal** public holidays from [python-holidays](https://github.com/vacanza/holidays) (offline, including observed dates).
 - `--holidays US --region IN` (or `US-IN` / `Indiana`) — that **state’s** calendar from the same library (Cesar Chavez in CA, Patriots’ Day in MA, etc.). There is **no city/county** overlay.
-- `--holidays GB` / `calendar --country DE` — [Nager.Date](https://date.nager.at) JSON, cached under `~/.cache/timewarp/holidays/{CC}-{year}.json` for 30 days (`TIMEWARP_HOLIDAY_DIR` overrides). `--refresh` refetches. GB defaults to England (`GB-ENG`); `--region GB-SCT` selects Scotland.
+- `--holidays GB` / `calendar --country DE` — [Nager.Date](https://date.nager.at) JSON, cached under `~/.cache/timewarp/holidays/{CC}-{year}.json` for 30 days (`TIMEWARP_HOLIDAY_DIR` overrides). `--refresh` refetches. `--region` is an ISO 3166-2 subdivision from that year’s feed (`DE-BY`, `BY`, or `Bavaria`; `CA-ON` / `Ontario`; `AU-NSW` / `New South Wales`). GB defaults to England (`GB-ENG`); `--region GB-SCT` or `Scotland` selects Scotland. There is **no city/county** overlay.
 
-`timewarp holidays 2026 --country US --region CA` lists them.
+`timewarp holidays 2026 --country US --region CA` lists them. `timewarp holidays 2026 --country DE --region BY` is Bavaria.
 
 ## Phase 2 — calendar, sky, and countdowns
 

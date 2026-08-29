@@ -18,6 +18,174 @@ _GB_ALIASES = {"GB", "UK", "GBR", "UNITED KINGDOM", "UNITEDKINGDOM"}
 # Without --region, GB uses England so Easter Monday / summer bank holiday apply.
 _DEFAULT_REGION = {"GB": "GB-ENG"}
 
+# Common names → ISO 3166-2 as used in Nager `counties`. Not cities.
+_UMLAUT = str.maketrans({"Ä": "AE", "Ö": "OE", "Ü": "UE", "ß": "SS"})
+_SUBDIV_NAMES = {
+    # GB
+    "ENGLAND": "GB-ENG",
+    "SCOTLAND": "GB-SCT",
+    "WALES": "GB-WLS",
+    "NORTHERNIRELAND": "GB-NIR",
+    "NI": "GB-NIR",
+    # DE
+    "BADENWURTTEMBERG": "DE-BW",
+    "BAVARIA": "DE-BY",
+    "BAYERN": "DE-BY",
+    "BERLIN": "DE-BE",
+    "BRANDENBURG": "DE-BB",
+    "BREMEN": "DE-HB",
+    "HAMBURG": "DE-HH",
+    "HESSE": "DE-HE",
+    "HESSEN": "DE-HE",
+    "MECKLENBURGVORPOMMERN": "DE-MV",
+    "LOWERSAXONY": "DE-NI",
+    "NIEDERSACHSEN": "DE-NI",
+    "NORTHRHINEWESTPHALIA": "DE-NW",
+    "NORDRHEINWESTFALEN": "DE-NW",
+    "NRW": "DE-NW",
+    "RHINELANDPALATINATE": "DE-RP",
+    "RHEINLANDPFALZ": "DE-RP",
+    "SAARLAND": "DE-SL",
+    "SAXONY": "DE-SN",
+    "SACHSEN": "DE-SN",
+    "SAXONYANHALT": "DE-ST",
+    "SACHSENANHALT": "DE-ST",
+    "SCHLESWIGHOLSTEIN": "DE-SH",
+    "THURINGIA": "DE-TH",
+    "THURINGEN": "DE-TH",
+    # AU
+    "AUSTRALIANCAPITALTERRITORY": "AU-ACT",
+    "NEWSOUTHWALES": "AU-NSW",
+    "NORTHERNTERRITORY": "AU-NT",
+    "QUEENSLAND": "AU-QLD",
+    "SOUTHAUSTRALIA": "AU-SA",
+    "TASMANIA": "AU-TAS",
+    "VICTORIA": "AU-VIC",
+    "WESTERNAUSTRALIA": "AU-WA",
+    # CA
+    "ALBERTA": "CA-AB",
+    "BRITISHCOLUMBIA": "CA-BC",
+    "MANITOBA": "CA-MB",
+    "NEWBRUNSWICK": "CA-NB",
+    "NEWFOUNDLAND": "CA-NL",
+    "NEWFOUNDLANDANDLABRADOR": "CA-NL",
+    "NOVASCOTIA": "CA-NS",
+    "NORTHWESTTERRITORIES": "CA-NT",
+    "NUNAVUT": "CA-NU",
+    "ONTARIO": "CA-ON",
+    "PRINCEEDWARDISLAND": "CA-PE",
+    "QUEBEC": "CA-QC",
+    "SASKATCHEWAN": "CA-SK",
+    "YUKON": "CA-YT",
+    # ES
+    "ANDALUCIA": "ES-AN",
+    "ANDALUSIA": "ES-AN",
+    "ARAGON": "ES-AR",
+    "ASTURIAS": "ES-AS",
+    "CANTABRIA": "ES-CB",
+    "CASTILEANDLEON": "ES-CL",
+    "CASTILELAMANCHA": "ES-CM",
+    "CANARYISLANDS": "ES-CN",
+    "CATALONIA": "ES-CT",
+    "CATALUNYA": "ES-CT",
+    "EXTREMADURA": "ES-EX",
+    "GALICIA": "ES-GA",
+    "BALEARICISLANDS": "ES-IB",
+    "MURCIA": "ES-MC",
+    "MADRID": "ES-MD",
+    "NAVARRE": "ES-NC",
+    "BASQUECOUNTRY": "ES-PV",
+    "EUSKADI": "ES-PV",
+    "LARIOJA": "ES-RI",
+    "VALENCIA": "ES-VC",
+    "VALENCIANCOMMUNITY": "ES-VC",
+    # CH
+    "AARGAU": "CH-AG",
+    "APPENZELLINNERRHODEN": "CH-AI",
+    "APPENZELLAUSSERRHODEN": "CH-AR",
+    "BERN": "CH-BE",
+    "BERNE": "CH-BE",
+    "BASELLAND": "CH-BL",
+    "BASELLANDSCHAFT": "CH-BL",
+    "BASELSTADT": "CH-BS",
+    "FRIBOURG": "CH-FR",
+    "GENEVA": "CH-GE",
+    "GENEVE": "CH-GE",
+    "GLARUS": "CH-GL",
+    "GRAUBUNDEN": "CH-GR",
+    "GRISONS": "CH-GR",
+    "JURA": "CH-JU",
+    "LUCERNE": "CH-LU",
+    "LUZERN": "CH-LU",
+    "NEUCHATEL": "CH-NE",
+    "NIDWALDEN": "CH-NW",
+    "OBWALDEN": "CH-OW",
+    "STGALLEN": "CH-SG",
+    "SCHAFFHAUSEN": "CH-SH",
+    "SOLOTHURN": "CH-SO",
+    "SCHWYZ": "CH-SZ",
+    "THURGAU": "CH-TG",
+    "TICINO": "CH-TI",
+    "URI": "CH-UR",
+    "VAUD": "CH-VD",
+    "VALAIS": "CH-VS",
+    "ZUG": "CH-ZG",
+    "ZURICH": "CH-ZH",
+    # NZ
+    "AUCKLAND": "NZ-AUK",
+    "BAYOFPLENTY": "NZ-BOP",
+    "CANTERBURY": "NZ-CAN",
+    "CHATHAMISLANDS": "NZ-CIT",
+    "GISBORNE": "NZ-GIS",
+    "HAWKESBAY": "NZ-HKB",
+    "MARLBOROUGH": "NZ-MBH",
+    "MANAWATU": "NZ-MWT",
+    "NELSON": "NZ-NSN",
+    "NORTHLAND": "NZ-NTL",
+    "OTAGO": "NZ-OTA",
+    "SOUTHLAND": "NZ-STL",
+    "TARANAKI": "NZ-TKI",
+    "TASMAN": "NZ-TAS",
+    "WELLINGTON": "NZ-WGN",
+    "WAIKATO": "NZ-WKO",
+    "WESTCOAST": "NZ-WTC",
+    # AT (Nager uses AT-1 … AT-9)
+    "BURGENLAND": "AT-1",
+    "CARINTHIA": "AT-2",
+    "KARNTEN": "AT-2",
+    "LOWERAUSTRIA": "AT-3",
+    "NIEDEROSTERREICH": "AT-3",
+    "UPPERAUSTRIA": "AT-4",
+    "OBEROSTERREICH": "AT-4",
+    "SALZBURG": "AT-5",
+    "STYRIA": "AT-6",
+    "STEIERMARK": "AT-6",
+    "TYROL": "AT-7",
+    "TIROL": "AT-7",
+    "VORARLBERG": "AT-8",
+    "VIENNA": "AT-9",
+    "WIEN": "AT-9",
+    # leftover Nager first-level codes
+    "AZORES": "PT-20",
+    "MADEIRA": "PT-30",
+    "FEDERATIONOFBOSNIAANDHERZEGOVINA": "BA-BIH",
+    "REPUBLIKASRSPKA": "BA-SRP",
+    "BONAIRE": "BQ-BO",
+    "SABA": "BQ-SA",
+    "SINTEUSTATIUS": "BQ-SE",
+    "SAOPAULO": "BR-SP",
+    "ARICAANDPARINACOTA": "CL-AP",
+    "KOSRAE": "FM-KSA",
+    "POHNPEI": "FM-PNI",
+    "CHUUK": "FM-TRK",
+    "YAP": "FM-YAP",
+    "TRENTINOALTOADIGE": "IT-32",
+    "SOUTHTYROL": "IT-32",
+    "ASCENSION": "SH-AC",
+    "SAINTHELENA": "SH-HL",
+    "TRISTANDACUNHA": "SH-TA",
+}
+
 # ISO 3166-2 US / USPS. No city or county calendars in Nager or python-holidays.
 _USPS = {
     "AL": "Alabama",
@@ -214,6 +382,43 @@ def load_nager_year(cc: str, year: int, *, refresh: bool = False) -> tuple[list,
     return data, note
 
 
+def _alnum(text: str) -> str:
+    return "".join(ch for ch in text.upper().translate(_UMLAUT) if ch.isalnum())
+
+
+def nager_subdivision_codes(rows: list) -> set[str]:
+    """ISO 3166-2 codes listed in Nager `counties` for this calendar year."""
+    out: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for code in row.get("counties") or []:
+            out.add(str(code).upper())
+    return out
+
+
+def normalize_nager_region(cc: str, region: str, known: set[str]) -> str:
+    """BY / DE-BY / Bavaria → DE-BY when that code is in this year's Nager rows."""
+    if not known:
+        raise TimeWarpError(
+            f"Nager.Date has no subdivisions for {cc}; omit --region "
+            "(city and county calendars are out of scope)"
+        )
+    raw = region.strip().upper().replace(" ", "").replace("_", "-").replace(".", "")
+    candidates = [raw, f"{cc}-{raw}"]
+    named = _SUBDIV_NAMES.get(_alnum(region))
+    if named:
+        candidates.append(named)
+    for cand in candidates:
+        if cand in known and cand.startswith(cc + "-"):
+            return cand
+    listed = ", ".join(sorted(known))
+    raise TimeWarpError(
+        f"unknown {cc} region {region!r}; use an ISO 3166-2 code from this year "
+        f"({listed}) or a common name (Bavaria, Scotland, Ontario, …)"
+    )
+
+
 def _row_applies(row: dict, region: str | None) -> bool:
     types = row.get("types") or []
     if "Public" not in types:
@@ -229,11 +434,17 @@ def _row_applies(row: dict, region: str | None) -> bool:
 
 def nager_holidays(year: int, cc: str, *, refresh: bool = False, region: str | None = None) -> tuple[list[tuple[date, str]], str | None]:
     rows, note = load_nager_year(cc, year, refresh=refresh)
+    use_region = region
+    if use_region is None and cc in _DEFAULT_REGION:
+        use_region = _DEFAULT_REGION[cc]
+    if use_region is not None:
+        known = nager_subdivision_codes(rows)
+        use_region = normalize_nager_region(cc, use_region, known)
     out: list[tuple[date, str]] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
-        if not _row_applies(row, region):
+        if not _row_applies(row, use_region):
             continue
         raw = row.get("date")
         name = row.get("name") or row.get("localName") or "Holiday"

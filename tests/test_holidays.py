@@ -8,6 +8,7 @@ from timewarp.holidays import holidays_for_year
 from timewarp.workdays import add_workdays, count_workdays
 
 FIXTURE = Path(__file__).resolve().parent / "data" / "holidays-GB-2026.json"
+DE_FIXTURE = Path(__file__).resolve().parent / "data" / "holidays-DE-2026.json"
 
 
 class NagerHolidayTests(unittest.TestCase):
@@ -15,6 +16,8 @@ class NagerHolidayTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         dest = Path(self.tmp.name) / "GB-2026.json"
         dest.write_bytes(FIXTURE.read_bytes())
+        dest_de = Path(self.tmp.name) / "DE-2026.json"
+        dest_de.write_bytes(DE_FIXTURE.read_bytes())
         self._old = os.environ.get("TIMEWARP_HOLIDAY_DIR")
         os.environ["TIMEWARP_HOLIDAY_DIR"] = self.tmp.name
 
@@ -39,6 +42,36 @@ class NagerHolidayTests(unittest.TestCase):
         dates = {d for d, _ in rows}
         self.assertIn(date(2026, 1, 2), dates)
         self.assertNotIn(date(2026, 4, 6), dates)  # Easter Monday not Scotland in fixture
+        self.assertEqual(
+            holidays_for_year(2026, "GB", region="SCT")[0],
+            rows,
+        )
+        self.assertEqual(
+            holidays_for_year(2026, "GB", region="Scotland")[0],
+            rows,
+        )
+
+    def test_de_bavaria_aliases(self):
+        nationwide, _ = holidays_for_year(2026, "DE")
+        nat_dates = {d for d, _ in nationwide}
+        self.assertNotIn(date(2026, 1, 6), nat_dates)  # Epiphany is regional
+        by_code, _ = holidays_for_year(2026, "DE", region="DE-BY")
+        by_dates = {d for d, _ in by_code}
+        self.assertIn(date(2026, 1, 6), by_dates)
+        self.assertIn(date(2026, 1, 1), by_dates)
+        self.assertEqual(holidays_for_year(2026, "DE", region="BY")[0], by_code)
+        self.assertEqual(holidays_for_year(2026, "DE", region="Bavaria")[0], by_code)
+        be, _ = holidays_for_year(2026, "DE", region="Berlin")
+        be_dates = {d for d, _ in be}
+        self.assertNotIn(date(2026, 1, 6), be_dates)
+        self.assertIn(date(2026, 3, 8), be_dates)
+
+    def test_unknown_nager_region(self):
+        from timewarp.errors import TimeWarpError
+
+        with self.assertRaises(TimeWarpError) as ctx:
+            holidays_for_year(2026, "DE", region="ZZ")
+        self.assertIn("DE-BY", str(ctx.exception))
 
     def test_workdays_skip_boxing_day(self):
         # 2026-12-24 Thu, 25 Fri holiday, 26 Sat, 27 Sun, 28 Mon holiday, 29 Tue

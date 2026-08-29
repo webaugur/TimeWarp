@@ -103,6 +103,7 @@ Examples:
   {PROG} calendar 2026 --country GB
   {PROG} holidays 2026 --country GB
   {PROG} holidays 2026 --country US --region CA
+  {PROG} holidays 2026 --country DE --region BY
   {PROG} month 2026-07 --city Indianapolis
   {PROG} month --city Indianapolis --twilight
   {PROG} countdown 2026-12-31T00:00:00
@@ -1189,7 +1190,7 @@ def _add_work_flags(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument(
         "--region",
-        help="subdivision: US-IN / IN / Indiana, or GB-SCT; GB defaults to GB-ENG",
+        help="subdivision: US-IN / Indiana; Nager ISO 3166-2 (DE-BY / BY / Bavaria). GB defaults to GB-ENG",
     )
     p.add_argument("--refresh", action="store_true", help="refetch the holiday calendar")
 
@@ -1264,7 +1265,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p)
     p.add_argument("year", nargs="?", type=int)
     p.add_argument("--country", default="US", help="ISO country code (US: python-holidays; others: Nager.Date cache)")
-    p.add_argument("--region", help="subdivision: US-IN / IN / Indiana, or GB-SCT")
+    p.add_argument("--region", help="subdivision: US-IN / Indiana; Nager ISO 3166-2 (DE-BY / BY / Bavaria). GB defaults to GB-ENG")
     p.add_argument("--refresh", action="store_true", help="refetch the holiday calendar")
     p.add_argument("--iso", action="store_true", help="Monday-first weeks (ISO)")
     p.set_defaults(func=cmd_calendar)
@@ -1275,7 +1276,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--country", default="US", help="ISO country code (US: python-holidays; others: Nager.Date)")
     p.add_argument(
         "--region",
-        help="subdivision: US-IN / IN / Indiana, or GB-SCT; GB defaults to GB-ENG",
+        help="subdivision: US-IN / Indiana; Nager ISO 3166-2 (DE-BY / BY / Bavaria). GB defaults to GB-ENG",
     )
     p.add_argument("--refresh", action="store_true", help="refetch the holiday calendar")
     p.set_defaults(func=cmd_holidays)
