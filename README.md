@@ -33,6 +33,12 @@ timewarp --help
 
 `~/.local/bin` must be on your `PATH`. The script uses `.venv/bin/python` if that environment exists, otherwise `PYTHONPATH=src python3 -m timewarp`.
 
+Emoji reel (any key for the next command, `q` to quit):
+
+```bash
+./demos/emoji.sh
+```
+
 Editable install is still available:
 
 ```bash
