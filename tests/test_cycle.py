@@ -125,8 +125,19 @@ class CliCycleTests(unittest.TestCase):
     def test_no_color_has_no_music_emoji(self):
         code, out, err = run("cycle", "--no-color", "2026-08-29")
         self.assertEqual(code, 0, err)
+        self.assertIn("Star Date:", out)
+        self.assertNotIn("Stamp:", out)
         self.assertNotIn("🎼", out)
         self.assertNotIn("🎵", out)
+
+    def test_color_puts_note_emoji_with_letter_not_star_date(self):
+        code, out, err = run("cycle", "--color", "2026-08-29")
+        self.assertEqual(code, 0, err)
+        star = next(ln for ln in out.splitlines() if "Star Date:" in ln)
+        note = next(ln for ln in out.splitlines() if "Note:" in ln)
+        self.assertNotIn("🎼", star)
+        self.assertNotIn("🎵", star)
+        self.assertIn("🎵", note)
 
 
 if __name__ == "__main__":

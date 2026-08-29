@@ -773,7 +773,7 @@ def cmd_cycle(args: argparse.Namespace) -> int:
     letter = format_note(daily["letter"], color=em)
     cyc = payload["cycle_1690"]
     meta = [
-        (icon("cycle", emoji=em), "Stamp:", payload["stamp"], ""),
+        ("Star Date:", payload["stamp"]),
         ("Place:", f"{payload['place']} ({payload['tz']})"),
         ("CE year:", str(payload["ce_year"])),
         ("RC day from:", payload["day_start"]),

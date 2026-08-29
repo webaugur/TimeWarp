@@ -329,10 +329,12 @@ def soul_period(born: date) -> tuple[int, str]:
 
 
 def format_note(letter: str, *, color: bool) -> str:
+    """A–G with optional tint; music emoji sits next to the letter, not the date."""
     if not color:
         return letter
     r, g, b = NOTE_COLOR[letter]
-    return f"\033[1;38;2;{r};{g};{b}m{letter}\033[0m"
+    tinted = f"\033[1;38;2;{r};{g};{b}m{letter}\033[0m"
+    return f"🎵 {tinted}"
 
 
 def to_dict(
@@ -347,6 +349,7 @@ def to_dict(
     daily = daily_period(when, place)
     payload = {
         "stamp": stamp.stamp(),
+        "star_date": stamp.stamp(),
         "rc_year": stamp.rc_year,
         "day_of_year": stamp.day,
         "ce_year": stamp.ce_year,
