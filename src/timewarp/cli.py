@@ -535,7 +535,13 @@ def cmd_holidays(args: argparse.Namespace) -> int:
     grid = []
     for d, name in rows:
         grid.append([d.isoformat(), weekday_name(d), glyph_pad(party) if party else "", name])
-    print_grid(["date", "weekday", "", "holiday"], grid, color=em, widths={2: 2} if party else None)
+    print_grid(
+        ["date", "weekday", "", "holiday"],
+        grid,
+        color=em,
+        widths={2: 3} if party else None,
+        justify={2: "right"} if party else None,
+    )
     return 0
 
 
@@ -975,7 +981,13 @@ def _print_sky_table(
         for _title, attr in cols:
             row.append(_fmt_event_times(getattr(r, attr)))
         grid.append(row)
-    print_grid(headers, grid, color=color, widths={glyph_i: 2})
+    print_grid(
+        headers,
+        grid,
+        color=color,
+        widths={glyph_i: 3},
+        justify={glyph_i: "right"},
+    )
 
 
 def _parse_sky_when(args: argparse.Namespace):
@@ -1233,7 +1245,13 @@ def cmd_eclipse(args: argparse.Namespace) -> int:
     for e in rows:
         mark = icon("solar" if e.kind == "solar" else "lunar", emoji=em)
         grid.append([iso_range(e), glyph_pad(mark) if mark else "", e.kind, e.type])
-    print_grid(["date", "", "kind", "type"], grid, color=em, widths={1: 2})
+    print_grid(
+        ["date", "", "kind", "type"],
+        grid,
+        color=em,
+        widths={1: 3},
+        justify={1: "right"},
+    )
     return 0
 
 

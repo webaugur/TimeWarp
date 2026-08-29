@@ -30,14 +30,15 @@ class IconTests(unittest.TestCase):
 
 
 class GlyphPadTests(unittest.TestCase):
-    def test_fixed_two_cells(self):
+    def test_pads_up_never_crops(self):
         from rich.cells import cell_len
 
         from timewarp.ui import glyph_pad
 
-        self.assertEqual(cell_len(glyph_pad("")), 2)
-        self.assertEqual(cell_len(glyph_pad("☀️")), 2)
-        self.assertEqual(cell_len(glyph_pad("♂️")), 2)
+        self.assertEqual(cell_len(glyph_pad("")), 3)
+        self.assertGreaterEqual(cell_len(glyph_pad("🌞")), 2)
+        self.assertGreaterEqual(cell_len(glyph_pad("♂️")), 2)
+        self.assertGreaterEqual(cell_len(glyph_pad("☀️")), 2)
 
 
 class GridTests(unittest.TestCase):

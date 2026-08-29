@@ -13,7 +13,7 @@ from timewarp.ephem import SYMBOL_RGB, SYMBOLS, format_body as _format_body_iau
 
 # Prefer emoji over IAU miscellaneous-symbols; most modern terminals draw these.
 EMOJI = {
-    "sun": "☀️",
+    "sun": "🌞",
     "moon": "🌙",
     "mercury": "☿️",
     "venus": "♀️",
@@ -44,7 +44,7 @@ EMOJI = {
 }
 
 SKY_BIN = {
-    "day": "☀️",
+    "day": "🌞",
     "civil": "🏙️",
     "nautical": "🌆",
     "astronomical": "🌌",
@@ -65,7 +65,7 @@ ICON = {
     "pin": "📌",
     "clock": "⏳",
     "pass": "🛰️",
-    "solar": "☀️",
+    "solar": "🌞",
     "lunar": "🌙",
 }
 
@@ -109,15 +109,16 @@ def sky_bin_label(name: str, *, emoji: bool) -> str:
     return f"{glyph_pad(mark)} {name}" if mark else name
 
 
-def glyph_pad(text: str, width: int = 2) -> str:
-    """Force a glyph to `width` terminal cells so columns don't drift."""
-    raw = text or ""
-    try:
-        from rich.cells import set_cell_size
+GLYPH_CELLS = 3
 
-        return set_cell_size(raw, width)
-    except ImportError:
-        return (raw + "  ")[:width]
+
+def glyph_pad(text: str, width: int = GLYPH_CELLS) -> str:
+    """Pad a glyph to `width` cells. Never crop — cropping ☀️ made it overflow."""
+    raw = text or ""
+    n = _cell_len(raw)
+    if n >= width:
+        return raw
+    return raw + (" " * (width - n))
 
 
 def _cell_len(text: str) -> int:
@@ -198,7 +199,7 @@ def _console(*, color: bool, file: TextIO | None = None):
 
 
 def body_glyph(name: str, *, color: bool):
-    """Padded 2-cell body glyph (Rich Text if colored)."""
+    """Padded body glyph (Rich Text if colored)."""
     key = name.strip().lower()
     symbol = (EMOJI.get(key) if color else SYMBOLS.get(key)) or SYMBOLS.get(key) or ""
     padded = glyph_pad(symbol)
@@ -250,7 +251,7 @@ def print_kv(rows: list[tuple], *, color: bool, file: TextIO | None = None) -> N
         show_edge=False,
         expand=False,
     )
-    table.add_column("g", no_wrap=True, min_width=2, max_width=2)
+    table.add_column("g", no_wrap=True, min_width=GLYPH_CELLS, justify="right")
     table.add_column("k", no_wrap=True, justify="right")
     table.add_column("v", no_wrap=True)
     for row in rows:
@@ -315,7 +316,6 @@ def print_grid(
         extra = {}
         if i in wmap:
             extra["min_width"] = wmap[i]
-            extra["max_width"] = wmap[i]
         table.add_column(
             header, justify=just.get(i, "left"), no_wrap=True, overflow="fold", **extra
         )
