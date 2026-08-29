@@ -60,7 +60,7 @@ from timewarp.passes import (
     select_sats,
     tle_freshness_note,
 )
-from timewarp.paths import ensure_zoneinfo
+from timewarp.paths import configure_stdio, ensure_zoneinfo, swallow_broken_pipe
 from timewarp.places import Place, lookup_place, place_names
 from timewarp.rise import each_civil_day
 from timewarp.workdays import add_workdays, count_workdays, parse_workday_count
@@ -1562,6 +1562,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    configure_stdio()
     ensure_zoneinfo()
     raw = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
@@ -1598,6 +1599,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"{PROG}: {mark + ' ' if mark else ''}{exc}", file=sys.stderr)
         return 2
     except BrokenPipeError:
+        swallow_broken_pipe()
         return 0
     except KeyboardInterrupt:
         mark = icon("error", emoji=want_color(stream=sys.stderr))

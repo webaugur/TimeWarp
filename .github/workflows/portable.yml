@@ -30,6 +30,9 @@ jobs:
         run: python -m PyInstaller --noconfirm --clean timewarp.spec
       - name: Smoke
         shell: bash
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: utf-8
         run: |
           if [[ -f dist/timewarp/timewarp.exe ]]; then
             TW=dist/timewarp/timewarp.exe
@@ -40,8 +43,10 @@ jobs:
           "$TW" --version
           "$TW" weekday 2026-07-04
           "$TW" sun --city "New York" --no-color 2026-07-04
-          "$TW" cities | head
-          "$TW" holidays 2026 --country US | head
+          "$TW" cities > cities.out
+          "$TW" holidays 2026 --country US --no-color > holidays.out
+          test -s cities.out
+          test -s holidays.out
       - name: Zip
         shell: bash
         run: |

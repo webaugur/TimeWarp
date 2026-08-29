@@ -11,6 +11,47 @@ import sys
 from pathlib import Path
 
 
+def configure_stdio() -> None:
+    """UTF-8 stdout/stderr so ☉/emoji do not crash Windows cp1252 consoles."""
+    for stream in (sys.stdout, sys.stderr):
+        reconf = getattr(stream, "reconfigure", None)
+        if reconf is None:
+            continue
+        try:
+            reconf(encoding="utf-8", errors="replace")
+        except (OSError, ValueError, AttributeError):
+            try:
+                reconf(errors="replace")
+            except (OSError, ValueError, AttributeError):
+                pass
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+            ctypes.windll.kernel32.SetConsoleCP(65001)
+        except (AttributeError, OSError):
+            pass
+
+
+def swallow_broken_pipe() -> None:
+    """Avoid exit 120 when the interpreter flushes stdout after `| head`."""
+    try:
+        sys.stdout.flush()
+    except BrokenPipeError:
+        pass
+    except OSError:
+        pass
+    try:
+        fd = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(fd, sys.stdout.fileno())
+        finally:
+            os.close(fd)
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
 def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 

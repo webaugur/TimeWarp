@@ -7,7 +7,15 @@ from timewarp.cache import cache_path
 from timewarp.holidays import holiday_cache_dir
 from timewarp.iana_places import zone1970_tab
 from timewarp.jpl import sbdb_cache_dir
-from timewarp.paths import cache_subdir, config_file, tzdata_zoneinfo_dir, user_cache_dir, user_config_dir
+from timewarp.paths import (
+    cache_subdir,
+    config_file,
+    configure_stdio,
+    swallow_broken_pipe,
+    tzdata_zoneinfo_dir,
+    user_cache_dir,
+    user_config_dir,
+)
 from timewarp.passes import tle_dir
 
 
@@ -54,6 +62,14 @@ class WindowsDirsTests(unittest.TestCase):
             with patch("timewarp.paths.os.name", "nt"):
                 self.assertEqual(user_config_dir(), Path(r"C:\Users\x\AppData\Roaming"))
                 self.assertEqual(user_cache_dir(), Path(r"C:\Users\x\AppData\Local"))
+
+
+class StdioTests(unittest.TestCase):
+    def test_configure_stdio_is_safe(self):
+        configure_stdio()
+
+    def test_swallow_broken_pipe_is_safe(self):
+        swallow_broken_pipe()
 
 
 class TzdataTests(unittest.TestCase):
