@@ -214,13 +214,26 @@ class Pass:
 
 def tle_cache_file(query: str | None = None, *, catalog: str | None = None) -> Path:
     """Path under ~/.cache/timewarp/tle for a name, catalog number, or group."""
+
+    def slug(value: str) -> str:
+        out: list[str] = []
+        prev_us = False
+        for ch in value.lower().strip():
+            if ch.isalnum():
+                out.append(ch)
+                prev_us = False
+            elif not prev_us:
+                out.append("_")
+                prev_us = True
+        return "".join(out).strip("_")
+
     if catalog:
         g = normalize_catalog(catalog)
-        return tle_dir() / f"group-{g}.tle"
+        return tle_dir() / f"group-{slug(g)}.tle"
     q = (query or DEFAULT_SAT).strip()
     if q.isdigit():
         return tle_dir() / f"catnr-{q}.tle"
-    return tle_dir() / f"name-{q.lower().replace(' ', '_')}.tle"
+    return tle_dir() / f"name-{slug(q)}.tle"
 
 def fetch_tle(
     query: str | None = None,
@@ -597,6 +610,43 @@ def select_sats(sats: list[TleSat], query: str | None, *, all_sats: bool) -> lis
         raise TimeWarpError(f"no satellite matching {query!r} in TLE set (have: {names})")
     return picked
 
+def is_tle_path(value: str | None) -> bool:
+    if not value:
+        return False
+    p = Path(value)
+    return p.is_file() or value.endswith((".tle", ".txt")) or "/" in value or "\\" in value
+
+
+def format_tle(sat: TleSat) -> str:
+    return f"{sat.name}\n{sat.line1}\n{sat.line2}\n"
+
+
+def import_tle_file(
+    path: Path,
+    *,
+    catalog: str | None = None,
+) -> tuple[list[TleSat], Path]:
+    """Copy a local TLE file into the on-disk TLE cache and index it."""
+    sats = load_tle_file(path)
+    dest_dir = tle_dir()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    raw = path.read_text(encoding="utf-8")
+    if catalog:
+        dest = tle_cache_file(catalog=catalog)
+        dest.write_text(raw, encoding="utf-8")
+        return sats, dest
+
+    # Keep the original filename, plus the keys fetch_tle() looks up later.
+    dest = dest_dir / path.name
+    dest.write_text(raw, encoding="utf-8")
+    for sat in sats:
+        text = format_tle(sat)
+        tle_cache_file(str(sat.catalog)).write_text(text, encoding="utf-8")
+        slug = sat.name.split("(")[0].strip()  # "ISS (ZARYA)" → "ISS"
+        if slug:
+            tle_cache_file(slug).write_text(text, encoding="utf-8")
+    return sats, dest
 
 def passes_for_day(
     sat: TleSat,

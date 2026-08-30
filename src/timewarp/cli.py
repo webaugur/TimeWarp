@@ -53,6 +53,8 @@ from timewarp.cache import (
     quote_value,
     save as cache_save,
 )
+from pathlib import Path
+
 from timewarp.passes import (
     DEFAULT_MIN_ELEV,
     DEFAULT_SAT,
@@ -61,6 +63,7 @@ from timewarp.passes import (
     passes_for_day,
     select_sats,
     tle_cache_file,
+    tle_dir,
     tle_freshness_note,
 )
 from timewarp.paths import configure_stdio, ensure_zoneinfo, swallow_broken_pipe
@@ -1212,21 +1215,74 @@ def cmd_cache_load(args: argparse.Namespace) -> int:
 
 
 def cmd_cache_save(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from timewarp.passes import tle_dir
+
     data = cache_load()
     wrote = False
-    # ... existing city/lat/lon/tz/holidays/weekend/country/color handling ...
+    if getattr(args, "city", None):
+        data["city"] = lookup_place(args.city).name
+        wrote = True
+    if getattr(args, "lat", None) is not None:
+        data["lat"] = args.lat
+        wrote = True
+    if getattr(args, "lon", None) is not None:
+        data["lon"] = args.lon
+        wrote = True
+    if getattr(args, "tz", None):
+        data["tz"] = args.tz
+        wrote = True
+    if getattr(args, "holidays", None):
+        data["holidays"] = args.holidays
+        wrote = True
+    if getattr(args, "weekend", None):
+        data["weekend"] = args.weekend
+        wrote = True
+    if getattr(args, "country", None):
+        data["country"] = args.country
+        wrote = True
+    if getattr(args, "color", False):
+        data["color"] = True
+        data.pop("no_color", None)
+        wrote = True
+    if getattr(args, "no_color", False):
+        data["no_color"] = True
+        data.pop("color", None)
+        wrote = True
 
     tle_query = getattr(args, "tle", None)
     catalog = getattr(args, "catalog", None)
     if tle_query is not None or catalog:
-        sats = fetch_tle(tle_query, catalog=catalog, force_refresh=True)
-        dest = tle_cache_file(tle_query, catalog=catalog)
+        src = Path(tle_query) if tle_query else None
+        if src is not None and src.is_file():
+            sats = load_tle_file(src)
+            dest_dir = tle_dir()
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / src.name
+            raw = src.read_text(encoding="utf-8")
+            dest.write_text(raw, encoding="utf-8")
+            for sat in sats:
+                text = f"{sat.name}\n{sat.line1}\n{sat.line2}\n"
+                tle_cache_file(str(sat.catalog)).write_text(text, encoding="utf-8")
+                slug = sat.name.split("(")[0].strip()
+                if slug:
+                    tle_cache_file(slug).write_text(text, encoding="utf-8")
+            if catalog:
+                dest = tle_cache_file(catalog=catalog)
+                dest.write_text(raw, encoding="utf-8")
+        else:
+            sats = fetch_tle(tle_query, catalog=catalog, force_refresh=True)
+            dest = tle_cache_file(tle_query, catalog=catalog)
         wrote = True
         if args.json:
             payload = {
                 "path": str(dest),
                 "count": len(sats),
-                "satellites": [{"name": s.name, "catalog": s.catalog, "epoch": s.epoch.isoformat()} for s in sats],
+                "satellites": [
+                    {"name": s.name, "catalog": s.catalog, "epoch": s.epoch.isoformat()}
+                    for s in sats
+                ],
             }
             if not any(
                 getattr(args, key, None)
@@ -1239,17 +1295,9 @@ def cmd_cache_save(args: argparse.Namespace) -> int:
                 print(f"  {sat.catalog:>6}  {sat.name}")
             if len(sats) > 12:
                 print(f"  … {len(sats) - 12} more")
-        tle_query = getattr(args, "tle", None)
-        catalog = getattr(args, "catalog", None)
-        if tle_query is not None or catalog:
-            sats = fetch_tle(tle_query, catalog=catalog, force_refresh=True)
-            wrote = True
-            if not args.quiet:
-                print(f"timewarp: cached {len(sats)} TLE(s)")
 
     if not wrote:
         raise TimeWarpError("cache save needs a setting, e.g. --city Indianapolis or --tle")
-    # only write cache.json if a settings flag was actually set
     settings_changed = any(
         [
             getattr(args, "city", None),
@@ -1269,7 +1317,6 @@ def cmd_cache_save(args: argparse.Namespace) -> int:
         if line:
             print(line)
     return 0
-
 
 def cmd_cache_unload(args: argparse.Namespace) -> int:
     keys: list[str] = []
