@@ -212,6 +212,26 @@ class Pass:
             "magnitude": None if self.magnitude is None else round(self.magnitude, 1),
         }
 
+def catalog_from_tle_field(field: str) -> int:
+    """Decode TLE columns 3-7: numeric 0-99999 or Alpha-5 100000-339999."""
+    field = field.strip()
+    if not field:
+        raise ValueError("empty catalog field")
+    if field.isdigit():
+        return int(field)
+    first, rest = field[0], field[1:]
+    if not first.isalpha() or not rest.isdigit() or len(field) != 5:
+        raise ValueError(f"invalid catalog field: {field!r}")
+    letter = first.upper()
+    if letter in "IO":
+        raise ValueError(f"reserved Alpha-5 letter: {field!r}")
+    # A=10 ... H=17, J=18 ... N=22, P=23 ... Z=33
+    n = ord(letter) - ord("A") + 10
+    if letter > "I":
+        n -= 1
+    if letter > "O":
+        n -= 1
+    return n * 10_000 + int(rest)
 
 def parse_tle_text(text: str) -> list[TleSat]:
     _need_sgp4()
@@ -231,9 +251,9 @@ def parse_tle_text(text: str) -> list[TleSat]:
         i += 2
         try:
             rec = Satrec.twoline2rv(l1, l2)
+            catalog = catalog_from_tle_field(l1[2:7])
         except Exception as exc:
             raise TimeWarpError(f"could not parse TLE for {name or l1[2:7]!r}: {exc}") from exc
-        catalog = int(l1[2:7])
         if name is None:
             name = str(catalog)
         jd = rec.jdsatepoch + getattr(rec, "jdsatepochF", 0.0)
