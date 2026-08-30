@@ -55,10 +55,12 @@ from timewarp.cache import (
 )
 from timewarp.passes import (
     DEFAULT_MIN_ELEV,
+    DEFAULT_SAT,
     fetch_tle,
     load_tle_file,
     passes_for_day,
     select_sats,
+    tle_cache_file,
     tle_freshness_note,
 )
 from timewarp.paths import configure_stdio, ensure_zoneinfo, swallow_broken_pipe
@@ -1212,41 +1214,60 @@ def cmd_cache_load(args: argparse.Namespace) -> int:
 def cmd_cache_save(args: argparse.Namespace) -> int:
     data = cache_load()
     wrote = False
-    if getattr(args, "city", None):
-        data["city"] = lookup_place(args.city).name
+    # ... existing city/lat/lon/tz/holidays/weekend/country/color handling ...
+
+    tle_query = getattr(args, "tle", None)
+    catalog = getattr(args, "catalog", None)
+    if tle_query is not None or catalog:
+        sats = fetch_tle(tle_query, catalog=catalog, force_refresh=True)
+        dest = tle_cache_file(tle_query, catalog=catalog)
         wrote = True
-    if getattr(args, "lat", None) is not None:
-        data["lat"] = args.lat
-        wrote = True
-    if getattr(args, "lon", None) is not None:
-        data["lon"] = args.lon
-        wrote = True
-    if getattr(args, "tz", None):
-        data["tz"] = args.tz
-        wrote = True
-    if getattr(args, "holidays", None):
-        data["holidays"] = args.holidays
-        wrote = True
-    if getattr(args, "weekend", None):
-        data["weekend"] = args.weekend
-        wrote = True
-    if getattr(args, "country", None):
-        data["country"] = args.country
-        wrote = True
-    if getattr(args, "color", False):
-        data["color"] = True
-        data.pop("no_color", None)
-        wrote = True
-    if getattr(args, "no_color", False):
-        data["no_color"] = True
-        data.pop("color", None)
-        wrote = True
+        if args.json:
+            payload = {
+                "path": str(dest),
+                "count": len(sats),
+                "satellites": [{"name": s.name, "catalog": s.catalog, "epoch": s.epoch.isoformat()} for s in sats],
+            }
+            if not any(
+                getattr(args, key, None)
+                for key in ("city", "lat", "lon", "tz", "holidays", "weekend", "country")
+            ) and not getattr(args, "color", False) and not getattr(args, "no_color", False):
+                return _print_json(payload)
+        elif not args.quiet:
+            print(f"timewarp: cached {len(sats)} TLE(s) at {dest}")
+            for sat in sats[:12]:
+                print(f"  {sat.catalog:>6}  {sat.name}")
+            if len(sats) > 12:
+                print(f"  … {len(sats) - 12} more")
+        tle_query = getattr(args, "tle", None)
+        catalog = getattr(args, "catalog", None)
+        if tle_query is not None or catalog:
+            sats = fetch_tle(tle_query, catalog=catalog, force_refresh=True)
+            wrote = True
+            if not args.quiet:
+                print(f"timewarp: cached {len(sats)} TLE(s)")
+
     if not wrote:
-        raise TimeWarpError("cache save needs a setting, e.g. --city Indianapolis")
-    cache_save(data)
-    line = format_pulled_cli(data_as_pulled(data), prog="" if args.quiet else "timewarp")
-    if line:
-        print(line)
+        raise TimeWarpError("cache save needs a setting, e.g. --city Indianapolis or --tle")
+    # only write cache.json if a settings flag was actually set
+    settings_changed = any(
+        [
+            getattr(args, "city", None),
+            getattr(args, "lat", None) is not None,
+            getattr(args, "lon", None) is not None,
+            getattr(args, "tz", None),
+            getattr(args, "holidays", None),
+            getattr(args, "weekend", None),
+            getattr(args, "country", None),
+            getattr(args, "color", False),
+            getattr(args, "no_color", False),
+        ]
+    )
+    if settings_changed:
+        cache_save(data)
+        line = format_pulled_cli(data_as_pulled(data), prog="" if args.quiet else "timewarp")
+        if line:
+            print(line)
     return 0
 
 
@@ -1457,6 +1478,17 @@ def build_parser() -> argparse.ArgumentParser:
         parser.add_argument("--holidays")
         parser.add_argument("--weekend")
         parser.add_argument("--country")
+        parser.add_argument(
+            "--tle",
+            nargs="?",
+            const=DEFAULT_SAT,
+            metavar="SAT",
+            help="refetch TLE from Celestrak into the cache (default SAT: ISS)",
+        )
+        parser.add_argument(
+            "--catalog",
+            help="refetch a Celestrak TLE group (visual, stations, starlink, gps, …)",
+        )
         _add_color_flags(parser)
 
     def _add_cache_unload_flags(parser: argparse.ArgumentParser) -> None:

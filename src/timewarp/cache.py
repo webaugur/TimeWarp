@@ -9,6 +9,7 @@ from timewarp.paths import config_file
 
 # Flag name (without --) → cache key
 CACHEABLE = {
+    "tle": "tle",
     "city": "city",
     "lat": "lat",
     "lon": "lon",
@@ -104,6 +105,7 @@ def format_pulled_cli(pulled: list[tuple[str, str | bool]], *, prog: str = "time
 def data_as_pulled(data: dict) -> list[tuple[str, str | bool]]:
     """Stable flag order for scripting."""
     order = (
+        ("tle", "--tle"),
         ("city", "--city"),
         ("lat", "--lat"),
         ("lon", "--lon"),

@@ -212,6 +212,64 @@ class Pass:
             "magnitude": None if self.magnitude is None else round(self.magnitude, 1),
         }
 
+def tle_cache_file(query: str | None = None, *, catalog: str | None = None) -> Path:
+    """Path under ~/.cache/timewarp/tle for a name, catalog number, or group."""
+    if catalog:
+        g = normalize_catalog(catalog)
+        return tle_dir() / f"group-{g}.tle"
+    q = (query or DEFAULT_SAT).strip()
+    if q.isdigit():
+        return tle_dir() / f"catnr-{q}.tle"
+    return tle_dir() / f"name-{q.lower().replace(' ', '_')}.tle"
+
+def fetch_tle(
+    query: str | None = None,
+    *,
+    catalog: str | None = None,
+    timeout: float = 20.0,
+    force_refresh: bool = False,
+) -> list[TleSat]:
+    """Fetch a TLE from Celestrak. `query` is a name or catalog number; `catalog` is a GROUP."""
+    _need_sgp4()
+    if catalog:
+        g = normalize_catalog(catalog)
+        url = CELESTRAK_GROUP.format(g=urllib.parse.quote(g))
+        label = g
+    else:
+        q = (query or DEFAULT_SAT).strip()
+        label = q
+        if q.isdigit():
+            url = CELESTRAK_CATNR.format(id=q)
+        else:
+            url = CELESTRAK_NAME.format(name=urllib.parse.quote(q))
+    dest = tle_cache_file(query, catalog=catalog)
+    if dest.is_file() and not force_refresh:
+        age = datetime.now(timezone.utc) - datetime.fromtimestamp(dest.stat().st_mtime, tz=timezone.utc)
+        if age < timedelta(hours=24):
+            return load_tle_file(dest)
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            raw = resp.read()
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        if dest.is_file() and not force_refresh:
+            return load_tle_file(dest)
+        raise TimeWarpError(
+            f"could not fetch TLE for {label!r} from Celestrak ({exc}). "
+            f"Pass --tle FILE for offline use."
+        ) from exc
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise TimeWarpError(f"Celestrak TLE for {label!r} was not text") from exc
+    if "No GP data found" in text or not any(ln.startswith("1 ") for ln in text.splitlines()):
+        raise TimeWarpError(f"Celestrak has no TLE for {label!r}")
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(text, encoding="utf-8")
+    except OSError:
+        pass
+    return parse_tle_text(text)
+
 def catalog_from_tle_field(field: str) -> int:
     """Decode TLE columns 3-7: numeric 0-99999 or Alpha-5 100000-339999."""
     field = field.strip()
@@ -365,7 +423,13 @@ def rcs_for(catalog: int) -> float | None:
     return table.get(catalog)
 
 
-def fetch_tle(query: str | None = None, *, catalog: str | None = None, timeout: float = 20.0) -> list[TleSat]:
+def fetch_tle(
+    query: str | None = None,
+    *,
+    catalog: str | None = None,
+    timeout: float = 20.0,
+    force_refresh: bool = False,
+) -> list[TleSat]:
     """Fetch a TLE from Celestrak. `query` is a name or catalog number; `catalog` is a GROUP."""
     _need_sgp4()
     if catalog:
@@ -389,7 +453,7 @@ def fetch_tle(query: str | None = None, *, catalog: str | None = None, timeout: 
         with urllib.request.urlopen(url, timeout=timeout) as resp:
             raw = resp.read()
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        if dest.is_file():
+        if dest.is_file() and not force_refresh:
             return load_tle_file(dest)
         raise TimeWarpError(
             f"could not fetch TLE for {q!r} from Celestrak ({exc}). "
