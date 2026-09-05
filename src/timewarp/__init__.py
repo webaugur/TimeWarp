@@ -1,3 +1,3 @@
 """TimeWarp: local ISO-8601 date calculators."""
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
