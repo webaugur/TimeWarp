@@ -1,4 +1,9 @@
-"""Satellite passes from NORAD TLEs (SGP4), correlated with twilight and the moon."""
+"""Satellite passes from NORAD TLEs (SGP4), correlated with twilight and the moon.
+
+TLE files may be 2-line or 3-line (optional name, then lines starting 1 / 2).
+Catalog field (columns 3–7) is numeric 0–99999 or Alpha-5 (100000–339999).
+`timewarp save --tle PATH` copies a file into ~/.cache/timewarp/tle (TIMEWARP_TLE_DIR).
+"""
 
 from __future__ import annotations
 

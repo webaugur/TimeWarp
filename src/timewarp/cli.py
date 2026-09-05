@@ -103,8 +103,8 @@ Phase 2 (basic):
   save           store --city and similar flags
   load           print stored flags (scriptable)
   unload         drop stored flags
-  cache          same as save/load/unload, nested: cache save|load|unload|orbits
-  eclipse        solar/lunar eclipses 1900–2199 (Meeus)
+  cache          nested: cache save|load|unload|orbits (orbits alias: sbdb)
+  eclipse        solar/lunar eclipses 1900–2199 (Meeus; --limit)
   cycle          Rosicrucian year (CE+1353; day starts at midnight) and Lewis periods
   help           this overview, or help for one command (--help works too)
 
@@ -133,6 +133,9 @@ Examples:
   {PROG} passes --city Indianapolis
   {PROG} passes ISS --city "New York" 2019-12-10 --tle path/to/iss.tle
   {PROG} passes --catalog visual --city Indianapolis
+  {PROG} save --tle path/to/iss.tle
+  {PROG} save --tle
+  {PROG} save --catalog visual
   {PROG} rise --city "New York"
   {PROG} rise --city "New York" 2026-07-04
   {PROG} rise --city Indianapolis --13 --33
@@ -143,6 +146,7 @@ Examples:
   {PROG} set venus --city London
   {PROG} moonset --city London 2026-08-28
   {PROG} eclipse 2026
+  {PROG} eclipse --limit 8
   {PROG} eclipse 1919
   {PROG} cycle 2026-08-29
   {PROG} cycle --born 1960-03-22 --city Indianapolis
@@ -151,24 +155,25 @@ Examples:
   {PROG} cache orbits --refresh
   {PROG} cache orbits --file path/to/sbdb.json
   {PROG} rise --list-sb
+  {PROG} rise --list-sb --refresh
   {PROG} rise iris --city London
   {PROG} rise io --city London
   {PROG} rise halley --city London
   {PROG} cities
   {PROG} save --city Indianapolis
   {PROG} load
-  {PROG} cache orbits --refresh
-  {PROG} cache orbits --file path/to/sbdb.json
   {PROG} unload --city
   {PROG} unload
   {PROG} help
   {PROG} help add
 
-Dates are ISO 8601 only: YYYY-MM-DD, YYYY-MM-DDTHH:MM[:SS][Z|+HH:MM],
-YYYY-Www-D, YYYY-DDD. Optional words: today, now, yesterday, tomorrow.
+Dates are ISO 8601 only: YYYY-MM (month sheet), YYYY-MM-DD,
+YYYY-MM-DDTHH:MM[:SS][Z|+HH:MM], YYYY-Www-D, YYYY-DDD.
+Optional words: today, now, yesterday, tomorrow.
 Omit a date to use today (yellow on the reconstructed command line).
 Sky times print HH:MM plus a zone letter (17:52R); -q and --json stay ISO 8601.
-`sun` includes civil/nautical/astronomical twilight. `passes` needs sgp4 and a TLE.
+`sun` includes civil/nautical/astronomical twilight. `passes` needs sgp4 and a TLE
+(2-line or 3-line; catalog field may be Alpha-5).
 Negative offsets after the date may need -- so they are not flags:
   {PROG} add 2026-07-04 -- -P7M
 """
@@ -1586,12 +1591,12 @@ def build_parser() -> argparse.ArgumentParser:
             "--tle",
             nargs="?",
             const=DEFAULT_SAT,
-            metavar="SAT",
-            help="refetch TLE from Celestrak into the cache (default SAT: ISS)",
+            metavar="SAT|PATH",
+            help="install a TLE file if PATH exists, else refetch SAT from Celestrak (default: ISS)",
         )
         parser.add_argument(
             "--catalog",
-            help="refetch a Celestrak TLE group (visual, stations, starlink, gps, …)",
+            help="refetch a Celestrak TLE group into the cache (visual, stations, starlink, gps, …)",
         )
         _add_color_flags(parser)
 
@@ -1658,7 +1663,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("sat", nargs="?", help="name or catalog number (default: ISS)")
     p.add_argument("date", nargs="?", help="ISO 8601 start date (default: today)")
     p.add_argument("end", nargs="?", help="ISO 8601 end date (inclusive)")
-    p.add_argument("--tle", help="TLE file (skip Celestrak)")
+    p.add_argument(
+        "--tle",
+        help="TLE file (2-line or 3-line name+1+2; skip Celestrak). Catalog field may be Alpha-5",
+    )
     p.add_argument(
         "--catalog",
         help="Celestrak TLE group (visual, stations, starlink, gps, …); lists the group unless a sat name is given",
@@ -1749,7 +1757,10 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p)
     p.set_defaults(func=cmd_cities)
 
-    cache_p = sub.add_parser("cache", help="Save, load, or unload remembered settings")
+    cache_p = sub.add_parser(
+        "cache",
+        help="Remembered settings, TLE files, or the JPL SBDB dump",
+    )
     cache_sub = cache_p.add_subparsers(dest="cache_cmd")
     cache_p.set_defaults(func=cmd_cache, cache_cmd="load")
 
@@ -1757,7 +1768,11 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(load_p)
     load_p.set_defaults(func=cmd_cache, cache_cmd="load")
 
-    save_p = cache_sub.add_parser("save", aliases=["set"], help="store settings")
+    save_p = cache_sub.add_parser(
+        "save",
+        aliases=["set"],
+        help="store --city flags, or install/refetch a TLE",
+    )
     _add_common(save_p)
     _add_cache_save_flags(save_p)
     save_p.set_defaults(func=cmd_cache, cache_cmd="save")
@@ -1783,7 +1798,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     orbits_p.set_defaults(func=cmd_cache, cache_cmd="orbits")
 
-    p = sub.add_parser("save", help="store --city and similar flags")
+    p = sub.add_parser("save", help="store --city flags, or install/refetch a TLE")
     _add_common(p)
     _add_cache_save_flags(p)
     p.set_defaults(func=cmd_cache, cache_cmd="save")
@@ -1800,7 +1815,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("eclipse", help="Eclipse catalog 1900–2199")
     _add_common(p)
     p.add_argument("year", nargs="?", type=int)
-    p.add_argument("--limit", type=int)
+    p.add_argument(
+        "--limit",
+        type=int,
+        help="max rows (default: all in YEAR, or 8 upcoming if YEAR is omitted)",
+    )
     _add_color_flags(p)
     p.set_defaults(func=cmd_eclipse)
 

@@ -437,6 +437,8 @@ class HelpAndErrorTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("timewarp add", out)
         self.assertIn("Command help:", out)
+        self.assertIn("cache orbits --file", out)
+        self.assertIn("save --tle", out)
 
     def test_help_topic(self):
         code, out, err = run("help", "add")

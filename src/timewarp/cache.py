@@ -1,4 +1,8 @@
-"""Remembered CLI settings (--city, --tz, and similar)."""
+"""Remembered CLI settings (--city, --tz, and similar).
+
+TLE installs (`save --tle` / `--catalog`) write files under TIMEWARP_TLE_DIR;
+they are not stored in this JSON. The SBDB dump is `cache orbits`.
+"""
 
 from __future__ import annotations
 
