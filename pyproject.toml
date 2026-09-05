@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "timewarp"
-version = "1.2.0"
-description = "Local date calculators and sky almanac: durations, holidays, sun/moon/planets, SBDB bodies, and satellite passes."
+version = "1.2.1"
+description = "Local date calculators and sky almanac: durations, holidays, sun/moon/planets, SBDB bodies, satellite passes, and tropical/sidereal charts."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"

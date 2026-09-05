@@ -15,6 +15,7 @@ _(none)_
 
 ## Done
 
+- [#17](https://github.com/webaugur/TimeWarp/issues/17) `astro` command (chart geometry, houses, lots, sidereal)
 - [#16](https://github.com/webaugur/TimeWarp/issues/16) Parse `@beats` on input; document Swatch clocks
 - [#15](https://github.com/webaugur/TimeWarp/issues/15) Swatch Internet Time (`@000`–`@999`) next to HH:MM clocks
 - [#14](https://github.com/webaugur/TimeWarp/issues/14) `today` command (one-screen civil day)

@@ -57,7 +57,7 @@ python3 -m PyInstaller --noconfirm --clean timewarp.spec
 dist/timewarp/timewarp --version
 ```
 
-Artifacts: **Actions → portable** (manual run or a `v*` tag). Names look like `timewarp-1.2.0-linux-x86_64.zip`.
+Artifacts: **Actions → portable** (manual run or a `v*` tag). Names look like `timewarp-1.2.1-linux-x86_64.zip`.
 
 - **Windows:** `tzdata` is bundled so `--city` and `ZoneInfo` work. Settings go under `%APPDATA%\timewarp`; caches under `%LOCALAPPDATA%\timewarp`. SmartScreen may warn (unsigned).
 - **macOS:** unsigned; first launch may need right-click → Open, or `xattr -d com.apple.quarantine timewarp`. arm64 from `macos-latest`.
@@ -191,6 +191,7 @@ Workdays skip Saturday and Sunday by default. `--weekend Fri,Sat` changes that.
 | Set | `timewarp set --city "New York" [DATE]` | Set times for the same bodies and period |
 | Eclipse lookup | `timewarp eclipse [YEAR]` | Solar and lunar eclipses 1900–2199. Omit YEAR for the next 8 from today; `--limit N` caps the list |
 | Rosicrucian cycle | `timewarp cycle [DATE]` | Year CE+1353; RC **day** starts at **local midnight**. Star date `3379.162`. `--born` adds Lewis periods. Alias: `rosicrucian` |
+| Chart | `timewarp astro --city NAME [DATE]` | Tropical (or `--sidereal`) chart: ASC/MC, Placidus houses, planets, mean node/Lilith, Chiron, Arabic parts, major aspects. `--explain` is geometry in English |
 | Satellite passes | `timewarp passes [SAT] [DATE] --city NAME` | AOS / max / LOS vs twilight, moon, and visual mag; `--catalog visual`; `--tle FILE`; `--min-elev` (default 10°) |
 | Help | `timewarp help [COMMAND]` | Overview, or one command’s usage (`--help` works too; alias: `?`) |
 
@@ -225,6 +226,11 @@ timewarp eclipse 1919
 timewarp cycle 2026-08-29
 timewarp cycle 2026-07-04T@500
 timewarp cycle --born 1960-03-22 --city Indianapolis
+timewarp astro --city Indianapolis
+timewarp astro --city Indianapolis --explain
+timewarp astro --city Indianapolis --sidereal lahiri
+timewarp astro --city Indianapolis --houses whole
+timewarp astro --city Indianapolis --born 1960-03-22 2026-07-04
 timewarp rise ceres --city London
 timewarp rise 433 --city London
 timewarp cache orbits --refresh
@@ -244,6 +250,8 @@ timewarp help rise
 ```
 
 `timewarp cycle` (alias `rosicrucian`) prints the **Rosicrucian year**: Common Era + **1353**. The year is the **March equinox date**; the RC **day** (and that new year) starts at **local midnight**, not at the equinox instant. Default place is Greenwich. The **star date** is `YEAR.DDD` — midnights since the equinox-date midnight (`2026-08-29` → `3379.162`). A **1690-year** cycle starts at midnight on the **337 CE** equinox date (proleptic Gregorian) and rolls at the 2027 equinox midnight. Daily A–G letters and their **color period** (gold, green, orange, orchid, periwinkle, sky, coral) follow the public [AMORC cycles clock](https://cycles.amorc.org/en/cycles), counted from midnight. `--born` adds H. Spencer Lewis period *numbers* (7-year life, ~52-day yearly, soul grid from 22 March); the book’s essays are not copied. `-q` prints the star date.
+
+`timewarp astro --city NAME` is a **chart** from TimeWarp’s existing ecliptic longitudes (Schlyter planets, ~1–2′). Tropical by default; `--sidereal lahiri` (or `fagan`, `krishnamurti`) subtracts a **mean ayanamsa**, not DE. Houses default to **Placidus** (`--houses equal|whole`; Equal if the latitude is too high for Placidus). Rows: Sun through Pluto, mean lunar node, mean Lilith (lunar apogee), Chiron if the SBDB dump has it. Arabic parts: Fortune, Spirit, Necessity, Eros, Courage, Victory, Nemesis (day/night formulas). Major aspects (conjunction, sextile, square, trine, opposition) with orbs. `--born` is a natal chart; with a DATE it lists **transits to natal**. `--explain` restates that geometry in English — not personality or fortune-telling. `-q`: frame, ASC, Sun, Moon.
 
 `timewarp today --city NAME` is one local day: weekday, ISO week, holiday if any (US federal by default; `--holidays` / `--country` / `--region`), civil dawn/dusk and sunrise/set, moon phase plus moonrise/set, RC **star date + daily note and color** (not the 1690-year sheet or Lewis), a season or eclipse line only if it falls that day, and ISS passes (fail-soft if there is no TLE; `--tle FILE` installs nothing, it only reads). Place is required like `sun` (cached `--city` counts). `-q` prints date, weekday, sunrise–sunset, star date, and the note letter.
 

@@ -107,6 +107,7 @@ Phase 2 (basic):
   cache          nested: cache save|load|unload|orbits (orbits alias: sbdb)
   eclipse        solar/lunar eclipses 1900–2199 (Meeus; --limit)
   cycle          Rosicrucian year (CE+1353; day starts at midnight) and Lewis periods
+  astro          tropical/sidereal chart (angles, houses, aspects, lots)
   help           this overview, or help for one command (--help works too)
 
 Examples:
@@ -153,6 +154,10 @@ Examples:
   {PROG} eclipse 1919
   {PROG} cycle 2026-08-29
   {PROG} cycle --born 1960-03-22 --city Indianapolis
+  {PROG} astro --city Indianapolis
+  {PROG} astro --city Indianapolis --explain
+  {PROG} astro --city Indianapolis --sidereal lahiri
+  {PROG} astro --city Indianapolis --born 1960-03-22 2026-07-04
   {PROG} rise ceres --city London
   {PROG} rise 433 --city London
   {PROG} cache orbits --refresh
@@ -178,6 +183,9 @@ Omit a date to use today (yellow on the reconstructed command line).
 Sky times print HH:MM plus a zone letter and Swatch beats (17:52R @994).
 Beats are midnight BMT (UTC+1, no DST); @000 is 23:00Z, @500 is 11:00Z.
 -q and --json stay ISO 8601.
+`astro` is a tropical (or --sidereal) chart from Schlyter longitudes: ASC/MC,
+Placidus houses, major aspects, Arabic parts. --explain is geometry in English,
+not a horoscope. Not JPL DE.
 `sun` includes civil/nautical/astronomical twilight. `passes` needs sgp4 and a TLE
 (2-line or 3-line; catalog field may be Alpha-5).
 Negative offsets after the date may need -- so they are not flags:
@@ -833,6 +841,135 @@ def cmd_cycle(args: argparse.Namespace) -> int:
     ]
     print(marked("cycle", "Rosicrucian cycle", emoji=em))
     print_kv_blocks([meta, now_rows, lewis_rows, cite], color=em)
+    return 0
+
+
+def _chart_when(raw: str | None, place: Place) -> tuple[datetime, bool]:
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo(place.tz)
+    if not raw:
+        return datetime.now(tz).replace(microsecond=0), True
+    inst = parse_instant(raw)
+    if isinstance(inst, datetime):
+        if inst.tzinfo is None:
+            return inst.replace(tzinfo=tz), False
+        return inst, False
+    return datetime(inst.year, inst.month, inst.day, 12, 0, tzinfo=tz), False
+
+
+def _print_chart(chart, *, color: bool, transits=None, explain_lines=None) -> None:
+    em = color
+    frame = chart.frame
+    ay = ""
+    if chart.frame == "sidereal" and chart.ayanamsa_name:
+        ay = f"  ayanamsa {chart.ayanamsa_name} {chart.ayanamsa_deg:.2f}°"
+    title = "Natal" if chart.natal and not transits else "Chart"
+    if transits:
+        title = "Natal + transits"
+    print(marked("solar", f"{title}  {frame}{ay}", emoji=em))
+    meta = [
+        ("When:", format_instant(chart.when)),
+        ("Place:", f"{chart.place.name} ({chart.place.lat}, {chart.place.lon}) {chart.place.tz}"),
+        ("Houses:", chart.house_system + (f" ({chart.house_note})" if chart.house_note else "")),
+    ]
+    ang_rows = []
+    for key, label in (("asc", "ASC:"), ("mc", "MC:"), ("dsc", "DSC:"), ("ic", "IC:")):
+        p = chart.angles[key]
+        ang_rows.append((label, p.label(), f"h{p.house}" if p.house else ""))
+    print_kv_blocks([meta, ang_rows], color=em)
+    body_grid = []
+    body_marks = []
+    for name, pos in chart.bodies.items():
+        rx = " R" if pos.retrograde else ""
+        body_grid.append(
+            [name, pos.label(), str(pos.house or ""), f"{pos.lon:.2f}°{rx}"]
+        )
+        body_marks.append(body_mark(name, color=em) if name in ("sun", "moon", "mercury", "venus", "mars", "jupiter", "saturn", "uranus", "neptune", "pluto") else "")
+    print()
+    print_grid(
+        ["body", "sign", "h", "lon"],
+        body_grid,
+        color=em,
+        justify={2: "right", 3: "right"},
+        marks=body_marks,
+    )
+    lot_grid = [
+        [name, pos.label(), str(pos.house or "")]
+        for name, pos in chart.lots.items()
+    ]
+    print()
+    print_grid(["lot", "sign", "h"], lot_grid, color=em, justify={2: "right"})
+    asp = transits if transits is not None else chart.aspects
+    if asp:
+        print()
+        rows = []
+        for h in asp[:24]:
+            motion = ""
+            if h.applying is True:
+                motion = "app"
+            elif h.applying is False:
+                motion = "sep"
+            rows.append([h.a, h.kind, h.b, f"{h.orb:.1f}°", motion])
+        print_grid(["a", "aspect", "b", "orb", ""], rows, color=em, justify={3: "right"})
+    if explain_lines:
+        print()
+        for line in explain_lines:
+            print(line)
+
+
+def cmd_astro(args: argparse.Namespace) -> int:
+    from timewarp.chart import compute_chart, explain, format_quiet, transit_aspects
+
+    place = _place_from_args(args)
+    when, assumed = _chart_when(getattr(args, "date", None), place)
+    _maybe_echo_command(args, format_instant(when) if assumed else None)
+    houses = getattr(args, "houses", None) or "placidus"
+    sidereal = getattr(args, "sidereal", None)
+    orb = getattr(args, "orb", None)
+    born_raw = getattr(args, "born", None)
+    natal_when = _chart_when(born_raw, place)[0] if born_raw else None
+    if natal_when is not None and getattr(args, "date", None):
+        natal = compute_chart(
+            natal_when, place, houses=houses, sidereal=sidereal, orb=orb, natal=True
+        )
+        trans = compute_chart(when, place, houses=houses, sidereal=sidereal, orb=orb)
+        hits = transit_aspects(natal, trans, orb=orb)
+        expl = explain(natal, transits=hits) if getattr(args, "explain", False) else None
+        if args.json:
+            payload = natal.to_dict()
+            payload["transits"] = {
+                "when": format_instant(when),
+                "bodies": {k: v.to_dict() for k, v in trans.bodies.items()},
+                "aspects": [h.to_dict() for h in hits],
+            }
+            if expl:
+                payload["explain"] = expl
+            return _print_json(payload)
+        if args.quiet:
+            print(format_quiet(natal) + "  transits " + str(len(hits)))
+            return 0
+        _print_chart(natal, color=_want_color(args), transits=hits, explain_lines=expl)
+        return 0
+    chart_when = natal_when or when
+    chart = compute_chart(
+        chart_when,
+        place,
+        houses=houses,
+        sidereal=sidereal,
+        orb=orb,
+        natal=natal_when is not None,
+    )
+    expl = explain(chart) if getattr(args, "explain", False) else None
+    if args.json:
+        payload = chart.to_dict()
+        if expl:
+            payload["explain"] = expl
+        return _print_json(payload)
+    if args.quiet:
+        print(format_quiet(chart))
+        return 0
+    _print_chart(chart, color=_want_color(args), explain_lines=expl)
     return 0
 
 
@@ -1773,6 +1910,32 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_cycle)
 
     p = sub.add_parser(
+        "astro",
+        help="Tropical or sidereal chart: angles, houses, aspects, Arabic parts",
+    )
+    _add_common(p)
+    p.add_argument("date", nargs="?", help="ISO 8601 date or instant, or @beats (default: now)")
+    p.add_argument("--born", help="natal instant; with DATE, transits to natal")
+    p.add_argument("--explain", action="store_true", help="geometry in English (no delineation)")
+    p.add_argument(
+        "--houses",
+        choices=("placidus", "equal", "whole"),
+        default="placidus",
+        help="house system (default: placidus; equal if polar)",
+    )
+    p.add_argument(
+        "--sidereal",
+        nargs="?",
+        const="lahiri",
+        metavar="NAME",
+        help="sidereal frame: lahiri (default), fagan, krishnamurti",
+    )
+    p.add_argument("--orb", type=float, help="aspect orb in degrees for all points")
+    _add_place(p)
+    _add_color_flags(p)
+    p.set_defaults(func=cmd_astro)
+
+    p = sub.add_parser(
         "today",
         help="One-screen civil day: sun, moon, RC note, holiday, ISS",
     )
@@ -1989,6 +2152,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             cmd_moon,
             cmd_seasons,
             cmd_cycle,
+            cmd_astro,
             cmd_today,
             cmd_passes,
             cmd_weekday,
