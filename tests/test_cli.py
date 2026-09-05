@@ -28,6 +28,9 @@ _TEST_TLE.mkdir(parents=True, exist_ok=True)
 _SATCAT = Path(__file__).resolve().parent / "data" / "satcat-iss.csv"
 if _SATCAT.is_file():
     (_TEST_TLE / "satcat.csv").write_bytes(_SATCAT.read_bytes())
+_ISS_FIXTURE = Path(__file__).resolve().parent / "data" / "iss.tle"
+if _ISS_FIXTURE.is_file():
+    (_TEST_TLE / "name-iss.tle").write_bytes(_ISS_FIXTURE.read_bytes())
 os.environ["TIMEWARP_TLE_DIR"] = str(_TEST_TLE)
 
 _TEST_HORIZONS = Path(tempfile.gettempdir()) / "timewarp-tests-horizons"
@@ -439,6 +442,7 @@ class HelpAndErrorTests(unittest.TestCase):
         self.assertIn("Command help:", out)
         self.assertIn("cache orbits --file", out)
         self.assertIn("save --tle", out)
+        self.assertIn("today --city", out)
 
     def test_help_topic(self):
         code, out, err = run("help", "add")

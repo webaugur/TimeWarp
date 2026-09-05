@@ -91,6 +91,7 @@ Phase 2 (basic):
   holidays       list public holidays (US: python-holidays; others: Nager.Date cache)
   month          month sheet of sun/moon/twilight times
   countdown      signed time from now to a date (negative if past)
+  today          one-screen civil day (sun, moon, RC note, holiday, ISS)
   sun            sunrise / sunset, twilight, azimuth
   moon           moon phase and next new/full/quarter times
   seasons        equinoxes and solstices
@@ -127,6 +128,8 @@ Examples:
   {PROG} month 2026-07 --city Indianapolis
   {PROG} month --city Indianapolis --twilight
   {PROG} countdown 2026-12-31T00:00:00
+  {PROG} today --city Indianapolis
+  {PROG} today --city Indianapolis 2026-07-04
   {PROG} sun --city "New York" 2026-07-04
   {PROG} moon 2026-08-28 --city Indianapolis
   {PROG} seasons 2026
@@ -827,6 +830,114 @@ def cmd_cycle(args: argparse.Namespace) -> int:
     ]
     print(marked("cycle", "Rosicrucian cycle", emoji=em))
     print_kv_blocks([meta, now_rows, lewis_rows, cite], color=em)
+    return 0
+
+
+def cmd_today(args: argparse.Namespace) -> int:
+    from zoneinfo import ZoneInfo
+
+    from timewarp.cycle import format_color_period, format_note
+    from timewarp.eclipses import iso_range
+    from timewarp.today import format_quiet, holiday_country, snapshot
+
+    place = _place_from_args(args)
+    assumed = not getattr(args, "date", None)
+    if args.date:
+        when = parse_instant(args.date)
+    else:
+        when = datetime.now(ZoneInfo(place.tz)).replace(microsecond=0)
+    min_elev = float(getattr(args, "min_elev", DEFAULT_MIN_ELEV))
+    if not 0 <= min_elev <= 90:
+        raise TimeWarpError("--min-elev must be in 0..90 degrees")
+    tle_raw = getattr(args, "tle", None)
+    tle_path = Path(tle_raw) if tle_raw else None
+    country = holiday_country(getattr(args, "holidays", None), getattr(args, "country", None))
+    view = snapshot(
+        when,
+        place,
+        country=country,
+        region=getattr(args, "region", None),
+        tle_path=tle_path,
+        min_elev=min_elev,
+    )
+    _maybe_echo_command(args, view.date.isoformat() if assumed else None)
+    if args.json:
+        return _print_json(view.to_dict())
+    if args.quiet:
+        print(format_quiet(view))
+        return 0
+    em = _want_color(args)
+    dash = "—"
+
+    def clk(when_dt):
+        return format_clock(when_dt) if when_dt else dash
+
+    print(marked("calendar", f"{view.weekday} {view.date.isoformat()}", emoji=em))
+    meta: list[tuple] = [
+        ("Place:", f"{view.place.name} ({view.place.lat}, {view.place.lon}) {view.place.tz}"),
+        ("ISO week:", view.iso_week),
+    ]
+    if view.holiday:
+        meta.append((icon("holiday", emoji=em), "Holiday:", view.holiday, ""))
+    sun_rows: list[tuple] = [
+        _body_kv("sun", color=em),
+        (icon("dawn", emoji=em), "Civil dawn:", clk(view.sun.civil_dawn), ""),
+        (icon("rise", emoji=em), "Sunrise:", clk(view.sun.sunrise), _fmt_az(view.sun.sunrise_az).strip()),
+        (icon("noon", emoji=em), "Solar noon:", clk(view.sun.solar_noon), ""),
+        (icon("set", emoji=em), "Sunset:", clk(view.sun.sunset), _fmt_az(view.sun.sunset_az).strip()),
+        (icon("dusk", emoji=em), "Civil dusk:", clk(view.sun.civil_dusk), ""),
+    ]
+    if view.sun.day_length_seconds is not None:
+        sun_rows.append(("Day length:", view.sun.to_dict()["day_length_iso8601"]))
+    if view.sun.note:
+        sun_rows.append((icon("warn", emoji=em), "Note:", view.sun.note, ""))
+    moon_rows: list[tuple] = [
+        _body_kv("moon", color=em),
+        ("Phase:", view.moon.phase),
+        ("Illumination:", f"{view.moon.illumination:.1%}"),
+        (icon("rise", emoji=em), "Moonrise:", clk(view.moonrise), ""),
+        (icon("set", emoji=em), "Moonset:", clk(view.moonset), ""),
+    ]
+    if view.moon_event_name and view.moon_event_time:
+        moon_rows.append((view.moon_event_name + ":", clk(view.moon_event_time)))
+    daily = view.daily
+    letter = format_note(daily["letter"], color=em)
+    rc_rows: list[tuple] = [
+        (body_mark(daily["planet"], color=em), "Star Date:", view.stamp, ""),
+        ("", "Note:", letter, daily["time"]),
+        ("", "Color:", format_color_period(daily["letter"], color=em), ""),
+    ]
+    extra: list[tuple] = []
+    if view.season is not None:
+        extra.append(("Season:", view.season.name, clk(view.season.time)))
+    if view.eclipse is not None:
+        extra.append(("Eclipse:", f"{view.eclipse.kind} {view.eclipse.type}", iso_range(view.eclipse)))
+    print_kv_blocks([meta, sun_rows, moon_rows, rc_rows, extra], color=em)
+    if not view.passes:
+        return 0
+    print()
+    print(marked("pass", "ISS", emoji=em))
+    grid = []
+    marks = []
+    for p in view.passes:
+        grid.append(
+            [
+                p.sat.name,
+                format_clock(p.aos),
+                format_clock(p.tca),
+                f"{p.max_alt_deg:.0f}°",
+                format_clock(p.los),
+                p.twilight,
+            ]
+        )
+        marks.append(sky_mark(p.twilight, color=em))
+    print_grid(
+        ["sat", "aos", "max", "alt", "los", "sky"],
+        grid,
+        color=em,
+        justify={3: "right"},
+        marks=marks,
+    )
     return 0
 
 
@@ -1658,6 +1769,34 @@ def build_parser() -> argparse.ArgumentParser:
     _add_color_flags(p)
     p.set_defaults(func=cmd_cycle)
 
+    p = sub.add_parser(
+        "today",
+        help="One-screen civil day: sun, moon, RC note, holiday, ISS",
+    )
+    _add_common(p)
+    p.add_argument("date", nargs="?", help="ISO 8601 date or instant (default: now)")
+    p.add_argument(
+        "--holidays",
+        metavar="COUNTRY",
+        help="holiday calendar ISO country (default: US)",
+    )
+    p.add_argument("--country", help="same as --holidays (uses the cached --country if set)")
+    p.add_argument(
+        "--region",
+        help="subdivision: US-IN / Indiana; Nager ISO 3166-2 (DE-BY / BY / Bavaria)",
+    )
+    p.add_argument("--tle", help="TLE file for ISS (skip Celestrak)")
+    p.add_argument(
+        "--min-elev",
+        dest="min_elev",
+        type=float,
+        default=DEFAULT_MIN_ELEV,
+        help="minimum ISS max-elevation in degrees (default: 10)",
+    )
+    _add_place(p)
+    _add_color_flags(p)
+    p.set_defaults(func=cmd_today)
+
     p = sub.add_parser("passes", help="Satellite passes vs twilight, moon, and visual mag")
     _add_common(p)
     p.add_argument("sat", nargs="?", help="name or catalog number (default: ISS)")
@@ -1847,6 +1986,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             cmd_moon,
             cmd_seasons,
             cmd_cycle,
+            cmd_today,
             cmd_passes,
             cmd_weekday,
             cmd_week,

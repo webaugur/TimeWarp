@@ -183,6 +183,7 @@ Workdays skip Saturday and Sunday by default. `--weekend Fri,Sat` changes that.
 | Create calendar | `timewarp calendar [YEAR]` | Year grid; US: python-holidays (federal or `--region` state); others: Nager.Date |
 | Month sheet | `timewarp month [YYYY-MM] --city NAME` | One row per day: civil twilight, sunrise/set, moonrise/set, illumination |
 | Countdown to Any Date | `timewarp countdown [DATE]` | Signed remaining time (negative if the date is past) |
+| Today | `timewarp today --city NAME [DATE]` | One screen: weekday, holiday, sun, moon, RC note/color, ISS. Not the full `cycle` sheet |
 | Sunrise & Sunset | `timewarp sun --city "New York" [DATE]` | Rise, noon, set, twilight, azimuth, day length |
 | Moon phases | `timewarp moon [DATE]` | Phase, illumination, next new/full/quarter *times* |
 | Seasons | `timewarp seasons [YEAR]` | March/September equinox, June/December solstice |
@@ -199,6 +200,9 @@ timewarp calendar 2026 --iso          # Monday-first weeks
 timewarp month 2026-07 --city Indianapolis
 timewarp month --city Indianapolis --twilight
 timewarp countdown 2026-12-31
+timewarp today --city Indianapolis
+timewarp today --city Indianapolis 2026-07-04
+timewarp today --city Indianapolis 2019-12-10 --tle tests/data/iss.tle
 timewarp sun --city "New York" 2026-07-04
 timewarp sun --lat 40.7128 --lon -74.0060 --tz America/New_York
 timewarp moon 2026-08-28
@@ -239,6 +243,8 @@ timewarp help rise
 ```
 
 `timewarp cycle` (alias `rosicrucian`) prints the **Rosicrucian year**: Common Era + **1353**. The year is the **March equinox date**; the RC **day** (and that new year) starts at **local midnight**, not at the equinox instant. Default place is Greenwich. The **star date** is `YEAR.DDD` — midnights since the equinox-date midnight (`2026-08-29` → `3379.162`). A **1690-year** cycle starts at midnight on the **337 CE** equinox date (proleptic Gregorian) and rolls at the 2027 equinox midnight. Daily A–G letters and their **color period** (gold, green, orange, orchid, periwinkle, sky, coral) follow the public [AMORC cycles clock](https://cycles.amorc.org/en/cycles), counted from midnight. `--born` adds H. Spencer Lewis period *numbers* (7-year life, ~52-day yearly, soul grid from 22 March); the book’s essays are not copied. `-q` prints the star date.
+
+`timewarp today --city NAME` is one local day: weekday, ISO week, holiday if any (US federal by default; `--holidays` / `--country` / `--region`), civil dawn/dusk and sunrise/set, moon phase plus moonrise/set, RC **star date + daily note and color** (not the 1690-year sheet or Lewis), a season or eclipse line only if it falls that day, and ISS passes (fail-soft if there is no TLE; `--tle FILE` installs nothing, it only reads). Place is required like `sun` (cached `--city` counts). `-q` prints date, weekday, sunrise–sunset, star date, and the note letter.
 
 `sun` and rise/set human output is local `HH:MM` plus a NATO zone letter for the UTC offset: **Q** = UTC−4 (EDT), **R** = UTC−5 (EST), **Z** = UTC, and so on (`17:52R`, `18:52Q`, `13:00Z`). Keys in a view share one right-aligned column (Rise/Transit/Set line up with Body/Date/Place). Clock extras (azimuth, ISO timestamps) are a third column sized only from those rows, so a long Place line cannot stretch `moon`’s next-quarter dates. The civil date is not repeated on every rise/set cell; it is on the command line (yellow if assumed) or in the date column of a multi-day range. `--13` / `--33` are geometric altitudes above the horizon (not twilight). If the body never reaches that height, the cell is `—`. `-q` and `--json` still use full ISO timestamps.
 

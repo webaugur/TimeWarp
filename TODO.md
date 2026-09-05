@@ -15,6 +15,7 @@ _(none)_
 
 ## Done
 
+- [#14](https://github.com/webaugur/TimeWarp/issues/14) `today` command (one-screen civil day)
 - [#13](https://github.com/webaugur/TimeWarp/issues/13) Install a downloaded JPL SBDB dump (`cache orbits --file`)
 - [#12](https://github.com/webaugur/TimeWarp/issues/12) SBDB Query dump for more rise/set small bodies
 - [#10](https://github.com/webaugur/TimeWarp/issues/10) Rosicrucian Cycles of Life (`cycle` / `rosicrucian`)
