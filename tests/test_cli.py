@@ -167,6 +167,20 @@ class CliPhase2Tests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("solar", out)
 
+    def test_cache_orbits_file(self):
+        from timewarp.jpl import _reset_catalog_memo, catalog_path
+
+        dump = Path(__file__).resolve().parent / "data" / "sbdb-catalog-h11.json"
+        _reset_catalog_memo()
+        try:
+            code, out, err = run("cache", "orbits", "--file", str(dump))
+            self.assertEqual(code, 0, err)
+            self.assertIn("objects: 3", out)
+            self.assertTrue(catalog_path().is_file())
+            self.assertIn("Installed from", out)
+        finally:
+            _reset_catalog_memo()
+
     def test_list_sb_from_fixture(self):
         old = os.environ.get("TIMEWARP_SBDB_CATALOG")
         os.environ["TIMEWARP_SBDB_CATALOG"] = str(

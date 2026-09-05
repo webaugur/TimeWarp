@@ -9,6 +9,7 @@ import re
 import sys
 import traceback
 from datetime import date, datetime
+from pathlib import Path
 from typing import Sequence
 
 from timewarp import __version__
@@ -53,7 +54,6 @@ from timewarp.cache import (
     quote_value,
     save as cache_save,
 )
-from pathlib import Path
 
 from timewarp.passes import (
     DEFAULT_MIN_ELEV,
@@ -149,6 +149,7 @@ Examples:
   {PROG} rise ceres --city London
   {PROG} rise 433 --city London
   {PROG} cache orbits --refresh
+  {PROG} cache orbits --file path/to/sbdb.json
   {PROG} rise --list-sb
   {PROG} rise iris --city London
   {PROG} rise io --city London
@@ -157,6 +158,7 @@ Examples:
   {PROG} save --city Indianapolis
   {PROG} load
   {PROG} cache orbits --refresh
+  {PROG} cache orbits --file path/to/sbdb.json
   {PROG} unload --city
   {PROG} unload
   {PROG} help
@@ -1344,10 +1346,15 @@ def cmd_cache_save(args: argparse.Namespace) -> int:
     return 0
 
 def cmd_cache_orbits(args: argparse.Namespace) -> int:
-    from timewarp.jpl import catalog_path, catalog_rows, load_catalog
+    from timewarp.jpl import catalog_path, catalog_rows, install_catalog, load_catalog
 
+    src = getattr(args, "orbit_file", None)
     refresh = bool(getattr(args, "refresh", False))
-    index = load_catalog(refresh=refresh)
+    if src:
+        install_catalog(Path(src))
+        index = load_catalog()
+    else:
+        index = load_catalog(refresh=refresh)
     rows = catalog_rows()
     path = catalog_path()
     if args.json:
@@ -1358,10 +1365,13 @@ def cmd_cache_orbits(args: argparse.Namespace) -> int:
     print(f"SBDB catalog  {path}")
     print(f"objects: {len(rows)}  (numbered asteroids H≤11 + numbered comets)")
     print("Two-body osculating elements; not JPL Horizons / DE.")
-    if refresh:
+    if src:
+        print(f"Installed from {src}")
+    elif refresh:
         print("Refetched from ssd-api.jpl.nasa.gov/sbdb_query.api")
     elif not path.is_file():
         print("No dump on disk. Run: timewarp cache orbits --refresh")
+        print("Or install a downloaded JSON: timewarp cache orbits --file dump.json")
     return 0
 
 
@@ -1763,7 +1773,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="JPL SBDB dump: numbered asteroids H≤11 and numbered comets",
     )
     _add_common(orbits_p)
-    orbits_p.add_argument("--refresh", action="store_true", help="refetch the dump from JPL")
+    orbits_src = orbits_p.add_mutually_exclusive_group()
+    orbits_src.add_argument("--refresh", action="store_true", help="refetch the dump from JPL")
+    orbits_src.add_argument(
+        "--file",
+        dest="orbit_file",
+        metavar="PATH",
+        help="install a downloaded JPL JSON dump (objects list or fields/data table)",
+    )
     orbits_p.set_defaults(func=cmd_cache, cache_cmd="orbits")
 
     p = sub.add_parser("save", help="store --city and similar flags")

@@ -9,8 +9,12 @@ from unittest.mock import patch
 from timewarp.errors import TimeWarpError
 from timewarp.jpl import (
     SBDB_QUERY,
+    _read_catalog_file,
     _reset_catalog_memo,
+    catalog_objects_from_payload,
     fetch_sbdb,
+    install_catalog,
+    load_catalog,
     load_elements,
     load_query,
     lookup_catalog,
@@ -194,6 +198,163 @@ class CatalogTests(unittest.TestCase):
             with patch("timewarp.jpl.fetch_catalog", side_effect=AssertionError("network")):
                 self.assertEqual(resolve_body("Iris"), "iris")
                 self.assertEqual(resolve_body("7"), "iris")
+
+    def test_reads_jpl_fields_data_table(self):
+        payload = {
+            "fields": [
+                "pdes",
+                "name",
+                "full_name",
+                "epoch",
+                "a",
+                "e",
+                "i",
+                "om",
+                "w",
+                "ma",
+                "n",
+                "H",
+                "kind",
+            ],
+            "data": [
+                [
+                    "7",
+                    "Iris",
+                    "7 Iris",
+                    "2461200.5",
+                    "2.385",
+                    "0.231",
+                    "5.52",
+                    "259.7",
+                    "145.4",
+                    "10.0",
+                    "0.268",
+                    "5.51",
+                    "an",
+                ]
+            ],
+        }
+        rows = catalog_objects_from_payload(payload)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["name"], "Iris")
+
+
+class InstallCatalogTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._old_dir = os.environ.get("TIMEWARP_SBDB_DIR")
+        self._old_cat = os.environ.get("TIMEWARP_SBDB_CATALOG")
+        os.environ["TIMEWARP_SBDB_DIR"] = self.tmp.name
+        os.environ.pop("TIMEWARP_SBDB_CATALOG", None)
+        _reset_catalog_memo()
+
+    def tearDown(self):
+        _reset_catalog_memo()
+        if self._old_dir is None:
+            os.environ.pop("TIMEWARP_SBDB_DIR", None)
+        else:
+            os.environ["TIMEWARP_SBDB_DIR"] = self._old_dir
+        if self._old_cat is None:
+            os.environ.pop("TIMEWARP_SBDB_CATALOG", None)
+        else:
+            os.environ["TIMEWARP_SBDB_CATALOG"] = self._old_cat
+        self.tmp.cleanup()
+
+    def test_install_objects_dump(self):
+        src = Path(self.tmp.name) / "download.json"
+        src.write_bytes((DATA / "sbdb-catalog-h11.json").read_bytes())
+        rows = install_catalog(src)
+        self.assertGreaterEqual(len(rows), 2)
+        el = lookup_catalog("Iris")
+        self.assertIsNotNone(el)
+        dest = Path(self.tmp.name) / "catalog-h11.json"
+        self.assertTrue(dest.is_file())
+        on_disk = json.loads(dest.read_text(encoding="utf-8"))
+        self.assertIsInstance(on_disk.get("objects"), list)
+
+    def test_install_jpl_table(self):
+        src = Path(self.tmp.name) / "jpl.json"
+        src.write_text(
+            json.dumps(
+                {
+                    "fields": [
+                        "pdes",
+                        "name",
+                        "full_name",
+                        "epoch",
+                        "a",
+                        "e",
+                        "i",
+                        "om",
+                        "w",
+                        "ma",
+                        "n",
+                        "H",
+                        "kind",
+                    ],
+                    "data": [
+                        [
+                            "7",
+                            "Iris",
+                            "7 Iris",
+                            "2461200.5",
+                            "2.385",
+                            "0.231",
+                            "5.52",
+                            "259.7",
+                            "145.4",
+                            "10.0",
+                            "0.268",
+                            "5.51",
+                            "an",
+                        ]
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        install_catalog(src)
+        self.assertEqual(lookup_catalog("7").name, "iris")
+
+    def test_load_raw_table_from_catalog_path(self):
+        dest = Path(self.tmp.name) / "catalog-h11.json"
+        dest.write_text(
+            json.dumps(
+                {
+                    "fields": ["pdes", "name", "epoch", "a", "e", "i", "om", "w", "ma", "n"],
+                    "data": [
+                        [
+                            "7",
+                            "Iris",
+                            "2461200.5",
+                            "2.385",
+                            "0.231",
+                            "5.52",
+                            "259.7",
+                            "145.4",
+                            "10.0",
+                            "0.268",
+                        ]
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        rows = _read_catalog_file(dest)
+        self.assertIsNotNone(rows)
+        self.assertEqual(rows[0]["name"], "Iris")
+        self.assertIn("iris", load_catalog())
+
+    def test_empty_dump_errors(self):
+        src = Path(self.tmp.name) / "empty.json"
+        src.write_text(json.dumps({"objects": []}), encoding="utf-8")
+        with self.assertRaises(TimeWarpError) as ctx:
+            install_catalog(src)
+        self.assertIn("no objects", str(ctx.exception))
+
+    def test_missing_file_errors(self):
+        with self.assertRaises(TimeWarpError):
+            install_catalog(Path(self.tmp.name) / "missing.json")
 
 
 class FetchSbdbTests(unittest.TestCase):

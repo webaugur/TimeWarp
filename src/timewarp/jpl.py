@@ -3,7 +3,7 @@
 GET https://ssd-api.jpl.nasa.gov/sbdb.api?sstr=…&full-prec=1
 Catalog dump: sbdb_query.api (numbered H≤11 asteroids + numbered comets).
 Cache: ~/.cache/timewarp/sbdb/ (TIMEWARP_SBDB_DIR). Catalog file override:
-TIMEWARP_SBDB_CATALOG.
+TIMEWARP_SBDB_CATALOG. Manual dump: `timewarp cache orbits --file dump.json`.
 """
 
 from __future__ import annotations
@@ -406,24 +406,59 @@ def fetch_catalog(*, timeout: float = 60.0) -> list[dict]:
     return rows
 
 
+def catalog_objects_from_payload(payload: object) -> list[dict]:
+    """TimeWarp `{objects}` dump or a raw JPL `sbdb_query.api` `{fields,data}` table."""
+    if not isinstance(payload, dict):
+        raise TimeWarpError("SBDB catalog is not a JSON object")
+    objects = payload.get("objects")
+    if isinstance(objects, list):
+        return [r for r in objects if isinstance(r, dict)]
+    if isinstance(payload.get("fields"), list) and isinstance(payload.get("data"), list):
+        return parse_query_table(payload)
+    raise TimeWarpError(
+        "SBDB catalog needs an objects list or a JPL fields/data table"
+    )
+
+
 def _read_catalog_file(path: Path) -> list[dict] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    if not isinstance(payload, dict) or not isinstance(payload.get("objects"), list):
+    try:
+        return catalog_objects_from_payload(payload)
+    except TimeWarpError:
         return None
-    return [r for r in payload["objects"] if isinstance(r, dict)]
 
 
-def _write_catalog_file(path: Path, rows: list[dict]) -> None:
+def _write_catalog_file(path: Path, rows: list[dict], *, source: str = SBDB_QUERY_URL) -> None:
     blob = {
         "fetched": datetime.now(timezone.utc).isoformat(),
-        "source": SBDB_QUERY_URL,
+        "source": source,
         "objects": rows,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(blob) + "\n", encoding="utf-8")
+
+
+def install_catalog(src: Path) -> list[dict]:
+    """Copy a downloaded dump into the cache. Does not hit the network."""
+    try:
+        payload = json.loads(src.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise TimeWarpError(f"could not read SBDB dump {src}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise TimeWarpError(f"SBDB dump {src} is not JSON") from exc
+    rows = catalog_objects_from_payload(payload)
+    if not rows:
+        raise TimeWarpError(f"SBDB dump {src} has no objects")
+    dest = catalog_path()
+    try:
+        _write_catalog_file(dest, rows, source=str(src))
+    except OSError as exc:
+        raise TimeWarpError(f"could not write SBDB catalog {dest}: {exc}") from exc
+    _reset_catalog_memo()
+    return rows
 
 
 def load_catalog(*, refresh: bool = False) -> dict[str, KeplerElements]:
