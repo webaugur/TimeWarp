@@ -2,7 +2,7 @@
 
 Command-line date calculators, including **negative** spans (end before start).
 
-Dates you **type** are **ISO 8601** only. There is no `MM/DD` vs `DD/MM`. Time of day is optional. `-q` and `--json` also print ISO 8601. Sky clocks (`sun`, rise/set, `moon` event times, `seasons`) use `HH:MM` plus a NATO zone letter (`17:52R`) instead of repeating the calendar date.
+Dates you **type** are **ISO 8601** only. There is no `MM/DD` vs `DD/MM`. Time of day is optional; a time that starts with `@` is [Swatch Internet Time](https://en.wikipedia.org/wiki/Swatch_Internet_Time) (`@500`, `2026-07-04T@500`). `-q` and `--json` also print ISO 8601. Sky clocks (`sun`, rise/set, `moon` event times, `seasons`) use `HH:MM` plus a NATO zone letter and Swatch beats (`17:52R @994`) instead of repeating the calendar date.
 
 On a color TTY, human output uses **emoji** (🌞 🌙 ☄️ 🛰️ 🎉). Labels and clocks are ASCII so columns line up; glyphs sit at the **end of the line**. Putting ☀️/🌞 in the same cell as a time is what shoved the rest of the row over (terminals disagree with East Asian Width on VS16 sequences). `NO_COLOR`, `--no-color`, pipes, `-q`, and `--json` stay plain (IAU symbols, no emoji). `--color` belongs after the subcommand (`sun --color …`); it is also accepted on the parent parser.
 
@@ -187,7 +187,7 @@ Workdays skip Saturday and Sunday by default. `--weekend Fri,Sat` changes that.
 | Sunrise & Sunset | `timewarp sun --city "New York" [DATE]` | Rise, noon, set, twilight, azimuth, day length |
 | Moon phases | `timewarp moon [DATE]` | Phase, illumination, next new/full/quarter *times* |
 | Seasons | `timewarp seasons [YEAR]` | March/September equinox, June/December solstice |
-| Rise / set | `timewarp rise --city "New York" [DATE]` | Rise times as `HH:MM` + zone letter; `--13` / `--33` add +13°/+33° after rise and before set. Named extras plus SBDB ids (`433`) |
+| Rise / set | `timewarp rise --city "New York" [DATE]` | Rise times as `HH:MM` + zone letter + Swatch `@beats`; `--13` / `--33` add +13°/+33° after rise and before set. Named extras plus SBDB ids (`433`) |
 | Set | `timewarp set --city "New York" [DATE]` | Set times for the same bodies and period |
 | Eclipse lookup | `timewarp eclipse [YEAR]` | Solar and lunar eclipses 1900–2199. Omit YEAR for the next 8 from today; `--limit N` caps the list |
 | Rosicrucian cycle | `timewarp cycle [DATE]` | Year CE+1353; RC **day** starts at **local midnight**. Star date `3379.162`. `--born` adds Lewis periods. Alias: `rosicrucian` |
@@ -223,6 +223,7 @@ timewarp eclipse 2026
 timewarp eclipse --limit 8
 timewarp eclipse 1919
 timewarp cycle 2026-08-29
+timewarp cycle 2026-07-04T@500
 timewarp cycle --born 1960-03-22 --city Indianapolis
 timewarp rise ceres --city London
 timewarp rise 433 --city London
@@ -246,7 +247,7 @@ timewarp help rise
 
 `timewarp today --city NAME` is one local day: weekday, ISO week, holiday if any (US federal by default; `--holidays` / `--country` / `--region`), civil dawn/dusk and sunrise/set, moon phase plus moonrise/set, RC **star date + daily note and color** (not the 1690-year sheet or Lewis), a season or eclipse line only if it falls that day, and ISS passes (fail-soft if there is no TLE; `--tle FILE` installs nothing, it only reads). Place is required like `sun` (cached `--city` counts). `-q` prints date, weekday, sunrise–sunset, star date, and the note letter.
 
-`sun` and rise/set human output is local `HH:MM` plus a NATO zone letter for the UTC offset: **Q** = UTC−4 (EDT), **R** = UTC−5 (EST), **Z** = UTC, and so on (`17:52R`, `18:52Q`, `13:00Z`). Keys in a view share one right-aligned column (Rise/Transit/Set line up with Body/Date/Place). Clock extras (azimuth, ISO timestamps) are a third column sized only from those rows, so a long Place line cannot stretch `moon`’s next-quarter dates. The civil date is not repeated on every rise/set cell; it is on the command line (yellow if assumed) or in the date column of a multi-day range. `--13` / `--33` are geometric altitudes above the horizon (not twilight). If the body never reaches that height, the cell is `—`. `-q` and `--json` still use full ISO timestamps.
+`sun` and rise/set human output is local `HH:MM` plus a NATO zone letter for the UTC offset: **Q** = UTC−4 (EDT), **R** = UTC−5 (EST), **Z** = UTC, and so on (`17:52R @994`, `18:52Q @994`, `13:00Z @583`). After the letter comes **Swatch Internet Time** (`@000`–`@999`). That beat is **not** local: it is the same number everywhere, counted from midnight **BMT** (UTC+1, no daylight saving). One beat is 86.4 seconds. `@000` is 23:00 UTC; `@500` is 11:00 UTC (noon BMT). Solar noon at `13:00Q` is `@750` because 13:00 EDT is 18:00 BMT. Missing rise/set cells stay `—` (no beat). Every other human clock (`month`, `today`, `passes`, cycle period) uses the same `format_clock`. Type a beat the same way: `@500` (this BMT day) or `2026-07-04T@500` / `2026-07-04 @500`. Keys in a view share one right-aligned column (Rise/Transit/Set line up with Body/Date/Place). Clock extras (azimuth, ISO timestamps) are a third column sized only from those rows, so a long Place line cannot stretch `moon`’s next-quarter dates. The civil date is not repeated on every rise/set cell; it is on the command line (yellow if assumed) or in the date column of a multi-day range. `--13` / `--33` are geometric altitudes above the horizon (not twilight). If the body never reaches that height, the cell is `—`. `-q` and `--json` still use full ISO timestamps (no `@` beat on those lines).
 
 `timewarp month YYYY-MM --city NAME` (alias `almanac`) is a printable month sheet: civil dawn/dusk (sun −6°), sunrise/set, day length, moonrise/set, illumination. `--twilight` adds nautical (−12°) and astronomical (−18°) columns. Omit the month to use this month (yellow on the reconstructed CLI).
 
@@ -302,9 +303,11 @@ Accepted:
 - `YYYY-MM-DDTHH:MM[:SS][Z|+HH:MM]` (space instead of `T` is also accepted)
 - `YYYY-Www-D` (ISO week date)
 - `YYYY-DDD` (ordinal date)
+- `@000` … `@999` (Swatch beats on the current BMT date; optional fraction `@500.5`)
+- `YYYY-MM-DDT@500` or `YYYY-MM-DD @500` (that beat on that BMT calendar date)
 - `today`, `now`, `yesterday`, `tomorrow`
 
-Rejected (on purpose): `04/31/2025`, `31-04-2025`, `April 31, 2025`.
+Rejected (on purpose): `04/31/2025`, `31-04-2025`, `April 31, 2025`. `@1000` is not a beat.
 
 ## Tests
 

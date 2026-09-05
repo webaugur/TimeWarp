@@ -443,6 +443,8 @@ class HelpAndErrorTests(unittest.TestCase):
         self.assertIn("cache orbits --file", out)
         self.assertIn("save --tle", out)
         self.assertIn("today --city", out)
+        self.assertIn("@500", out)
+        self.assertIn("Swatch beats", out)
 
     def test_help_topic(self):
         code, out, err = run("help", "add")

@@ -42,6 +42,9 @@ _HMS = re.compile(
     r"^T?(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|[+-]\d{2}:?\d{2})?$",
     re.IGNORECASE,
 )
+_BEATS = re.compile(r"^@(\d{1,3}(?:\.\d+)?)$")
+# Biel Mean Time: UTC+1 all year (Swatch Internet Time).
+BMT = timezone(timedelta(hours=1), "BMT")
 
 _RELATIVE = {
     "today": lambda: date.today(),
@@ -92,12 +95,56 @@ def tz_letter(value: datetime) -> str:
     return _MIL_WEST[min(-hours, 12)]
 
 
+def swatch_beats(value: datetime) -> float:
+    """Swatch beats after midnight BMT (UTC+1, no DST). One beat = 86.4 seconds.
+
+    Naive datetimes are treated as UTC. Range is 0 inclusive to 1000 exclusive.
+    """
+    if value.tzinfo is None:
+        utc = value.replace(tzinfo=timezone.utc)
+    else:
+        utc = value.astimezone(timezone.utc)
+    secs = utc.hour * 3600 + utc.minute * 60 + utc.second + utc.microsecond / 1_000_000
+    bmt = (secs + 3600.0) % 86400.0
+    return bmt / 86.4
+
+
+def format_swatch(value: datetime) -> str:
+    """Canonical Swatch Internet Time: @000 … @999."""
+    n = int(round(swatch_beats(value))) % 1000
+    return f"@{n:03d}"
+
+
+def datetime_from_beats(day: date, beats: float) -> datetime:
+    """Instant at `beats` after midnight BMT on `day` (aware, UTC+1)."""
+    if not 0 <= beats < 1000:
+        raise ParseError(f"Swatch beats must be @000 … @999, got @{beats}")
+    start = datetime(day.year, day.month, day.day, tzinfo=BMT)
+    return start + timedelta(seconds=beats * 86.4)
+
+
+def parse_beats(text: str) -> float:
+    """Parse `@000` … `@999` (optional fraction). Leading T/space is allowed."""
+    raw = text.strip()
+    if raw[:1] in "Tt":
+        raw = raw[1:].strip()
+    m = _BEATS.fullmatch(raw)
+    if not m:
+        raise ParseError(
+            f"invalid Swatch time {text!r}; use @000 … @999 (optional fraction, e.g. @500.5)"
+        )
+    beats = float(m.group(1))
+    if not 0 <= beats < 1000:
+        raise ParseError(f"Swatch beats must be @000 … @999, got {raw}")
+    return beats
+
+
 def format_clock(value: datetime) -> str:
-    """Local time as HH:MM plus zone letter: 17:52R, 18:52Q, 13:00Z."""
+    """Local HH:MM plus NATO zone letter and Swatch beats: 17:52R @994, 13:00Z @583."""
     local = value
     if value.tzinfo is not None:
         local = value.astimezone(value.tzinfo)
-    return f"{local:%H:%M}{tz_letter(local)}"
+    return f"{local:%H:%M}{tz_letter(local)} {format_swatch(value)}"
 
 
 def format_labeled(value: Instant) -> str:
@@ -140,12 +187,14 @@ def _parse_time_suffix(suffix: str) -> tuple[time, timezone | None] | None:
         text = "T" + text[1:].strip()
     elif text[0].isdigit():
         text = "T" + text
+    elif text[0] == "@":
+        raise ParseError(f"invalid time {suffix!r}; use ISO 8601 HH:MM[:SS][Z|+HH:MM] or @beats")
     else:
         raise ParseError(f"unexpected trailing date text {suffix!r}")
     m = _HMS.fullmatch(text)
     if not m:
         raise ParseError(
-            f"invalid time {suffix!r}; use ISO 8601 HH:MM[:SS][Z|+HH:MM]"
+            f"invalid time {suffix!r}; use ISO 8601 HH:MM[:SS][Z|+HH:MM] or @beats"
         )
     hour = int(m.group(1))
     minute = int(m.group(2))
@@ -158,11 +207,13 @@ def _parse_time_suffix(suffix: str) -> tuple[time, timezone | None] | None:
 
 
 def looks_like_instant(text: str) -> bool:
-    """True when `text` is a relative word or an ISO date/week/ordinal (not a body name)."""
+    """True when `text` is a relative word, ISO date/week/ordinal, or @beats (not a body name)."""
     raw = text.strip()
     if not raw:
         return False
     if raw.lower() in _RELATIVE:
+        return True
+    if raw.startswith("@") or "T@" in raw.upper() or " @" in raw:
         return True
     if _WEEK.fullmatch(raw) or _ORDINAL.fullmatch(raw) or _YMD.match(raw):
         return True
@@ -170,7 +221,12 @@ def looks_like_instant(text: str) -> bool:
 
 
 def parse_instant(text: str) -> Instant:
-    """Parse an ISO 8601 date or date-time. Relative words today/now/yesterday/tomorrow are also accepted."""
+    """Parse an ISO 8601 date or date-time, or a Swatch `@beats` time.
+
+    Relative words today/now/yesterday/tomorrow are also accepted.
+    `@500` is that beat on the current BMT date. `YYYY-MM-DDT@500` (or a space
+    before `@`) is that beat on that BMT calendar date.
+    """
     raw = text.strip()
     if not raw:
         raise ParseError("empty date")
@@ -178,6 +234,11 @@ def parse_instant(text: str) -> Instant:
     key = raw.lower()
     if key in _RELATIVE:
         return _RELATIVE[key]()
+
+    if raw.startswith("@"):
+        beats = parse_beats(raw)
+        bmt_day = datetime.now(timezone.utc).astimezone(BMT).date()
+        return datetime_from_beats(bmt_day, beats)
 
     week = _WEEK.fullmatch(raw)
     if week:
@@ -210,6 +271,13 @@ def parse_instant(text: str) -> Instant:
             raise _invalid_ymd(year, month, day) from exc
         if not rest.strip():
             return d
+        beat_text = rest.strip()
+        if beat_text[:1] in "Tt":
+            beat_body = beat_text[1:].strip()
+        else:
+            beat_body = beat_text
+        if beat_body.startswith("@"):
+            return datetime_from_beats(d, parse_beats(beat_body))
         parsed_time = _parse_time_suffix(rest)
         if parsed_time is None:
             return d
@@ -222,7 +290,8 @@ def parse_instant(text: str) -> Instant:
     except ValueError:
         pass
     raise ParseError(
-        f"invalid date {raw!r}; use ISO 8601 (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS[Z|+HH:MM])"
+        f"invalid date {raw!r}; use ISO 8601 (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS[Z|+HH:MM]) "
+        f"or Swatch @beats (@500, 2026-07-04T@500)"
     )
 
 

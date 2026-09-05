@@ -172,9 +172,12 @@ Examples:
 
 Dates are ISO 8601 only: YYYY-MM (month sheet), YYYY-MM-DD,
 YYYY-MM-DDTHH:MM[:SS][Z|+HH:MM], YYYY-Www-D, YYYY-DDD.
+Swatch beats: @500 (this BMT day) or 2026-07-04T@500.
 Optional words: today, now, yesterday, tomorrow.
 Omit a date to use today (yellow on the reconstructed command line).
-Sky times print HH:MM plus a zone letter (17:52R); -q and --json stay ISO 8601.
+Sky times print HH:MM plus a zone letter and Swatch beats (17:52R @994).
+Beats are midnight BMT (UTC+1, no DST); @000 is 23:00Z, @500 is 11:00Z.
+-q and --json stay ISO 8601.
 `sun` includes civil/nautical/astronomical twilight. `passes` needs sgp4 and a TLE
 (2-line or 3-line; catalog field may be Alpha-5).
 Negative offsets after the date may need -- so they are not flags:

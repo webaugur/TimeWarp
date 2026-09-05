@@ -105,6 +105,11 @@ class CliCycleTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(out.strip(), "3379.162")
 
+    def test_beats_input(self):
+        code, out, err = run("cycle", "-q", "2026-07-04T@000", "--city", "Greenwich")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.strip(), "3379.106")
+
     def test_json_has_cycle(self):
         code, out, err = run("cycle", "--json", "2026-08-29")
         self.assertEqual(code, 0, err)

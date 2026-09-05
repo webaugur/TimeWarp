@@ -108,8 +108,11 @@ def sheet_for_month(year: int, month: int, place: Place) -> list[DaySheet]:
     return rows
 
 
+_CLK_W = 11  # "17:52R @583"
+
+
 def _clk(v) -> str:
-    return format_clock(v) if v else "    —"
+    return format_clock(v) if v else "—"
 
 
 def _len_hm(seconds: int | None) -> str:
@@ -133,16 +136,17 @@ def format_month_sheet(rows: list[DaySheet], place: Place, *, twilight: bool = F
         dawn, rise, sset, dusk = "dawn", "rise", "set", "dusk"
         moon_up, moon_dn = "moon↑", "moon↓"
         adawn, ndawn, ndusk, adusk = "adawn", "ndawn", "ndusk", "adusk"
+    w = _CLK_W
     if twilight:
         hdr = (
-            f"{'date':10}  wd  {adawn:8}  {ndawn:8}  {dawn:8}  {rise:8}  "
-            f"{sset:8}  {dusk:8}  {ndusk:8}  {adusk:8}  {'len':5}  "
-            f"{moon_up:8}  {moon_dn:8}  ph"
+            f"{'date':10}  wd  {adawn:{w}}  {ndawn:{w}}  {dawn:{w}}  {rise:{w}}  "
+            f"{sset:{w}}  {dusk:{w}}  {ndusk:{w}}  {adusk:{w}}  {'len':5}  "
+            f"{moon_up:{w}}  {moon_dn:{w}}  ph"
         )
     else:
         hdr = (
-            f"{'date':10}  wd  {dawn:8}  {rise:8}  {sset:8}  {dusk:8}  "
-            f"{'len':5}  {moon_up:8}  {moon_dn:8}  ph"
+            f"{'date':10}  wd  {dawn:{w}}  {rise:{w}}  {sset:{w}}  {dusk:{w}}  "
+            f"{'len':5}  {moon_up:{w}}  {moon_dn:{w}}  ph"
         )
     lines = [title, hdr]
     for r in rows:
@@ -150,17 +154,17 @@ def format_month_sheet(rows: list[DaySheet], place: Place, *, twilight: bool = F
         if twilight:
             lines.append(
                 f"{r.date.isoformat():10}  {r.weekday:2}  "
-                f"{_clk(r.astronomical_dawn):8}  {_clk(r.nautical_dawn):8}  "
-                f"{_clk(r.civil_dawn):8}  {_clk(r.sunrise):8}  {_clk(r.sunset):8}  "
-                f"{_clk(r.civil_dusk):8}  {_clk(r.nautical_dusk):8}  {_clk(r.astronomical_dusk):8}  "
-                f"{_len_hm(r.day_length_seconds):5}  {_clk(r.moonrise):8}  {_clk(r.moonset):8}  {illum}"
+                f"{_clk(r.astronomical_dawn):{w}}  {_clk(r.nautical_dawn):{w}}  "
+                f"{_clk(r.civil_dawn):{w}}  {_clk(r.sunrise):{w}}  {_clk(r.sunset):{w}}  "
+                f"{_clk(r.civil_dusk):{w}}  {_clk(r.nautical_dusk):{w}}  {_clk(r.astronomical_dusk):{w}}  "
+                f"{_len_hm(r.day_length_seconds):5}  {_clk(r.moonrise):{w}}  {_clk(r.moonset):{w}}  {illum}"
             )
         else:
             lines.append(
                 f"{r.date.isoformat():10}  {r.weekday:2}  "
-                f"{_clk(r.civil_dawn):8}  {_clk(r.sunrise):8}  {_clk(r.sunset):8}  "
-                f"{_clk(r.civil_dusk):8}  {_len_hm(r.day_length_seconds):5}  "
-                f"{_clk(r.moonrise):8}  {_clk(r.moonset):8}  {illum}"
+                f"{_clk(r.civil_dawn):{w}}  {_clk(r.sunrise):{w}}  {_clk(r.sunset):{w}}  "
+                f"{_clk(r.civil_dusk):{w}}  {_len_hm(r.day_length_seconds):5}  "
+                f"{_clk(r.moonrise):{w}}  {_clk(r.moonset):{w}}  {illum}"
             )
     lines.append("dawn/dusk are civil twilight (sun −6°). --twilight adds nautical and astronomical.")
     return "\n".join(lines) + "\n"
