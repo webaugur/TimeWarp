@@ -108,6 +108,7 @@ Phase 2 (basic):
   eclipse        solar/lunar eclipses 1900–2199 (Meeus; --limit)
   cycle          Rosicrucian year (CE+1353; day starts at midnight) and Lewis periods
   astro          tropical/sidereal chart (angles, houses, aspects, lots)
+  shell          interactive TimeWarp prompt (portable double-click uses this)
   help           this overview, or help for one command (--help works too)
 
 Examples:
@@ -174,6 +175,7 @@ Examples:
   {PROG} unload
   {PROG} help
   {PROG} help add
+  {PROG} shell
 
 Dates are ISO 8601 only: YYYY-MM (month sheet), YYYY-MM-DD,
 YYYY-MM-DDTHH:MM[:SS][Z|+HH:MM], YYYY-Www-D, YYYY-DDD.
@@ -186,6 +188,8 @@ Beats are midnight BMT (UTC+1, no DST); @000 is 23:00Z, @500 is 11:00Z.
 `astro` is a tropical (or --sidereal) chart from Schlyter longitudes: ASC/MC,
 Placidus houses, major aspects, Arabic parts. --explain is geometry in English,
 not a horoscope. Not JPL DE.
+Portable zip: double-click timewarp / timewarp.exe for an interactive prompt
+(`timewarp shell`). Empty `timewarp` in a real terminal still prints this help.
 `sun` includes civil/nautical/astronomical twilight. `passes` needs sgp4 and a TLE
 (2-line or 3-line; catalog field may be Alpha-5).
 Negative offsets after the date may need -- so they are not flags:
@@ -256,6 +260,12 @@ def _print_json(payload: object) -> int:
     json.dump(payload, sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")
     return 0
+
+
+def cmd_shell(args: argparse.Namespace) -> int:
+    from timewarp.launch import run_repl
+
+    return run_repl()
 
 
 def cmd_help(args: argparse.Namespace) -> int:
@@ -1743,6 +1753,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="cmd", required=False)
     parser.set_defaults(func=cmd_help, topic=None)
 
+    p = sub.add_parser(
+        "shell",
+        help="Interactive TimeWarp prompt (also: double-click the portable exe)",
+    )
+    _add_common(p)
+    p.set_defaults(func=cmd_shell)
+
     p = sub.add_parser("help", aliases=["?"], help="Show help (also: --help, COMMAND --help)")
     p.add_argument("topic", nargs="?", help="command name (add, rise, count, …)")
     p.set_defaults(func=cmd_help)
@@ -2135,7 +2152,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     configure_stdio()
     ensure_zoneinfo()
-    raw = list(sys.argv[1:] if argv is None else argv)
+    argv_was_none = argv is None
+    raw = list(sys.argv[1:] if argv_was_none else argv)
+    from timewarp.launch import maybe_launch_from_double_click
+
+    launched = maybe_launch_from_double_click(argv_was_none, raw)
+    if launched is not None:
+        return launched
     parser = build_parser()
     try:
         args = parser.parse_args(raw)

@@ -444,6 +444,7 @@ class HelpAndErrorTests(unittest.TestCase):
         self.assertIn("save --tle", out)
         self.assertIn("today --city", out)
         self.assertIn("astro --city", out)
+        self.assertIn("shell", out)
         self.assertIn("@500", out)
         self.assertIn("Swatch beats", out)
 
