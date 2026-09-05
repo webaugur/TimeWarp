@@ -57,7 +57,7 @@ python3 -m PyInstaller --noconfirm --clean timewarp.spec
 dist/timewarp/timewarp --version
 ```
 
-Artifacts: **Actions → portable** (manual run or a `v*` tag). Names look like `timewarp-1.2.1-linux-x86_64.zip`.
+Artifacts: **Actions → portable** (manual run or a `v*` tag). A tag build names both the Actions artifact and the zip from that tag, e.g. `timewarp-1.2.1-linux-x86_64` / `timewarp-1.2.1-linux-x86_64.zip`, and attaches the zip to the GitHub Release. A manual run uses the package version instead of a tag.
 
 - **Windows:** `tzdata` is bundled so `--city` and `ZoneInfo` work. Settings go under `%APPDATA%\timewarp`; caches under `%LOCALAPPDATA%\timewarp`. SmartScreen may warn (unsigned).
 - **macOS:** unsigned; first launch may need right-click → Open, or `xattr -d com.apple.quarantine timewarp`. arm64 from `macos-latest`.

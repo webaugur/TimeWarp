@@ -6,6 +6,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   pack:
     strategy:
@@ -48,10 +51,16 @@ jobs:
           test -s cities.out
           test -s holidays.out
       - name: Zip
+        id: zip
         shell: bash
         run: |
-          VER=$(python -c "from timewarp import __version__; print(__version__)")
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VER="${GITHUB_REF_NAME#v}"
+          else
+            VER=$(python -c "from timewarp import __version__; print(__version__)")
+          fi
           NAME="timewarp-${VER}-${{ matrix.artifact }}"
+          echo "asset_name=${NAME}" >> "$GITHUB_OUTPUT"
           mkdir -p dist/upload
           if command -v zip >/dev/null 2>&1; then
             (cd dist && zip -r "upload/${NAME}.zip" timewarp)
@@ -60,5 +69,10 @@ jobs:
           fi
       - uses: actions/upload-artifact@v6
         with:
-          name: timewarp-${{ matrix.artifact }}
-          path: dist/upload/*.zip
+          name: ${{ steps.zip.outputs.asset_name }}
+          path: dist/upload/${{ steps.zip.outputs.asset_name }}.zip
+      - name: Attach to GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" "dist/upload/${{ steps.zip.outputs.asset_name }}.zip" --clobber
