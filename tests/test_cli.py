@@ -167,6 +167,26 @@ class CliPhase2Tests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("solar", out)
 
+    def test_list_sb_from_fixture(self):
+        old = os.environ.get("TIMEWARP_SBDB_CATALOG")
+        os.environ["TIMEWARP_SBDB_CATALOG"] = str(
+            Path(__file__).resolve().parent / "data" / "sbdb-catalog-h11.json"
+        )
+        from timewarp.jpl import _reset_catalog_memo
+
+        _reset_catalog_memo()
+        try:
+            code, out, err = run("rise", "--list-sb")
+            self.assertEqual(code, 0, err)
+            self.assertIn("Iris", out)
+            self.assertNotIn("Hyper", out)
+        finally:
+            _reset_catalog_memo()
+            if old is None:
+                os.environ.pop("TIMEWARP_SBDB_CATALOG", None)
+            else:
+                os.environ["TIMEWARP_SBDB_CATALOG"] = old
+
     def test_rise_ceres(self):
         code, out, err = run("rise", "ceres", "--city", "London", "2026-07-04")
         self.assertEqual(code, 0, err)

@@ -9,9 +9,11 @@ from unittest.mock import patch
 from timewarp.errors import TimeWarpError
 from timewarp.jpl import (
     SBDB_QUERY,
+    _reset_catalog_memo,
     fetch_sbdb,
     load_elements,
     load_query,
+    lookup_catalog,
     mean_anomaly,
     parse_sbdb,
     query_slug,
@@ -160,6 +162,38 @@ class LoadElementsTests(unittest.TestCase):
                 name="x",
             )
         self.assertIn("matches:", str(ctx.exception))
+
+
+class CatalogTests(unittest.TestCase):
+    def setUp(self):
+        self._old = os.environ.get("TIMEWARP_SBDB_CATALOG")
+        os.environ["TIMEWARP_SBDB_CATALOG"] = str(DATA / "sbdb-catalog-h11.json")
+        _reset_catalog_memo()
+
+    def tearDown(self):
+        _reset_catalog_memo()
+        if self._old is None:
+            os.environ.pop("TIMEWARP_SBDB_CATALOG", None)
+        else:
+            os.environ["TIMEWARP_SBDB_CATALOG"] = self._old
+
+    def test_lookup_by_name_and_number(self):
+        el = lookup_catalog("Iris")
+        self.assertIsNotNone(el)
+        self.assertAlmostEqual(el.a, 2.385, places=3)
+        self.assertEqual(lookup_catalog("7").name, el.name)
+
+    def test_skips_hyperbolic(self):
+        self.assertIsNone(lookup_catalog("Hyper"))
+        self.assertIsNone(lookup_catalog("99999"))
+
+    def test_resolve_body_skips_network(self):
+        from timewarp.ephem import resolve_body
+
+        with patch("timewarp.jpl.fetch_sbdb", side_effect=AssertionError("network")):
+            with patch("timewarp.jpl.fetch_catalog", side_effect=AssertionError("network")):
+                self.assertEqual(resolve_body("Iris"), "iris")
+                self.assertEqual(resolve_body("7"), "iris")
 
 
 class FetchSbdbTests(unittest.TestCase):

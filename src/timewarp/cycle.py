@@ -135,7 +135,7 @@ def _civil_midnight(day: date, place: Place) -> datetime:
 
 def day_boundary(day: date, place: Place) -> tuple[datetime, str | None]:
     """Start of the RC day on this civil date: sunrise, or midnight if the sun does not rise."""
-    rise = _civil_midnight(day, place)
+    rise = sunrise_on(day, place)
     if rise is None:
         return _civil_midnight(day, place), "no sunrise; RC day from local midnight"
     return rise, None

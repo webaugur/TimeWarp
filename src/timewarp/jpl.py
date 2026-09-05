@@ -1,12 +1,15 @@
 """JPL Small-Body Database osculating elements for named asteroids and comets.
 
 GET https://ssd-api.jpl.nasa.gov/sbdb.api?sstr=…&full-prec=1
-Cache: ~/.cache/timewarp/sbdb/{name}.json (7 days). TIMEWARP_SBDB_DIR overrides.
+Catalog dump: sbdb_query.api (numbered H≤11 asteroids + numbered comets).
+Cache: ~/.cache/timewarp/sbdb/ (TIMEWARP_SBDB_DIR). Catalog file override:
+TIMEWARP_SBDB_CATALOG.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,7 +21,10 @@ from timewarp.errors import TimeWarpError
 from timewarp.paths import cache_subdir
 
 SBDB_URL = "https://ssd-api.jpl.nasa.gov/sbdb.api?sstr={sstr}&full-prec=1"
+SBDB_QUERY_URL = "https://ssd-api.jpl.nasa.gov/sbdb_query.api"
 CACHE_TTL = timedelta(days=7)
+CATALOG_FIELDS = "pdes,name,full_name,epoch,a,e,i,om,w,ma,n,H,kind"
+_UA = "TimeWarp (https://github.com/webaugur/TimeWarp)"
 # Schlyter d = JD − 2451543.5 (2000 Jan 0.0). SBDB epoch is Julian day TDB.
 _SCHLYTER_JD0 = 2451543.5
 # Gaussian gravitational constant, degrees per day (n = k / a^{3/2}).
@@ -168,10 +174,7 @@ def _read_json(path: Path) -> dict:
 
 def fetch_sbdb(sstr: str, *, timeout: float = _TIMEOUT) -> dict:
     url = SBDB_URL.format(sstr=urllib.parse.quote(sstr, safe=""))
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": "TimeWarp (https://github.com/webaugur/TimeWarp)"},
-    )
+    req = urllib.request.Request(url, headers={"User-Agent": _UA})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read()
@@ -219,6 +222,10 @@ def load_elements(
         if required:
             raise TimeWarpError(f"no SBDB query for {name}")
         return None
+    if not refresh:
+        hit = lookup_catalog(name) or lookup_catalog(query)
+        if hit is not None:
+            return hit
     slug = query_slug(name)
     key = f"{sbdb_cache_dir()}::{slug}"
     if not refresh and key in _MEMO:
@@ -267,3 +274,187 @@ def load_query(sstr: str, *, refresh: bool = False) -> KeplerElements:
     if el is None:
         raise TimeWarpError(f"SBDB has no elliptical orbit for {q!r}")
     return el
+
+
+def catalog_path() -> Path:
+    env = os.environ.get("TIMEWARP_SBDB_CATALOG")
+    if env:
+        return Path(env)
+    return sbdb_cache_dir() / "catalog-h11.json"
+
+
+_CATALOG_INDEX: dict[str, KeplerElements] | None = None
+_CATALOG_ROWS: list[dict] | None = None
+
+
+def _reset_catalog_memo() -> None:
+    global _CATALOG_INDEX, _CATALOG_ROWS
+    _CATALOG_INDEX = None
+    _CATALOG_ROWS = None
+
+
+def elements_from_catalog_row(row: dict) -> KeplerElements | None:
+    try:
+        e = _as_float(row.get("e"), field="e")
+        a = _as_float(row.get("a"), field="a")
+        epoch_jd = _as_float(row.get("epoch"), field="epoch")
+    except TimeWarpError:
+        return None
+    if a <= 0.0 or e >= 1.0:
+        return None
+    n = row.get("n")
+    try:
+        n_f = _as_float(n, field="n") if n not in (None, "") else 0.0
+    except TimeWarpError:
+        n_f = 0.0
+    if n_f <= 0.0:
+        n_f = _K_DEG_PER_DAY / (a**1.5)
+    pdes = str(row.get("pdes") or "").strip()
+    iau = str(row.get("name") or "").strip()
+    full = str(row.get("full_name") or "").strip()
+    key = query_slug(iau or pdes)
+    if not key:
+        return None
+    try:
+        i = _as_float(row.get("i"), field="i")
+        om = _as_float(row.get("om"), field="om")
+        w = _as_float(row.get("w"), field="w")
+        ma = _as_float(row.get("ma"), field="ma")
+    except TimeWarpError:
+        return None
+    return KeplerElements(
+        name=key,
+        a=a,
+        e=e,
+        i=i,
+        N=om,
+        w=w,
+        M0=_rev(ma),
+        n=n_f,
+        epoch_jd=epoch_jd,
+        d_epoch=epoch_jd - _SCHLYTER_JD0,
+        designation=full or iau or pdes or None,
+    )
+
+
+def parse_query_table(payload: object) -> list[dict]:
+    if not isinstance(payload, dict):
+        raise TimeWarpError("SBDB query response is not a JSON object")
+    fields = payload.get("fields")
+    rows = payload.get("data")
+    if not isinstance(fields, list) or not isinstance(rows, list):
+        raise TimeWarpError("SBDB query response has no fields/data table")
+    names = [str(f) for f in fields]
+    out: list[dict] = []
+    for raw in rows:
+        if not isinstance(raw, list):
+            continue
+        rec = {names[i]: raw[i] if i < len(raw) else None for i in range(len(names))}
+        out.append(rec)
+    return out
+
+
+def _index_rows(rows: list[dict]) -> dict[str, KeplerElements]:
+    index: dict[str, KeplerElements] = {}
+    for rec in rows:
+        el = elements_from_catalog_row(rec)
+        if el is None:
+            continue
+        keys = {el.name}
+        for raw in (rec.get("pdes"), rec.get("name"), rec.get("full_name")):
+            if raw:
+                keys.add(query_slug(str(raw)))
+        for k in keys:
+            if k:
+                index[k] = el
+    return index
+
+
+def _http_json(url: str, *, timeout: float) -> dict:
+    req = urllib.request.Request(url, headers={"User-Agent": _UA})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+    except urllib.error.HTTPError as exc:
+        raise TimeWarpError(f"could not fetch SBDB query: HTTP {exc.code}") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise TimeWarpError(
+            f"could not fetch SBDB query ({exc}). Cached file: {catalog_path()}"
+        ) from exc
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise TimeWarpError("SBDB query response was not JSON") from exc
+    if not isinstance(data, dict):
+        raise TimeWarpError("SBDB query response is not a JSON object")
+    return data
+
+
+def fetch_catalog(*, timeout: float = 60.0) -> list[dict]:
+    """Numbered asteroids H≤11 plus numbered comets (no fragments)."""
+    cdata = urllib.parse.quote('{"AND":["H|LE|11"]}', safe="")
+    ast = (
+        f"{SBDB_QUERY_URL}?fields={CATALOG_FIELDS}&sb-ns=n&sb-kind=a"
+        f"&sb-cdata={cdata}&full-prec=true"
+    )
+    com = (
+        f"{SBDB_QUERY_URL}?fields={CATALOG_FIELDS}&sb-ns=n&sb-kind=c"
+        f"&sb-xfrag=1&full-prec=true"
+    )
+    rows = parse_query_table(_http_json(ast, timeout=timeout))
+    rows.extend(parse_query_table(_http_json(com, timeout=timeout)))
+    return rows
+
+
+def _read_catalog_file(path: Path) -> list[dict] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("objects"), list):
+        return None
+    return [r for r in payload["objects"] if isinstance(r, dict)]
+
+
+def _write_catalog_file(path: Path, rows: list[dict]) -> None:
+    blob = {
+        "fetched": datetime.now(timezone.utc).isoformat(),
+        "source": SBDB_QUERY_URL,
+        "objects": rows,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(blob) + "\n", encoding="utf-8")
+
+
+def load_catalog(*, refresh: bool = False) -> dict[str, KeplerElements]:
+    """Load the H≤11 dump. Does not hit the network unless `refresh` is True."""
+    global _CATALOG_INDEX, _CATALOG_ROWS
+    if not refresh and _CATALOG_INDEX is not None:
+        return _CATALOG_INDEX
+    path = catalog_path()
+    rows: list[dict] | None = None
+    if refresh:
+        rows = fetch_catalog()
+        try:
+            _write_catalog_file(path, rows)
+        except OSError:
+            pass
+    elif path.is_file():
+        rows = _read_catalog_file(path)
+    if rows is None:
+        rows = []
+    _CATALOG_ROWS = rows
+    _CATALOG_INDEX = _index_rows(rows)
+    return _CATALOG_INDEX
+
+
+def lookup_catalog(name: str) -> KeplerElements | None:
+    key = query_slug(name)
+    if not key:
+        return None
+    return load_catalog().get(key)
+
+
+def catalog_rows() -> list[dict]:
+    load_catalog()
+    return list(_CATALOG_ROWS or [])

@@ -15,6 +15,7 @@ _(none)_
 
 ## Done
 
+- [#12](https://github.com/webaugur/TimeWarp/issues/12) SBDB Query dump for more rise/set small bodies
 - [#10](https://github.com/webaugur/TimeWarp/issues/10) Rosicrucian Cycles of Life (`cycle` / `rosicrucian`)
 - [#9](https://github.com/webaugur/TimeWarp/issues/9) Human emoji (argparse kept); columns are ASCII, glyphs trail the line
 - [#2](https://github.com/webaugur/TimeWarp/issues/2) Holiday `--region` for more Nager countries

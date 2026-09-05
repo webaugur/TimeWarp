@@ -761,16 +761,21 @@ def normalize_body(name: str) -> str:
 
 
 def resolve_body(name: str) -> str:
-    """Known body, or an SBDB designation (number / packed des / name)."""
+    """Known body, catalog dump, or an SBDB designation (number / packed des / name)."""
     try:
         return normalize_body(name)
     except TimeWarpError:
         pass
-    from timewarp.jpl import load_query, query_slug
+    from timewarp.jpl import load_query, lookup_catalog, query_slug
 
     q = name.strip()
     if not q:
         raise TimeWarpError("missing body name")
+    hit = lookup_catalog(q)
+    if hit is not None:
+        slug = hit.name
+        _DYNAMIC[slug] = hit.designation or q
+        return slug
     slug = query_slug(q)
     load_query(q)
     _DYNAMIC[slug] = q

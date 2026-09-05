@@ -103,7 +103,7 @@ Phase 2 (basic):
   save           store --city and similar flags
   load           print stored flags (scriptable)
   unload         drop stored flags
-  cache          same as save/load/unload, nested: cache save|load|unload
+  cache          same as save/load/unload, nested: cache save|load|unload|orbits
   eclipse        solar/lunar eclipses 1900–2199 (Meeus)
   cycle          Rosicrucian year (CE+1353; day starts at sunrise) and Lewis periods
   help           this overview, or help for one command (--help works too)
@@ -148,11 +148,15 @@ Examples:
   {PROG} cycle --born 1960-03-22 --city Indianapolis
   {PROG} rise ceres --city London
   {PROG} rise 433 --city London
+  {PROG} cache orbits --refresh
+  {PROG} rise --list-sb
+  {PROG} rise iris --city London
   {PROG} rise io --city London
   {PROG} rise halley --city London
   {PROG} cities
   {PROG} save --city Indianapolis
   {PROG} load
+  {PROG} cache orbits --refresh
   {PROG} unload --city
   {PROG} unload
   {PROG} help
@@ -1098,6 +1102,25 @@ def _event_sort_key(result, primary: str):
 
 
 def cmd_rise(args: argparse.Namespace) -> int:
+    if getattr(args, "list_sb", False):
+        from timewarp.jpl import catalog_path, catalog_rows, load_catalog
+
+        load_catalog(refresh=bool(getattr(args, "refresh", False)))
+        rows = catalog_rows()
+        if args.json:
+            return _print_json({"path": str(catalog_path()), "objects": rows})
+        if not rows:
+            print("No SBDB dump. Run: timewarp cache orbits --refresh")
+            return 0
+        from timewarp.jpl import elements_from_catalog_row
+
+        for rec in rows:
+            if elements_from_catalog_row(rec) is None:
+                continue
+            pdes = rec.get("pdes") or ""
+            name = rec.get("name") or ""
+            print(f"{str(pdes):8} {name}")
+        return 0
     primary = getattr(args, "kind", "rise")
     place = _place_from_args(args)
     body_name, start, end, assumed = _parse_sky_when(args)
@@ -1198,6 +1221,8 @@ def cmd_cache(args: argparse.Namespace) -> int:
         return cmd_cache_save(args)
     if op in {"unload", "clear"}:
         return cmd_cache_unload(args)
+    if op in {"orbits", "sbdb"}:
+        return cmd_cache_orbits(args)
     raise TimeWarpError(f"unknown cache action {op!r}")
 
 
@@ -1317,6 +1342,28 @@ def cmd_cache_save(args: argparse.Namespace) -> int:
         if line:
             print(line)
     return 0
+
+def cmd_cache_orbits(args: argparse.Namespace) -> int:
+    from timewarp.jpl import catalog_path, catalog_rows, load_catalog
+
+    refresh = bool(getattr(args, "refresh", False))
+    index = load_catalog(refresh=refresh)
+    rows = catalog_rows()
+    path = catalog_path()
+    if args.json:
+        return _print_json({"path": str(path), "count": len(rows), "bodies": len(index)})
+    if args.quiet:
+        print(len(rows))
+        return 0
+    print(f"SBDB catalog  {path}")
+    print(f"objects: {len(rows)}  (numbered asteroids H≤11 + numbered comets)")
+    print("Two-body osculating elements; not JPL Horizons / DE.")
+    if refresh:
+        print("Refetched from ssd-api.jpl.nasa.gov/sbdb_query.api")
+    elif not path.is_file():
+        print("No dump on disk. Run: timewarp cache orbits --refresh")
+    return 0
+
 
 def cmd_cache_unload(args: argparse.Namespace) -> int:
     keys: list[str] = []
@@ -1643,6 +1690,16 @@ def build_parser() -> argparse.ArgumentParser:
             action="store_true",
             help="times at +33° after rise and before set",
         )
+        parser.add_argument(
+            "--list-sb",
+            action="store_true",
+            help="list cached SBDB dump names (H≤11 numbered asteroids + numbered comets)",
+        )
+        parser.add_argument(
+            "--refresh",
+            action="store_true",
+            help="refetch the SBDB dump (with --list-sb) from JPL",
+        )
 
     p = sub.add_parser("rise", help="Rise times for visible sun, moon, and planets")
     _add_common(p)
@@ -1699,6 +1756,15 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(unload_p)
     _add_cache_unload_flags(unload_p)
     unload_p.set_defaults(func=cmd_cache, cache_cmd="unload")
+
+    orbits_p = cache_sub.add_parser(
+        "orbits",
+        aliases=["sbdb"],
+        help="JPL SBDB dump: numbered asteroids H≤11 and numbered comets",
+    )
+    _add_common(orbits_p)
+    orbits_p.add_argument("--refresh", action="store_true", help="refetch the dump from JPL")
+    orbits_p.set_defaults(func=cmd_cache, cache_cmd="orbits")
 
     p = sub.add_parser("save", help="store --city and similar flags")
     _add_common(p)
