@@ -2,13 +2,13 @@
 
 Calendar rules (user + public AMORC):
   year = CE + 1353; new year = March equinox *date*; the RC day (and that
-  new year) starts at **local sunrise**, not at the equinox instant and not
-  at midnight. Stamp YEAR.DDD = sunrise-days since the equinox sunrise.
-  1690-year cycles from sunrise on the 337 CE March-equinox date.
+  new year) starts at **local midnight**, not at the equinox instant.
+  Star date YEAR.DDD = midnights since the equinox-date midnight.
+  1690-year cycles from midnight on the 337 CE March-equinox date.
 
 Lewis *Self-Mastery and Fate with the Cycles of Life*: period *lengths* only.
-Daily A–G letters follow https://cycles.amorc.org/en/cycles but are counted
-from sunrise (seven slices of the RC day). Place defaults to Greenwich.
+Daily A–G letters follow https://cycles.amorc.org/en/cycles (seven slices
+from local midnight). Place defaults to Greenwich.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from timewarp.astro import seasons_for_year, sun_times
+from timewarp.astro import seasons_for_year
 from timewarp.errors import TimeWarpError
 from timewarp.iso import Instant, as_date, format_clock, format_instant
 from timewarp.places import Place
@@ -55,7 +55,7 @@ NOTE_NAME = {
     "G": "coral",
 }
 
-# Daily 24h / 7 (AMORC minute widths, counted from local sunrise).
+# Daily 24h / 7 (AMORC clock, minutes from local midnight).
 DAILY_SLICES = (
     (1, 0, 205, "Midnight to 3:25 a.m."),
     (2, 205, 411, "3:25 a.m. to 6:51 a.m."),
@@ -95,7 +95,6 @@ YEARLY_KEY = (
 )
 
 _EQ_CACHE: dict[int, datetime] = {}
-_RISE_CACHE: dict[tuple[int, float, float], datetime | None] = {}
 
 
 def march_equinox(year: int) -> datetime:
@@ -117,16 +116,9 @@ def _as_utc_dt(when: Instant) -> datetime:
 def _local_dt(when: Instant, tz: str) -> datetime:
     utc = _as_utc_dt(when)
     if isinstance(when, date) and not isinstance(when, datetime):
-        # Date-only: noon local — after sunrise except polar night.
+        # Date-only: noon local (after midnight on that civil date).
         return datetime(when.year, when.month, when.day, 12, 0, tzinfo=ZoneInfo(tz))
     return utc.astimezone(ZoneInfo(tz))
-
-
-def sunrise_on(day: date, place: Place) -> datetime | None:
-    key = (day.toordinal(), round(place.lat, 4), round(place.lon, 4))
-    if key not in _RISE_CACHE:
-        _RISE_CACHE[key] = sun_times(day, place).sunrise
-    return _RISE_CACHE[key]
 
 
 def _civil_midnight(day: date, place: Place) -> datetime:
@@ -134,22 +126,15 @@ def _civil_midnight(day: date, place: Place) -> datetime:
 
 
 def day_boundary(day: date, place: Place) -> tuple[datetime, str | None]:
-    """Start of the RC day on this civil date: sunrise, or midnight if the sun does not rise."""
-    rise = sunrise_on(day, place)
-    if rise is None:
-        return _civil_midnight(day, place), "no sunrise; RC day from local midnight"
-    return rise, None
+    """Start of the RC day: local midnight."""
+    return _civil_midnight(day, place), None
 
 
 def rc_day(when: Instant, place: Place) -> tuple[date, datetime, str | None]:
-    """Civil date and instant of the last RC day-start (sunrise) at or before `when`."""
+    """Civil date and local midnight of the RC day containing `when`."""
     local = _local_dt(when, place.tz)
     d = local.date()
     start, note = day_boundary(d, place)
-    start_local = start.astimezone(ZoneInfo(place.tz))
-    if local < start_local:
-        d = d - timedelta(days=1)
-        start, note = day_boundary(d, place)
     return d, start, note
 
 
@@ -167,7 +152,7 @@ class RosicrucianStamp:
         return f"{self.rc_year}.{self.day:03d}"
 
 
-def _equinox_sunrise(ce_year: int, place: Place) -> tuple[date, datetime]:
+def _equinox_day_start(ce_year: int, place: Place) -> tuple[date, datetime]:
     eq = march_equinox(ce_year)
     eq_date = eq.astimezone(ZoneInfo(place.tz)).date()
     start, _note = day_boundary(eq_date, place)
@@ -180,14 +165,14 @@ def rosicrucian_stamp(when: Instant, place: Place | None = None) -> RosicrucianS
     y = d.year
     if y < 1:
         raise TimeWarpError("Rosicrucian year is not defined before 1 CE")
-    eq_date, eq_start = _equinox_sunrise(y, place)
+    eq_date, eq_start = _equinox_day_start(y, place)
     if start < eq_start:
         y -= 1
         if y < 1:
             raise TimeWarpError("Rosicrucian year is not defined before 1 CE")
-        eq_date, eq_start = _equinox_sunrise(y, place)
+        eq_date, eq_start = _equinox_day_start(y, place)
     if y < 9999:
-        _nxt_date, nxt_start = _equinox_sunrise(y + 1, place)
+        _nxt_date, nxt_start = _equinox_day_start(y + 1, place)
     else:
         nxt_start = eq_start + timedelta(days=365)
     day = (d - eq_date).days
@@ -215,18 +200,18 @@ class Cycle1690:
 def cycle_1690(when: Instant, place: Place | None = None) -> Cycle1690:
     place = place or GREENWICH
     d, start, _note = rc_day(when, place)
-    _eq0_date, start0 = _equinox_sunrise(EPOCH_CE, place)
+    _eq0_date, start0 = _equinox_day_start(EPOCH_CE, place)
     if start < start0:
-        raise TimeWarpError("1690-year cycle epoch is sunrise on the March equinox date of 337 CE")
+        raise TimeWarpError("1690-year cycle epoch is midnight on the March equinox date of 337 CE")
     ce = d.year
-    _eq_date, eq_start = _equinox_sunrise(ce, place)
+    _eq_date, eq_start = _equinox_day_start(ce, place)
     if start < eq_start:
         ce -= 1
     n = (ce - EPOCH_CE) // CYCLE_YEARS
     start_ce = EPOCH_CE + n * CYCLE_YEARS
     end_ce = start_ce + CYCLE_YEARS
-    _sdate, cstart = _equinox_sunrise(start_ce, place)
-    _edate, cend = _equinox_sunrise(end_ce, place)
+    _sdate, cstart = _equinox_day_start(start_ce, place)
+    _edate, cend = _equinox_day_start(end_ce, place)
     elapsed = (d - _sdate).days
     length = (_edate - _sdate).days
     remaining = (_edate - d).days
@@ -379,8 +364,8 @@ def to_dict(
         "place": place.name,
         "tz": place.tz,
         "day_start": format_instant(stamp.day_start),
-        "equinox_sunrise": format_instant(stamp.equinox),
-        "next_equinox_sunrise": format_instant(stamp.next_equinox),
+        "equinox_start": format_instant(stamp.equinox),
+        "next_equinox_start": format_instant(stamp.next_equinox),
         "cycle_1690": {
             "index": cyc.index,
             "start": format_instant(cyc.start),
@@ -391,9 +376,9 @@ def to_dict(
         },
         "daily": daily,
         "source": {
-            "calendar": "AMORC: CE+1353; RC day and equinox year start at local sunrise",
+            "calendar": "AMORC: CE+1353; RC day and equinox year start at local midnight",
             "lewis": "H. Spencer Lewis, Self-Mastery and Fate with the Cycles of Life (1929)",
-            "clock": "https://cycles.amorc.org/en/cycles (A–G letters; slices from sunrise)",
+            "clock": "https://cycles.amorc.org/en/cycles (A–G letters; slices from midnight)",
         },
     }
     if stamp.note:

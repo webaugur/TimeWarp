@@ -105,7 +105,7 @@ Phase 2 (basic):
   unload         drop stored flags
   cache          same as save/load/unload, nested: cache save|load|unload|orbits
   eclipse        solar/lunar eclipses 1900–2199 (Meeus)
-  cycle          Rosicrucian year (CE+1353; day starts at sunrise) and Lewis periods
+  cycle          Rosicrucian year (CE+1353; day starts at midnight) and Lewis periods
   help           this overview, or help for one command (--help works too)
 
 Examples:
@@ -786,8 +786,8 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         ("Place:", f"{payload['place']} ({payload['tz']})"),
         ("CE year:", str(payload["ce_year"])),
         ("RC day from:", payload["day_start"]),
-        ("Equinox sunrise:", payload["equinox_sunrise"]),
-        ("Next equinox sunrise:", payload["next_equinox_sunrise"]),
+        ("Equinox midnight:", payload["equinox_start"]),
+        ("Next equinox midnight:", payload["next_equinox_start"]),
         ("1690-cycle:", f"#{cyc['index']}  {cyc['elapsed_days']} d in, {cyc['remaining_days']} d left"),
         ("Cycle start:", cyc["start"]),
         ("Cycle end:", cyc["end"]),
@@ -813,8 +813,8 @@ def cmd_cycle(args: argparse.Namespace) -> int:
             ("Incarnation:", f"{L['incarnation_interval_years']} years (Lewis ch. 17)"),
         ]
     cite = [
-        ("Calendar:", "CE+1353; RC day and equinox year start at local sunrise"),
-        ("Cycle:", "1690 years from sunrise on the 337 CE equinox date"),
+        ("Calendar:", "CE+1353; RC day and equinox year start at local midnight"),
+        ("Cycle:", "1690 years from midnight on the 337 CE equinox date"),
         ("Lewis:", "Self-Mastery and Fate with the Cycles of Life (1929)"),
         ("Clock:", "https://cycles.amorc.org/en/cycles"),
     ]
@@ -1631,7 +1631,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "cycle",
         aliases=["rosicrucian"],
-        help="Rosicrucian year (CE+1353; RC day starts at sunrise) and Lewis cycle periods",
+        help="Rosicrucian year (CE+1353; RC day starts at midnight) and Lewis cycle periods",
     )
     _add_common(p)
     p.add_argument("date", nargs="?", help="ISO 8601 date or instant (default: now)")

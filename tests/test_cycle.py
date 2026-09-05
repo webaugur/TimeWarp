@@ -26,13 +26,13 @@ class StampTests(unittest.TestCase):
         stamp = rosicrucian_stamp(date(2026, 3, 19))
         self.assertEqual(stamp.rc_year, 3378)
 
-    def test_equinox_day_is_000_after_sunrise(self):
-        # Year rolls at sunrise on the equinox date, not at 14:32Z.
-        stamp = rosicrucian_stamp(datetime(2026, 3, 20, 12, 0, tzinfo=timezone.utc))
+    def test_equinox_day_is_000_after_midnight(self):
+        # Year rolls at local midnight on the equinox date, not at 14:32Z.
+        stamp = rosicrucian_stamp(datetime(2026, 3, 20, 3, 0, tzinfo=timezone.utc), GREENWICH)
         self.assertEqual(stamp.stamp(), "3379.000")
 
-    def test_before_sunrise_on_equinox_date_is_previous_year(self):
-        stamp = rosicrucian_stamp(datetime(2026, 3, 20, 3, 0, tzinfo=timezone.utc), GREENWICH)
+    def test_before_midnight_on_equinox_date_is_previous_year(self):
+        stamp = rosicrucian_stamp(datetime(2026, 3, 19, 23, 0, tzinfo=timezone.utc), GREENWICH)
         self.assertEqual(stamp.rc_year, 3378)
 
     def test_after_equinox_instant(self):
@@ -88,7 +88,7 @@ class LewisTests(unittest.TestCase):
         self.assertEqual(n, 7)
         self.assertEqual(letter, "G")
 
-    def test_daily_uses_sunrise_and_saturday_letters(self):
+    def test_daily_uses_midnight_and_saturday_letters(self):
         when = datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc)
         row = daily_period(when, GREENWICH)
         self.assertEqual(row["weekday"], "Saturday")
