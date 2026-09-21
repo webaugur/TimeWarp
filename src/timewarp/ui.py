@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import date
 from typing import TextIO
 
 from timewarp.ephem import SYMBOL_RGB, SYMBOLS, format_body as _format_body_iau
@@ -72,6 +73,59 @@ ICON = {
     "lunar": "🌙",
     "cycle": "🎼",
 }
+
+# First substring match wins. Unlisted names stay 🎉. Not a per-country catalog.
+_HOLIDAY_EMOJI = (
+    ("orthodox christmas eve", "🎅"),
+    ("julian christmas eve", "🎅"),
+    ("christmas eve", "🎅"),
+    ("orthodox christmas", "🎄"),
+    ("julian christmas", "🎄"),
+    ("christmas", "🎄"),
+    ("new year", "🎆"),
+    ("good friday", "🐣"),
+    ("ascension", "🐣"),
+    ("pentecost", "🐣"),
+    ("whit", "🐣"),
+    ("easter", "🐣"),
+    ("thanksgiving", "🦃"),
+    ("halloween", "🎃"),
+    ("hanukkah", "🕎"),
+    ("chanukah", "🕎"),
+    ("diwali", "🪔"),
+    ("deepavali", "🪔"),
+    ("ramadan", "🌙"),
+    ("eid", "🌙"),
+    ("juneteenth", "🎆"),
+    ("independence", "🎆"),
+    ("bastille", "🎆"),
+    ("canada day", "🎆"),
+    ("national day", "🎆"),
+    ("memorial", "🎖️"),
+    ("veterans", "🎖️"),
+    ("armistice", "🎖️"),
+    ("remembrance", "🎖️"),
+    ("anzac", "🎖️"),
+    ("may day", "🛠️"),
+    ("labour", "🛠️"),
+    ("labor", "🛠️"),
+)
+
+
+def holiday_emoji(name: str, when: date | None = None) -> str:
+    """Glyph for a holiday title; default party popper if nothing matches.
+
+    Orthodox/Julian Christmas Day is 🎄; the calendar day before (6 Jan) is 🎅
+    even when the title is only “Orthodox Christmas”.
+    """
+    low = name.casefold()
+    orthodox = "orthodox" in low or "julian" in low
+    if when is not None and when.month == 1 and when.day == 6 and orthodox and "christmas" in low:
+        return "🎅"
+    for key, glyph in _HOLIDAY_EMOJI:
+        if key in low:
+            return glyph
+    return ICON["holiday"]
 
 _RESET = "\033[0m"
 

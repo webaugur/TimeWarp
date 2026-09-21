@@ -1,6 +1,7 @@
 import unittest
+from datetime import date
 
-from timewarp.ui import EMOJI, format_body, icon, sky_bin_label, want_color
+from timewarp.ui import EMOJI, format_body, holiday_emoji, icon, sky_bin_label, want_color
 
 
 class FormatBodyTests(unittest.TestCase):
@@ -27,6 +28,26 @@ class IconTests(unittest.TestCase):
         self.assertEqual(icon("error", emoji=True), "❌")
         self.assertIn("civil", sky_bin_label("civil", emoji=True))
         self.assertIn("🏙️", sky_bin_label("civil", emoji=True))
+
+
+class HolidayEmojiTests(unittest.TestCase):
+    def test_christmas_eve_santa(self):
+        self.assertEqual(holiday_emoji("Christmas Eve"), "🎅")
+
+    def test_christmas_day_tree(self):
+        self.assertEqual(holiday_emoji("Christmas Day"), "🎄")
+        self.assertEqual(holiday_emoji("Christmas Day (observed)"), "🎄")
+
+    def test_orthodox_christmas(self):
+        self.assertEqual(holiday_emoji("Orthodox Christmas Eve"), "🎅")
+        self.assertEqual(holiday_emoji("Orthodox Christmas"), "🎄")
+        self.assertEqual(holiday_emoji("Julian Christmas"), "🎄")
+        self.assertEqual(holiday_emoji("Orthodox Christmas", when=date(2026, 1, 6)), "🎅")
+        self.assertEqual(holiday_emoji("Orthodox Christmas", when=date(2026, 1, 7)), "🎄")
+
+    def test_new_year_and_default(self):
+        self.assertEqual(holiday_emoji("New Year's Day"), "🎆")
+        self.assertEqual(holiday_emoji("Martin Luther King Jr. Day"), "🎉")
 
 
 class KvAlignTests(unittest.TestCase):

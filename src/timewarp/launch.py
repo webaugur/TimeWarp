@@ -5,9 +5,11 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
+from typing import Iterable
 
 from timewarp import __version__
 from timewarp.paths import is_frozen
@@ -43,6 +45,72 @@ def _console_process_count(buf: object) -> int:
     import ctypes
 
     return int(ctypes.windll.kernel32.GetConsoleProcessList(buf, 8))
+
+
+_STREAM_BLOCKED = frozenset({"shell", "demo", "-", "--stdin"})
+
+
+def stdin_is_command_stream() -> bool:
+    """True when stdin is a pipe or file (not a TTY, not /dev/null)."""
+    try:
+        if sys.stdin.isatty():
+            return False
+        mode = os.fstat(sys.stdin.fileno()).st_mode
+    except (OSError, ValueError, AttributeError):
+        return False
+    return bool(stat.S_ISFIFO(mode) or stat.S_ISREG(mode))
+
+
+def tokenize_line(text: str) -> list[str] | None:
+    """Split one command line. None = skip (blank or comment)."""
+    stripped = text.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+    posix = os.name != "nt"
+    tokens = shlex.split(stripped, posix=posix)
+    if tokens and tokens[0].lower() in {"timewarp", "timewarp.exe"}:
+        tokens = tokens[1:]
+    return tokens
+
+
+def run_command_lines(lines: Iterable[str], *, invoke=None) -> int:
+    """Run TimeWarp commands from an iterable of lines. Continue on errors."""
+    from timewarp.cli import main as cli_main
+
+    call = invoke if invoke is not None else cli_main
+    last_err = 0
+    for line in lines:
+        try:
+            tokens = tokenize_line(line)
+        except ValueError as exc:
+            print(f"timewarp: {exc}", file=sys.stderr)
+            last_err = 2
+            continue
+        if not tokens:
+            continue
+        if tokens[0] in _STREAM_BLOCKED:
+            print(f"timewarp: {tokens[0]!r} is not allowed in a command stream", file=sys.stderr)
+            last_err = 2
+            continue
+        try:
+            code = call(tokens)
+        except SystemExit as exc:
+            code = exc.code
+            if code is None or code is True:
+                code = 0
+            elif code is False:
+                code = 1
+            else:
+                try:
+                    code = int(code)
+                except (TypeError, ValueError):
+                    code = 1
+        except KeyboardInterrupt:
+            print("timewarp: interrupted", file=sys.stderr)
+            return 130
+        if code not in (0, None):
+            last_err = int(code)
+    return last_err
 
 
 def should_auto_repl(argv_was_none: bool, raw: list[str]) -> bool:
@@ -171,15 +239,14 @@ def run_repl(*, invoke=None) -> int:
             low = text.lower()
             if low in {"quit", "exit", "q"}:
                 return 0
-            posix = os.name != "nt"
             try:
-                tokens = shlex.split(text, posix=posix)
+                tokens = tokenize_line(line)
             except ValueError as exc:
                 print(f"timewarp: {exc}", file=sys.stderr)
                 continue
-            if tokens and tokens[0].lower() in {"timewarp", "timewarp.exe"}:
-                tokens = tokens[1:]
-            if tokens and tokens[0] == "shell":
+            if not tokens:
+                continue
+            if tokens[0] == "shell":
                 print("timewarp: already in the interactive shell", file=sys.stderr)
                 continue
             try:

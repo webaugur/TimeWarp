@@ -14,7 +14,7 @@ timewarp between 2026-05-31 2025-04-30
 
 The last example is the reason this exists: the end date is earlier, so the duration is negative (`-P1Y1M`, −396 days).
 
-If you omit a date, TimeWarp uses **today** and writes that date in **yellow** on the reconstructed command line (stderr). Cached flags (`--city`, …) are **pink**; what you typed is white.
+Every command writes a **reconstructed command line** on stderr: cached flags (`--city`, …) in **pink**, what you typed in white. If you omit a date, TimeWarp uses **today** and that date is **yellow**. `--json` skips the line.
 
 `2025-04-31` is not a date (April has 30 days). TimeWarp refuses it instead of rolling the extra day into May. Errors print `timewarp: …` on stderr and exit 2 (no traceback unless `TIMEWARP_DEBUG=1`).
 
@@ -22,6 +22,16 @@ If you omit a date, TimeWarp uses **today** and writes that date in **yellow** o
 timewarp help
 timewarp help add
 timewarp --help
+```
+
+With no subcommand, a **pipe or file** on stdin is a command stream (one TimeWarp command per line; `#` comments and blanks skipped). `timewarp --stdin` or `timewarp -` reads stdin even on a TTY (end with EOF). `shell` / `demo` / nested `--stdin` are rejected in a stream. A TTY with no args still prints help.
+
+```bash
+echo 'weekday 2026-07-04' | timewarp
+timewarp --stdin <<'EOF'
+calendar 2026-12 --country US
+sun --city Indianapolis 2026-07-04
+EOF
 ```
 
 ## Install
@@ -178,11 +188,13 @@ Workdays skip Saturday and Sunday by default. `--weekend Fri,Sat` changes that.
 
 `timewarp holidays 2026 --country US --region CA` lists them. `timewarp holidays 2026 --country DE --region BY` is Bavaria.
 
+On a color TTY, holiday **lists** (and `today`) use a small set of trailing glyphs from the name: 🎄 Christmas Day, 🎅 Christmas Eve (and Orthodox/Julian Christmas Eve, including 6 Jan), 🎆 New Year / Independence, 🦃 Thanksgiving, 🎖️ Memorial/Veterans, 🛠️ Labor, and a few others; everything else is 🎉. Calendar **grid cells stay `*`**. Those extra eve/Orthodox dates are **display-only** on `calendar` (not skipped workdays). `--json` / `--no-color` stay plain.
+
 ## Phase 2 — calendar, sky, and countdowns
 
 | Screen | Command | What you get now |
 |---|---|---|
-| Create calendar | `timewarp calendar [YEAR]` | Year grid; US: python-holidays (federal or `--region` state); others: Nager.Date |
+| Create calendar | `timewarp calendar [WHEN]` | `YYYY` year grid; `YYYY-MM` one month; `YYYY-Www` or `YYYY-MM-DD` that ISO week only. US: python-holidays; others: Nager.Date |
 | Month sheet | `timewarp month [YYYY-MM] --city NAME` | One row per day: civil twilight, sunrise/set, moonrise/set, illumination |
 | Countdown to Any Date | `timewarp countdown [DATE]` | Signed remaining time (negative if the date is past) |
 | Today | `timewarp today --city NAME [DATE]` | One screen: weekday, holiday, sun, moon, RC note/color, ISS. Not the full `cycle` sheet |
@@ -194,11 +206,16 @@ Workdays skip Saturday and Sunday by default. `--weekend Fri,Sat` changes that.
 | Eclipse lookup | `timewarp eclipse [YEAR]` | Solar and lunar eclipses 1900–2199. Omit YEAR for the next 8 from today; `--limit N` caps the list |
 | Rosicrucian cycle | `timewarp cycle [DATE]` | Year CE+1353; RC **day** starts at **local midnight**. Star date `3379.162`. `--born` adds Lewis periods. Alias: `rosicrucian` |
 | Chart | `timewarp astro --city NAME [DATE]` | Tropical (or `--sidereal`) chart: ASC/MC, Placidus houses, planets, mean node/Lilith, Chiron, Arabic parts, major aspects. `--explain` is geometry in English |
+| Panchanga | `timewarp panchanga [DATE]` | Lunisolar daily date: tithi, paksha, masa, nakshatra (Lahiri). Alias `bharata`. `--purnimanta`. Not a Mahabharata war chronology |
 | Satellite passes | `timewarp passes [SAT] [DATE] --city NAME` | AOS / max / LOS vs twilight, moon, and visual mag; `--catalog visual`; `--tle FILE`; `--min-elev` (default 10°) |
 | Help | `timewarp help [COMMAND]` | Overview, or one command’s usage (`--help` works too; alias: `?`) |
+| Demo | `timewarp demo` | Walk major features: clear the screen, run a command, pause (`--pause SEC`, default 5; `0` waits for a key) |
 
 ```bash
 timewarp calendar 2026 --country US
+timewarp calendar 2026-07 --country US
+timewarp calendar 2026-W27 --country US
+timewarp calendar 2026-07-04 --country US   # ISO week containing that day
 timewarp calendar 2026 --iso          # Monday-first weeks
 timewarp month 2026-07 --city Indianapolis
 timewarp month --city Indianapolis --twilight
@@ -228,6 +245,8 @@ timewarp eclipse 1919
 timewarp cycle 2026-08-29
 timewarp cycle 2026-07-04T@500
 timewarp cycle --born 1960-03-22 --city Indianapolis
+timewarp panchanga 2026-07-04
+timewarp panchanga --explain --city Indianapolis
 timewarp astro --city Indianapolis
 timewarp astro --city Indianapolis --explain
 timewarp astro --city Indianapolis --sidereal lahiri
@@ -249,9 +268,13 @@ timewarp passes --catalog visual --all --city Indianapolis --min-elev 20
 timewarp save --tle tests/data/iss.tle
 timewarp save --catalog visual
 timewarp help rise
+timewarp demo
+timewarp demo --pause 0
 ```
 
 `timewarp cycle` (alias `rosicrucian`) prints the **Rosicrucian year**: Common Era + **1353**. The year is the **March equinox date**; the RC **day** (and that new year) starts at **local midnight**, not at the equinox instant. Default place is Greenwich. The **star date** is `YEAR.DDD` — midnights since the equinox-date midnight (`2026-08-29` → `3379.162`). A **1690-year** cycle starts at midnight on the **337 CE** equinox date (proleptic Gregorian) and rolls at the 2027 equinox midnight. Daily A–G letters and their **color period** (gold, green, orange, orchid, periwinkle, sky, coral) follow the public [AMORC cycles clock](https://cycles.amorc.org/en/cycles), counted from midnight. `--born` adds H. Spencer Lewis period *numbers* (7-year life, ~52-day yearly, soul grid from 22 March); the book’s essays are not copied. `-q` prints the star date.
+
+`timewarp panchanga [DATE]` (alias `bharata`) converts a **modern** civil instant to the lunisolar pieces the Mahabharata uses to date events: **tithi**, **paksha** (Shukla/Krishna), **masa** (amanta by default; `--purnimanta`), **nakshatra** (27 equal spans), weekday, and a **Kali year** using the conventional epoch JD 588465.5 (18 Feb 3102 BCE). It uses Schlyter sun/moon and Lahiri ayanamsa. That is good enough for **which tithi today**; it is **not** a reconstruction of the war sky and is not valid at 3100 BCE. `--explain` is geometry only.
 
 `timewarp astro --city NAME` is a **chart** from TimeWarp’s existing ecliptic longitudes (Schlyter planets, ~1–2′). Tropical by default; `--sidereal lahiri` (or `fagan`, `krishnamurti`) subtracts a **mean ayanamsa**, not DE. Houses default to **Placidus** (`--houses equal|whole`; Equal if the latitude is too high for Placidus). Rows: Sun through Pluto, mean lunar node, mean Lilith (lunar apogee), Chiron if the SBDB dump has it. Arabic parts: Fortune, Spirit, Necessity, Eros, Courage, Victory, Nemesis (day/night formulas). Major aspects (conjunction, sextile, square, trine, opposition) with orbs. `--born` is a natal chart; with a DATE it lists **transits to natal**. `--explain` restates that geometry in English — not personality or fortune-telling. `-q`: frame, ASC, Sun, Moon.
 
@@ -280,6 +303,7 @@ Later work is tracked in [GitHub issues](https://github.com/webaugur/TimeWarp/is
 | `week` | `weekno`, `week-number` |
 | `month` | `almanac` |
 | `cycle` | `rosicrucian` |
+| `panchanga` | `bharata` |
 | `help` | `?` |
 | `load` | `show` |
 | `unload` | `clear` |
@@ -308,8 +332,10 @@ Later work is tracked in [GitHub issues](https://github.com/webaugur/TimeWarp/is
 
 Accepted:
 
-- `YYYY-MM` (month sheet)
-- `YYYY-MM-DD`
+- `YYYY` (year calendar)
+- `YYYY-MM` (month calendar or month sheet)
+- `YYYY-Www` (ISO week calendar)
+- `YYYY-MM-DD` (dates; on `calendar`, the ISO week containing that day)
 - `YYYY-MM-DDTHH:MM[:SS][Z|+HH:MM]` (space instead of `T` is also accepted)
 - `YYYY-Www-D` (ISO week date)
 - `YYYY-DDD` (ordinal date)

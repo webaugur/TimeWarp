@@ -156,6 +156,59 @@ class CliPhase2Tests(unittest.TestCase):
         self.assertIn("2026-01-19", out)
         self.assertIn("Martin Luther King Jr. Day", out)
 
+    def test_calendar_christmas_eve_on_month_and_week(self):
+        code, out, err = run("calendar", "2026-12", "--country", "US")
+        self.assertEqual(code, 0, err)
+        self.assertIn("Christmas Eve", out)
+        self.assertIn("2026-12-24", out)
+        code, out, err = run("calendar", "2026-12-24", "--country", "US")
+        self.assertEqual(code, 0, err)
+        self.assertIn("Christmas Eve", out)
+        self.assertNotIn("November 2026", out)
+
+    def test_calendar_month(self):
+        code, out, err = run("calendar", "2026-07", "--country", "US")
+        self.assertEqual(code, 0, err)
+        self.assertIn("July 2026", out)
+        self.assertNotIn("January 2026", out)
+        self.assertIn("Independence Day", out)
+        self.assertIn("Wk", out)
+
+    def test_calendar_echoes_command(self):
+        code, out, err = run("calendar", "2026-07", "--country", "US")
+        self.assertEqual(code, 0, err)
+        self.assertIn("timewarp", err)
+        self.assertIn("calendar", err)
+        self.assertIn("2026-07", err)
+
+    def test_count_echoes_command(self):
+        code, out, err = run("count", "2026-07-04", "2026-12-25")
+        self.assertEqual(code, 0, err)
+        self.assertIn("timewarp", err)
+        self.assertIn("count", err)
+
+    def test_json_skips_reconstructed_line(self):
+        code, out, err = run("count", "--json", "2026-05-31", "2025-04-30")
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("timewarp count", err)
+        self.assertTrue(out.lstrip().startswith("{"))
+
+    def test_calendar_week(self):
+        code, out, err = run("calendar", "2026-W27", "--country", "US")
+        self.assertEqual(code, 0, err)
+        self.assertIn("2026-W27", out)
+        self.assertIn("2026-06-29", out)
+        self.assertIn("Independence Day", out)
+        self.assertNotIn("July 2026", out)
+        self.assertNotIn("Wk", out)
+
+    def test_calendar_day_is_that_week(self):
+        code, out, err = run("calendar", "2026-07-04", "--country", "US")
+        self.assertEqual(code, 0, err)
+        self.assertIn("2026-W27", out)
+        self.assertNotIn("July 2026", out)
+        self.assertIn("2026-07-04", out)
+
     def test_eclipse_2026(self):
         code, out, err = run("eclipse", "2026")
         self.assertEqual(code, 0, err)
@@ -445,6 +498,7 @@ class HelpAndErrorTests(unittest.TestCase):
         self.assertIn("today --city", out)
         self.assertIn("astro --city", out)
         self.assertIn("shell", out)
+        self.assertIn("demo", out)
         self.assertIn("@500", out)
         self.assertIn("Swatch beats", out)
 

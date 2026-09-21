@@ -8,7 +8,7 @@ import os
 import re
 import sys
 import traceback
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Sequence
 
@@ -18,6 +18,7 @@ from timewarp.ephem import BODIES
 from timewarp.ui import (
     body_mark,
     format_body,
+    holiday_emoji,
     icon,
     marked,
     print_grid,
@@ -27,7 +28,7 @@ from timewarp.ui import (
     want_color,
 )
 from timewarp.rise import events_for_period
-from timewarp.calendar_view import year_calendar
+from timewarp.calendar_view import format_calendar
 from timewarp.month_view import format_month_sheet, parse_year_month, sheet_for_month
 from timewarp.duration import OffsetError, apply_offset, parse_offset, span
 from timewarp.cycle import format_color_period, format_note, to_dict as cycle_to_dict
@@ -87,7 +88,7 @@ Phase 1 (dates and durations):
   week           Week №         ISO 8601 week date (YYYY-Www-D)
 
 Phase 2 (basic):
-  calendar       year calendar with optional holidays
+  calendar       year, month (YYYY-MM), or ISO week (YYYY-Www / YYYY-MM-DD)
   holidays       list public holidays (US: python-holidays; others: Nager.Date cache)
   month          month sheet of sun/moon/twilight times
   countdown      signed time from now to a date (negative if past)
@@ -108,7 +109,10 @@ Phase 2 (basic):
   eclipse        solar/lunar eclipses 1900–2199 (Meeus; --limit)
   cycle          Rosicrucian year (CE+1353; day starts at midnight) and Lewis periods
   astro          tropical/sidereal chart (angles, houses, aspects, lots)
+  panchanga      lunisolar daily date: tithi, paksha, masa, nakshatra (alias: bharata)
   shell          interactive TimeWarp prompt (portable double-click uses this)
+  - / --stdin    run commands from stdin (one per line; also auto if piped with no args)
+  demo           walk major features (clears the screen; --pause SEC, 0 = key)
   help           this overview, or help for one command (--help works too)
 
 Examples:
@@ -123,6 +127,9 @@ Examples:
   {PROG} weekday 2026-07-04
   {PROG} week 2026-07-04
   {PROG} calendar 2026 --country US
+  {PROG} calendar 2026-07 --country US
+  {PROG} calendar 2026-W27 --country US
+  {PROG} calendar 2026-07-04 --country US
   {PROG} calendar 2026 --country GB
   {PROG} holidays 2026 --country GB
   {PROG} holidays 2026 --country US --region CA
@@ -155,6 +162,8 @@ Examples:
   {PROG} eclipse 1919
   {PROG} cycle 2026-08-29
   {PROG} cycle --born 1960-03-22 --city Indianapolis
+  {PROG} panchanga 2026-07-04 --city Greenwich
+  {PROG} panchanga --explain --city Indianapolis
   {PROG} astro --city Indianapolis
   {PROG} astro --city Indianapolis --explain
   {PROG} astro --city Indianapolis --sidereal lahiri
@@ -176,8 +185,13 @@ Examples:
   {PROG} help
   {PROG} help add
   {PROG} shell
+  {PROG} demo
+  {PROG} demo --pause 0
+  {PROG} --stdin < commands.txt
+  echo 'weekday 2026-07-04' | {PROG}
 
-Dates are ISO 8601 only: YYYY-MM (month sheet), YYYY-MM-DD,
+Dates are ISO 8601 only: YYYY (year calendar), YYYY-MM (month calendar or month sheet),
+YYYY-Www (ISO week calendar), YYYY-MM-DD (on calendar: that ISO week only),
 YYYY-MM-DDTHH:MM[:SS][Z|+HH:MM], YYYY-Www-D, YYYY-DDD.
 Swatch beats: @500 (this BMT day) or 2026-07-04T@500.
 Optional words: today, now, yesterday, tomorrow.
@@ -248,12 +262,12 @@ def _echo_cached_command(
     print(" ".join(p for p in (head, mid, tail, guess) if p), file=sys.stderr)
 
 
-def _maybe_echo_command(args: argparse.Namespace, assumed: str | None) -> None:
+def _maybe_echo_command(args: argparse.Namespace, assumed: str | None = None) -> None:
+    if getattr(args, "json", False):
+        return
     pulled = getattr(args, "cache_pulled", None) or []
     raw = getattr(args, "raw_argv", None) or []
-    assumed_s = None if getattr(args, "json", False) else assumed
-    if pulled or assumed_s:
-        _echo_cached_command(pulled, raw, args, assumed=assumed_s)
+    _echo_cached_command(pulled, raw, args, assumed=assumed)
 
 
 def _print_json(payload: object) -> int:
@@ -266,6 +280,12 @@ def cmd_shell(args: argparse.Namespace) -> int:
     from timewarp.launch import run_repl
 
     return run_repl()
+
+
+def cmd_demo(args: argparse.Namespace) -> int:
+    from timewarp.demo import run_demo
+
+    return run_demo(pause_s=float(getattr(args, "pause", 5.0)))
 
 
 def cmd_help(args: argparse.Namespace) -> int:
@@ -294,6 +314,7 @@ def cmd_help(args: argparse.Namespace) -> int:
 def cmd_count(args: argparse.Namespace) -> int:
     start = parse_instant(args.start)
     end = parse_instant(args.end)
+    _maybe_echo_command(args)
     result = span(start, end, include_end=args.include_end)
     if args.json:
         return _print_json(result.to_dict())
@@ -410,6 +431,7 @@ def _iso_week_label(d: date) -> str:
 def cmd_workdays(args: argparse.Namespace) -> int:
     start = parse_instant(args.start)
     end = parse_instant(args.end)
+    _maybe_echo_command(args)
     weekend = parse_weekend(args.weekend)
     result = count_workdays(
         start,
@@ -533,30 +555,50 @@ def cmd_week(args: argparse.Namespace) -> int:
 
 
 def cmd_calendar(args: argparse.Namespace) -> int:
-    assumed = args.year is None
-    year = args.year
-    if year is None:
-        year = date.today().year
-    _maybe_echo_command(args, str(year) if assumed else None)
-    if not 1 <= year <= 9999:
-        raise TimeWarpError(f"year {year} is out of range 1..9999")
+    spec = getattr(args, "when", None)
+    assumed = spec is None
     country = args.country or "US"
-    rows, note = holidays_for_year(
-        year, country, refresh=getattr(args, "refresh", False), region=getattr(args, "region", None)
-    )
-    if note:
-        print(note, file=sys.stderr)
-    text = year_calendar(
-        year,
+    kind, text, anchor = format_calendar(
+        spec,
         country=country,
         iso_weeks=args.iso,
         refresh=getattr(args, "refresh", False),
         region=getattr(args, "region", None),
         emoji=_want_color(args),
     )
+    assumed_label = None
+    if assumed:
+        if kind == "month":
+            assumed_label = f"{anchor.year:04d}-{anchor.month:02d}"
+        elif kind == "week":
+            iso = anchor.isocalendar()
+            assumed_label = f"{iso.year:04d}-W{iso.week:02d}"
+        else:
+            assumed_label = str(anchor.year)
+    _maybe_echo_command(args, assumed_label)
+    year = anchor.year
+    rows, note = holidays_for_year(
+        year, country, refresh=getattr(args, "refresh", False), region=getattr(args, "region", None)
+    )
+    if note:
+        print(note, file=sys.stderr)
     if args.json:
         hols = [{"date": d.isoformat(), "name": n} for d, n in rows]
-        return _print_json({"year": year, "country": country, "holidays": hols, "text": text})
+        if kind == "month":
+            hols = [h for h in hols if h["date"][5:7] == f"{anchor.month:02d}"]
+        elif kind == "week":
+            days = {(anchor + timedelta(days=i)).isoformat() for i in range(7)}
+            hols = [h for h in hols if h["date"] in days]
+        return _print_json(
+            {
+                "kind": kind,
+                "year": year,
+                "month": anchor.month if kind == "month" else None,
+                "country": country,
+                "holidays": hols,
+                "text": text,
+            }
+        )
     sys.stdout.write(text)
     return 0
 
@@ -584,7 +626,8 @@ def cmd_holidays(args: argparse.Namespace) -> int:
     em = _want_color(args)
     print(marked("calendar", f"Public holidays {year} ({country})", emoji=em))
     grid = [[d.isoformat(), weekday_name(d), name] for d, name in rows]
-    print_grid(["date", "weekday", "holiday"], grid, color=em)
+    marks = [holiday_emoji(name, when=d) if em else "" for d, name in rows]
+    print_grid(["date", "weekday", "holiday"], grid, color=em, marks=marks)
     return 0
 
 
@@ -854,6 +897,52 @@ def cmd_cycle(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_panchanga(args: argparse.Namespace) -> int:
+    from zoneinfo import ZoneInfo
+
+    from timewarp.cycle import GREENWICH
+    from timewarp.panchanga import KALI_JD, compute_panchanga, explain, format_quiet
+
+    place = _optional_place(args) or GREENWICH
+    assumed = not getattr(args, "date", None)
+    if args.date:
+        inst = parse_instant(args.date)
+    else:
+        inst = datetime.now(ZoneInfo(place.tz)).replace(microsecond=0)
+    _maybe_echo_command(args, as_date(inst).isoformat() if assumed else None)
+    p = compute_panchanga(
+        inst, place, purnimanta=bool(getattr(args, "purnimanta", False))
+    )
+    if args.json:
+        payload = p.to_dict()
+        if getattr(args, "explain", False):
+            payload["explain"] = explain(p)
+        return _print_json(payload)
+    if args.quiet:
+        print(format_quiet(p))
+        return 0
+    em = _want_color(args)
+    print(marked("moon", "Panchanga (lunisolar)", emoji=em))
+    sys_name = "purnimanta" if p.purnimanta else "amanta"
+    rows = [
+        ("When:", format_instant(p.when)),
+        ("Place:", f"{p.place.name} {p.place.tz}"),
+        ("Vara:", p.weekday),
+        ("Masa:", f"{p.masa} ({sys_name})"),
+        ("Paksha:", p.paksha),
+        ("Tithi:", f"{p.tithi} {p.tithi_name}  {p.tithi_frac:.0%} elapsed"),
+        ("Nakshatra:", f"{p.nakshatra} ({p.nakshatra_n}/27)"),
+        ("Kali year:", f"{p.kali_year}  (epoch JD {KALI_JD} convention)"),
+        ("Elongation:", f"{p.elong:.2f}°  Lahiri {p.ayanamsa:.2f}°"),
+    ]
+    print_kv(rows, color=em)
+    if getattr(args, "explain", False):
+        print()
+        for line in explain(p):
+            print(line)
+    return 0
+
+
 def _chart_when(raw: str | None, place: Place) -> tuple[datetime, bool]:
     from zoneinfo import ZoneInfo
 
@@ -1028,7 +1117,9 @@ def cmd_today(args: argparse.Namespace) -> int:
         ("ISO week:", view.iso_week),
     ]
     if view.holiday:
-        meta.append((icon("holiday", emoji=em), "Holiday:", view.holiday, ""))
+        meta.append(
+            (holiday_emoji(view.holiday, when=view.date) if em else "", "Holiday:", view.holiday, "")
+        )
     sun_rows: list[tuple] = [
         _body_kv("sun", color=em),
         (icon("dawn", emoji=em), "Civil dawn:", clk(view.sun.civil_dawn), ""),
@@ -1371,6 +1462,7 @@ def _event_sort_key(result, primary: str):
 
 def cmd_rise(args: argparse.Namespace) -> int:
     if getattr(args, "list_sb", False):
+        _maybe_echo_command(args)
         from timewarp.jpl import catalog_path, catalog_rows, load_catalog
 
         load_catalog(refresh=bool(getattr(args, "refresh", False)))
@@ -1437,6 +1529,7 @@ def cmd_rise(args: argparse.Namespace) -> int:
 
 
 def cmd_cities(args: argparse.Namespace) -> int:
+    _maybe_echo_command(args)
     names = place_names()
     if args.json:
         rows = []
@@ -1669,6 +1762,7 @@ def cmd_eclipse(args: argparse.Namespace) -> int:
     year = args.year
     after = None
     limit = args.limit
+    _maybe_echo_command(args, date.today().isoformat() if year is None else None)
     if year is not None and not 1 <= year <= 9999:
         raise TimeWarpError(f"year {year} is out of range 1..9999")
     if limit is not None and limit < 1:
@@ -1753,6 +1847,17 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="cmd", required=False)
     parser.set_defaults(func=cmd_help, topic=None)
 
+    p = sub.add_parser("demo", help="Walk major features (clear screen, 5s pause)")
+    _add_common(p)
+    p.add_argument(
+        "--pause",
+        type=float,
+        default=5.0,
+        metavar="SEC",
+        help="seconds after each scene (default: 5; 0 = press a key)",
+    )
+    p.set_defaults(func=cmd_demo)
+
     p = sub.add_parser(
         "shell",
         help="Interactive TimeWarp prompt (also: double-click the portable exe)",
@@ -1819,9 +1924,13 @@ def build_parser() -> argparse.ArgumentParser:
         g.add_argument("--color", action="store_true", help="color body symbols (even when piped)")
         g.add_argument("--no-color", action="store_true", help="plain symbols, no ANSI color")
 
-    p = sub.add_parser("calendar", help="Year calendar")
+    p = sub.add_parser("calendar", help="Year, month, or week calendar")
     _add_common(p)
-    p.add_argument("year", nargs="?", type=int)
+    p.add_argument(
+        "when",
+        nargs="?",
+        help="YYYY (year), YYYY-MM (month), YYYY-Www or YYYY-MM-DD (that ISO week only)",
+    )
     p.add_argument("--country", default="US", help="ISO country code (US: python-holidays; others: Nager.Date cache)")
     p.add_argument("--region", help="subdivision: US-IN / Indiana; Nager ISO 3166-2 (DE-BY / BY / Bavaria). GB defaults to GB-ENG")
     p.add_argument("--refresh", action="store_true", help="refetch the holiday calendar")
@@ -1925,6 +2034,23 @@ def build_parser() -> argparse.ArgumentParser:
     _add_place(p)
     _add_color_flags(p)
     p.set_defaults(func=cmd_cycle)
+
+    p = sub.add_parser(
+        "panchanga",
+        aliases=["bharata"],
+        help="Lunisolar daily date: tithi, paksha, masa, nakshatra",
+    )
+    _add_common(p)
+    p.add_argument("date", nargs="?", help="ISO 8601 date or instant (default: now)")
+    p.add_argument(
+        "--purnimanta",
+        action="store_true",
+        help="name the lunar month as in North India (default: amanta)",
+    )
+    p.add_argument("--explain", action="store_true", help="geometry in English (not itihasa)")
+    _add_place(p)
+    _add_color_flags(p)
+    p.set_defaults(func=cmd_panchanga)
 
     p = sub.add_parser(
         "astro",
@@ -2159,6 +2285,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     launched = maybe_launch_from_double_click(argv_was_none, raw)
     if launched is not None:
         return launched
+    from timewarp.launch import run_command_lines, stdin_is_command_stream
+
+    if raw in (["-"], ["--stdin"]) or (
+        argv_was_none and not raw and stdin_is_command_stream()
+    ):
+        return run_command_lines(sys.stdin)
     parser = build_parser()
     try:
         args = parser.parse_args(raw)
@@ -2170,11 +2302,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         echo_self = {
             cmd_rise,
             cmd_add,
+            cmd_count,
+            cmd_workdays,
             cmd_add_workdays,
             cmd_sun,
             cmd_moon,
             cmd_seasons,
             cmd_cycle,
+            cmd_panchanga,
             cmd_astro,
             cmd_today,
             cmd_passes,
@@ -2184,6 +2319,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             cmd_calendar,
             cmd_holidays,
             cmd_month,
+            cmd_eclipse,
+            cmd_cities,
         }
         if args.func is not cmd_cache:
             pulled = _apply_cache(args, raw)
