@@ -57,24 +57,31 @@ class CliPhase1Tests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), "2027-02-10")
 
-    def test_add_offset_assumes_today(self):
+    def test_add_offset_assumes_now(self):
+        from datetime import datetime, timezone
+        from unittest.mock import patch
+
         from timewarp.duration import apply_offset, parse_offset
         from timewarp.iso import format_instant
 
-        today = date.today().isoformat()
-        code, out, err = run("add", "-q", "P7M6D")
+        now = datetime(2026, 7, 4, 15, 30, tzinfo=timezone.utc)
+        with patch("timewarp.cli._now_local", return_value=now):
+            code, out, err = run("add", "-q", "P7M6D")
         self.assertEqual(code, 0, err)
-        expected = apply_offset(date.today(), parse_offset("P7M6D"))
+        expected = apply_offset(now, parse_offset("P7M6D"))
         self.assertEqual(out.strip(), format_instant(expected))
-        self.assertIn(today, err)
-        code, out, err = run("add", "-q", "7", "years", "6", "months")
+        self.assertIn("T", out.strip())
+        self.assertIn(format_instant(now), err)
+        with patch("timewarp.cli._now_local", return_value=now):
+            code, out, err = run("add", "-q", "7", "years", "6", "months")
         self.assertEqual(code, 0, err)
-        expected = apply_offset(date.today(), parse_offset("7 years 6 months"))
+        expected = apply_offset(now, parse_offset("7 years 6 months"))
         self.assertEqual(out.strip(), format_instant(expected))
-        self.assertIn(today, err)
-        code, out, err = run("add", "-q", "7-6-13")
+        self.assertIn(format_instant(now), err)
+        with patch("timewarp.cli._now_local", return_value=now):
+            code, out, err = run("add", "-q", "7-6-13")
         self.assertEqual(code, 0, err)
-        expected = apply_offset(date.today(), parse_offset("7-6-13"))
+        expected = apply_offset(now, parse_offset("7-6-13"))
         self.assertEqual(out.strip(), format_instant(expected))
 
     def test_between_negative(self):

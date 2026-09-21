@@ -14,7 +14,7 @@ timewarp between 2026-05-31 2025-04-30
 
 The last example is the reason this exists: the end date is earlier, so the duration is negative (`-P1Y1M`, −396 days).
 
-Every command writes a **reconstructed command line** on stderr: cached flags (`--city`, …) in **pink**, what you typed in white. If you omit a date, TimeWarp uses **today** and that date is **yellow**. `--json` skips the line.
+Every command writes a **reconstructed command line** on stderr: cached flags (`--city`, …) in **pink**, what you typed in white. If you omit a date, TimeWarp uses **today** (yellow). `add` / `sub` omit-start uses **now** (date and time, yellow). `--json` skips the line.
 
 `2025-04-31` is not a date (April has 30 days). TimeWarp refuses it instead of rolling the extra day into May. Errors print `timewarp: …` on stderr and exit 2 (no traceback unless `TIMEWARP_DEBUG=1`).
 
@@ -143,7 +143,7 @@ timewarp rise --list-sb --refresh            # refetch, then list
 | Tab | Command | What it does |
 |---|---|---|
 | Count Days | `timewarp count START END` | Signed calendar duration (aliases: `between`, `duration`) |
-| Add Days | `timewarp add [DATE] OFFSET...` | Add years, months, weeks, days, and optional time (DATE defaults to today) |
+| Add Days | `timewarp add [DATE] OFFSET...` | Add years, months, weeks, days, and optional time (start defaults to **now**, with clock time) |
 | Add Days | `timewarp sub [DATE] OFFSET...` | Subtract the same offset (alias: `subtract`) |
 | Workdays | `timewarp workdays START END` | Signed Mon–Fri count (alias: `workday`) |
 | Add Workdays | `timewarp add-workdays [DATE] N` | Move N business days (alias: `add-workday`) |

@@ -196,6 +196,7 @@ YYYY-MM-DDTHH:MM[:SS][Z|+HH:MM], YYYY-Www-D, YYYY-DDD.
 Swatch beats: @500 (this BMT day) or 2026-07-04T@500.
 Optional words: today, now, yesterday, tomorrow.
 Omit a date to use today (yellow on the reconstructed command line).
+`add` / `sub` without a start use now (date and time).
 Sky times print HH:MM plus a zone letter and Swatch beats (17:52R @994).
 Beats are midnight BMT (UTC+1, no DST); @000 is 23:00Z, @500 is 11:00Z.
 -q and --json stay ISO 8601.
@@ -368,24 +369,29 @@ def _looks_like_offset(text: str) -> bool:
     )
 
 
+def _now_local() -> datetime:
+    """Aware local now, seconds resolution. Used when `add` omits a start instant."""
+    return datetime.now().astimezone().replace(microsecond=0)
+
+
 def _split_start_offset(tokens: list[str]) -> tuple:
-    """Return (start, offset_tokens, assumed_today). Date omitted → today."""
+    """Return (start, offset_tokens, assumed_now). Date omitted → now (with time)."""
     if not tokens:
         raise OffsetError(
-            "missing offset; example: 7 months 6 days or P7M6D (date defaults to today)"
+            "missing offset; example: 7 months 6 days or P7M6D (start defaults to now)"
         )
     first = tokens[0]
     if _looks_like_offset(first):
-        return date.today(), tokens, True
+        return _now_local(), tokens, True
     try:
         start = parse_instant(first)
     except TimeWarpError:
-        return date.today(), tokens, True
+        return _now_local(), tokens, True
     rest = tokens[1:]
     if not rest:
         raise OffsetError(
             "missing offset; example: 7 months 6 days or P7M6D "
-            "(omit the date to add to today)"
+            "(omit the start to add to now)"
         )
     return start, rest, False
 
@@ -396,7 +402,7 @@ def cmd_add(args: argparse.Namespace) -> int:
         tokens.append(args.date)
     tokens.extend(_peel_flags(args, list(getattr(args, "offset", None) or [])))
     start, offset_tokens, assumed = _split_start_offset(tokens)
-    _maybe_echo_command(args, as_date(start).isoformat() if assumed else None)
+    _maybe_echo_command(args, format_instant(start) if assumed else None)
     offset = parse_offset(offset_tokens)
     if args.subtract:
         offset = offset.negated()
@@ -1878,13 +1884,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("add", help="Add Days: add years/months/weeks/days/time")
     _add_common(p)
-    p.add_argument("date", nargs="?", help="ISO 8601 start (default: today)")
+    p.add_argument("date", nargs="?", help="ISO 8601 start (default: now, with time)")
     p.add_argument("offset", nargs=argparse.REMAINDER, help="7 months 6 days  or  P7M6D")
     p.set_defaults(func=cmd_add, subtract=False)
 
     p = sub.add_parser("sub", aliases=["subtract"], help="Add Days: subtract an offset")
     _add_common(p)
-    p.add_argument("date", nargs="?", help="ISO 8601 start (default: today)")
+    p.add_argument("date", nargs="?", help="ISO 8601 start (default: now, with time)")
     p.add_argument("offset", nargs=argparse.REMAINDER)
     p.set_defaults(func=cmd_add, subtract=True)
 
