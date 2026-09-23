@@ -206,7 +206,8 @@ On a color TTY, holiday **lists** (and `today`) use a small set of trailing glyp
 | Eclipse lookup | `timewarp eclipse [YEAR]` | Solar and lunar eclipses 1900–2199. Omit YEAR for the next 8 from today; `--limit N` caps the list |
 | Rosicrucian cycle | `timewarp cycle [DATE]` | Year CE+1353; RC **day** starts at **local midnight**. Star date `3379.162`. `--born` adds Lewis periods. Alias: `rosicrucian` |
 | Chart | `timewarp astro --city NAME [DATE]` | Tropical (or `--sidereal`) chart: ASC/MC, Placidus houses, planets, mean node/Lilith, Chiron, Arabic parts, major aspects. `--explain` is geometry in English |
-| Panchanga | `timewarp panchanga [DATE]` | Lunisolar daily date: tithi, paksha, masa, nakshatra (Lahiri). Alias `bharata`. `--purnimanta`. Not a Mahabharata war chronology |
+| Panchanga | `timewarp panchanga [DATE]` | Lunisolar daily date: tithi, paksha, masa, nakshatra, **yoga** (Lahiri). Alias `bharata`. `--purnimanta`. Not a Mahabharata war chronology |
+| Eras | `timewarp eras [DATE]` | One civil day: Gregorian, Julian, French Republican, wandering Egyptian (Nabonassar), Rosicrucian, Anno Lucis / Mundi / Inventionis / Ordinis, Hebrew, tabular Hijri, Coptic, panchanga (with yoga). Alias `calendars` |
 | Satellite passes | `timewarp passes [SAT] [DATE] --city NAME` | AOS / max / LOS vs twilight, moon, and visual mag; `--catalog visual`; `--tle FILE`; `--min-elev` (default 10°) |
 | Help | `timewarp help [COMMAND]` | Overview, or one command’s usage (`--help` works too; alias: `?`) |
 | Demo | `timewarp demo` | Walk major features: clear the screen, run a command, pause (`--pause SEC`, default 5; `0` waits for a key) |
@@ -247,6 +248,7 @@ timewarp cycle 2026-07-04T@500
 timewarp cycle --born 1960-03-22 --city Indianapolis
 timewarp panchanga 2026-07-04
 timewarp panchanga --explain --city Indianapolis
+timewarp eras 2026-09-22
 timewarp astro --city Indianapolis
 timewarp astro --city Indianapolis --explain
 timewarp astro --city Indianapolis --sidereal lahiri
@@ -276,6 +278,8 @@ timewarp demo --pause 0
 
 `timewarp panchanga [DATE]` (alias `bharata`) converts a **modern** civil instant to the lunisolar pieces the Mahabharata uses to date events: **tithi**, **paksha** (Shukla/Krishna), **masa** (amanta by default; `--purnimanta`), **nakshatra** (27 equal spans), weekday, and a **Kali year** using the conventional epoch JD 588465.5 (18 Feb 3102 BCE). It uses Schlyter sun/moon and Lahiri ayanamsa. That is good enough for **which tithi today**; it is **not** a reconstruction of the war sky and is not valid at 3100 BCE. `--explain` is geometry only.
 
+`timewarp eras [DATE]` (alias `calendars`) is that same civil day on several systems at once: Gregorian, **Julian** (13 days behind in 1900–2099), Rosicrucian star date, **Anno Lucis** (CE+4000), **Anno Mundi** (the Hebrew year — Scottish Rite), **Anno Inventionis** (CE+530), **Anno Ordinis** (CE−1118), the Hebrew date, **tabular** Hijri (not moon-sighting), **Coptic** (fixed Egyptian 12×30+5), **wandering Egyptian** (365-day Nabonassar year; 1 Thoth = 26 Feb 747 BCE Julian), **French Republican** arithmetic (22 Sep 1792 = 1 Vendémiaire I; leap years III, VII, XI, … — not the Paris equinox, and only official through year XIV), and the panchanga line including **yoga**. AL / AI / AO are year stamps, not different days.
+
 `timewarp astro --city NAME` is a **chart** from TimeWarp’s existing ecliptic longitudes (Schlyter planets, ~1–2′). Tropical by default; `--sidereal lahiri` (or `fagan`, `krishnamurti`) subtracts a **mean ayanamsa**, not DE. Houses default to **Placidus** (`--houses equal|whole`; Equal if the latitude is too high for Placidus). Rows: Sun through Pluto, mean lunar node, mean Lilith (lunar apogee), Chiron if the SBDB dump has it. Arabic parts: Fortune, Spirit, Necessity, Eros, Courage, Victory, Nemesis (day/night formulas). Major aspects (conjunction, sextile, square, trine, opposition) with orbs. `--born` is a natal chart; with a DATE it lists **transits to natal**. `--explain` restates that geometry in English — not personality or fortune-telling. `-q`: frame, ASC, Sun, Moon.
 
 `timewarp today --city NAME` is one local day: weekday, ISO week, holiday if any (US federal by default; `--holidays` / `--country` / `--region`), civil dawn/dusk and sunrise/set, moon phase plus moonrise/set, RC **star date + daily note and color** (not the 1690-year sheet or Lewis), a season or eclipse line only if it falls that day, and ISS passes (fail-soft if there is no TLE; `--tle FILE` installs nothing, it only reads). Place is required like `sun` (cached `--city` counts). `-q` prints date, weekday, sunrise–sunset, star date, and the note letter.
@@ -304,6 +308,7 @@ Later work is tracked in [GitHub issues](https://github.com/webaugur/TimeWarp/is
 | `month` | `almanac` |
 | `cycle` | `rosicrucian` |
 | `panchanga` | `bharata` |
+| `eras` | `calendars` |
 | `help` | `?` |
 | `load` | `show` |
 | `unload` | `clear` |

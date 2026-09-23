@@ -55,5 +55,6 @@ class PanchangaCliTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("tithi", out)
         self.assertIn("nakshatra", out)
+        self.assertIn("yoga", out)
         self.assertIn("explain", out)
         self.assertIn("Schlyter", out)

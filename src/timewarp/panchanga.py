@@ -150,6 +150,45 @@ def nakshatra_from_lon(moon_sid: float) -> tuple[int, str, float]:
     return i + 1, NAKSHATRAS[i], frac
 
 
+YOGAS = (
+    "Vishkambha",
+    "Priti",
+    "Ayushman",
+    "Saubhagya",
+    "Shobhana",
+    "Atiganda",
+    "Sukarma",
+    "Dhriti",
+    "Shula",
+    "Ganda",
+    "Vriddhi",
+    "Dhruva",
+    "Vyaghata",
+    "Harshana",
+    "Vajra",
+    "Siddhi",
+    "Vyatipata",
+    "Variyan",
+    "Parigha",
+    "Shiva",
+    "Siddha",
+    "Sadhya",
+    "Shubha",
+    "Shukla",
+    "Brahma",
+    "Indra",
+    "Vaidhriti",
+)
+
+
+def yoga_from_lons(sun_sid: float, moon_sid: float) -> tuple[int, str, float]:
+    """Nitya yoga: (sidereal Sun + Moon) / (360°/27)."""
+    x = rev(sun_sid + moon_sid)
+    i = min(int(x / _NAK_SPAN), 26)
+    frac = (x / _NAK_SPAN) - i
+    return i + 1, YOGAS[i], frac
+
+
 def _when_elong(start: datetime, target: float, *, backward: bool) -> datetime:
     t = start
     for _ in range(12):
@@ -198,6 +237,9 @@ class Panchanga:
     nakshatra: str
     nakshatra_n: int
     nakshatra_frac: float
+    yoga: str
+    yoga_n: int
+    yoga_frac: float
     masa: str
     purnimanta: bool
     weekday: str
@@ -220,6 +262,9 @@ class Panchanga:
             "nakshatra": self.nakshatra,
             "nakshatra_n": self.nakshatra_n,
             "nakshatra_elapsed": round(self.nakshatra_frac, 4),
+            "yoga": self.yoga,
+            "yoga_n": self.yoga_n,
+            "yoga_elapsed": round(self.yoga_frac, 4),
             "masa": self.masa,
             "month_system": "purnimanta" if self.purnimanta else "amanta",
             "weekday": self.weekday,
@@ -244,6 +289,7 @@ def compute_panchanga(
     e = rev(moon - sun)
     tithi, frac, paksha, tname = tithi_from_elong(e)
     n_i, n_name, n_frac = nakshatra_from_lon(moon)
+    y_i, y_name, y_frac = yoga_from_lons(sun, moon)
     masa = masa_name(inst, purnimanta=purnimanta)
     ky, ah = kali_year(inst)
     return Panchanga(
@@ -257,6 +303,9 @@ def compute_panchanga(
         nakshatra=n_name,
         nakshatra_n=n_i,
         nakshatra_frac=n_frac,
+        yoga=y_name,
+        yoga_n=y_i,
+        yoga_frac=y_frac,
         masa=masa,
         purnimanta=purnimanta,
         weekday=weekday_name(as_date(inst)),
@@ -278,6 +327,7 @@ def explain(p: Panchanga) -> list[str]:
         f"Moon−Sun elongation {p.elong:.2f}° → tithi {p.tithi} {p.paksha} {p.tithi_name} "
         f"({p.tithi_frac:.0%} elapsed).",
         f"Moon in {p.nakshatra} ({p.nakshatra_n}/27, {p.nakshatra_frac:.0%} elapsed).",
+        f"Yoga {p.yoga_n} {p.yoga} ({p.yoga_frac:.0%} elapsed; Sun+Moon).",
         f"Lunar month {p.masa} ({'purnimanta' if p.purnimanta else 'amanta'}, named from full-moon nakshatra).",
         "Schlyter planets; not Drik Panchang and not a Mahabharata war date.",
     ]

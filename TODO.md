@@ -15,6 +15,8 @@ _(none)_
 
 ## Done
 
+- [#22](https://github.com/webaugur/TimeWarp/issues/22) Julian, French Republican, wandering Egyptian, and yoga
+- [#21](https://github.com/webaugur/TimeWarp/issues/21) `eras`: one civil day on several calendars
 - [#20](https://github.com/webaugur/TimeWarp/issues/20) panchanga: lunisolar daily date (Mahabharata elements)
 - [#19](https://github.com/webaugur/TimeWarp/issues/19) `demo` command (showcase major features)
 - [#18](https://github.com/webaugur/TimeWarp/issues/18) Portable double-click opens an interactive TimeWarp shell

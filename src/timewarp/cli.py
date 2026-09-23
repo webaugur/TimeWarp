@@ -110,6 +110,7 @@ Phase 2 (basic):
   cycle          Rosicrucian year (CE+1353; day starts at midnight) and Lewis periods
   astro          tropical/sidereal chart (angles, houses, aspects, lots)
   panchanga      lunisolar daily date: tithi, paksha, masa, nakshatra (alias: bharata)
+  eras           one civil day: Gregorian, Julian, French, Egyptian, RC, Masonic, Hebrew, Hijri, Coptic, panchanga+yoga
   shell          interactive TimeWarp prompt (portable double-click uses this)
   - / --stdin    run commands from stdin (one per line; also auto if piped with no args)
   demo           walk major features (clears the screen; --pause SEC, 0 = key)
@@ -164,6 +165,7 @@ Examples:
   {PROG} cycle --born 1960-03-22 --city Indianapolis
   {PROG} panchanga 2026-07-04 --city Greenwich
   {PROG} panchanga --explain --city Indianapolis
+  {PROG} eras 2026-09-22
   {PROG} astro --city Indianapolis
   {PROG} astro --city Indianapolis --explain
   {PROG} astro --city Indianapolis --sidereal lahiri
@@ -938,6 +940,7 @@ def cmd_panchanga(args: argparse.Namespace) -> int:
         ("Paksha:", p.paksha),
         ("Tithi:", f"{p.tithi} {p.tithi_name}  {p.tithi_frac:.0%} elapsed"),
         ("Nakshatra:", f"{p.nakshatra} ({p.nakshatra_n}/27)"),
+        ("Yoga:", f"{p.yoga_n} {p.yoga}  {p.yoga_frac:.0%} elapsed"),
         ("Kali year:", f"{p.kali_year}  (epoch JD {KALI_JD} convention)"),
         ("Elongation:", f"{p.elong:.2f}°  Lahiri {p.ayanamsa:.2f}°"),
     ]
@@ -946,6 +949,53 @@ def cmd_panchanga(args: argparse.Namespace) -> int:
         print()
         for line in explain(p):
             print(line)
+    return 0
+
+
+def cmd_eras(args: argparse.Namespace) -> int:
+    from zoneinfo import ZoneInfo
+
+    from timewarp.cycle import GREENWICH
+    from timewarp.eras import compute_eras, format_quiet as eras_quiet
+    from timewarp.panchanga import format_quiet as pan_quiet
+
+    place = _optional_place(args) or GREENWICH
+    assumed = not getattr(args, "date", None)
+    if args.date:
+        inst = parse_instant(args.date)
+    else:
+        inst = datetime.now(ZoneInfo(place.tz)).replace(microsecond=0)
+    _maybe_echo_command(args, as_date(inst).isoformat() if assumed else None)
+    day = compute_eras(inst, place)
+    if args.json:
+        return _print_json(day.to_dict())
+    if args.quiet:
+        print(eras_quiet(day))
+        return 0
+    em = _want_color(args)
+    print(marked("calendar", f"Eras  {day.civil.isoformat()}", emoji=em))
+    rows = [
+        ("Gregorian:", f"{day.weekday} {day.civil.isoformat()}  {day.iso_week}"),
+        ("Julian:", f"{day.julian_year:04d}-{day.julian_month:02d}-{day.julian_day:02d}"),
+        (
+            "French:",
+            f"{day.french_day} {day.french_month} an {day.french_year}  (arithmetic)",
+        ),
+        (
+            "Egyptian:",
+            f"{day.egyptian_day} {day.egyptian_month} {day.egyptian_year}  (Nabonassar, 365d)",
+        ),
+        ("Rosicrucian:", f"{day.rc_stamp}  {day.rc_letter}  {day.rc_color}"),
+        ("Anno Lucis:", f"{day.anno_lucis} A.L.  (Craft, CE+4000)"),
+        ("Anno Mundi:", f"{day.anno_mundi} A.M.  (Scottish Rite, Hebrew year)"),
+        ("Anno Inventionis:", f"{day.anno_inventionis} A.I.  (Royal Arch, CE+530)"),
+        ("Anno Ordinis:", f"{day.anno_ordinis} A.O.  (Templar, CE−1118)"),
+        ("Hebrew:", f"{day.hebrew_day} {day.hebrew_month} {day.hebrew_year}"),
+        ("Hijri:", f"{day.hijri_day} {day.hijri_month} {day.hijri_year}  (tabular)"),
+        ("Coptic:", f"{day.coptic_day} {day.coptic_month} {day.coptic_year}"),
+        ("Panchanga:", f"{pan_quiet(day.panchanga)}  yoga {day.panchanga.yoga}"),
+    ]
+    print_kv(rows, color=em)
     return 0
 
 
@@ -2059,6 +2109,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_panchanga)
 
     p = sub.add_parser(
+        "eras",
+        aliases=["calendars"],
+        help="One civil day: Gregorian, Julian, French, Egyptian, RC, Masonic, Hebrew, Hijri, Coptic, panchanga+yoga",
+    )
+    _add_common(p)
+    p.add_argument("date", nargs="?", help="ISO 8601 date or instant (default: now)")
+    _add_place(p)
+    _add_color_flags(p)
+    p.set_defaults(func=cmd_eras)
+
+    p = sub.add_parser(
         "astro",
         help="Tropical or sidereal chart: angles, houses, aspects, Arabic parts",
     )
@@ -2316,6 +2377,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             cmd_seasons,
             cmd_cycle,
             cmd_panchanga,
+            cmd_eras,
             cmd_astro,
             cmd_today,
             cmd_passes,
