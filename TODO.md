@@ -10,11 +10,24 @@ _(none)_
 
 ## Later
 
-- [#5](https://github.com/webaugur/TimeWarp/issues/5) Live countdown timers
+- [#33](https://github.com/webaugur/TimeWarp/issues/33) Aztec tonalpohualli / xiuhpohualli
+- [#30](https://github.com/webaugur/TimeWarp/issues/30) Inca / Quechua
+- [#34](https://github.com/webaugur/TimeWarp/issues/34) Hawaiian months
+- [#32](https://github.com/webaugur/TimeWarp/issues/32) Māori maramataka
+- [#35](https://github.com/webaugur/TimeWarp/issues/35) Australian Aboriginal seasonal calendars
 - Portable zips (PyInstaller onedir + GHA); Apple notarization / Authenticode later
 
 ## Done
 
+- [#36](https://github.com/webaugur/TimeWarp/issues/36) Maya day-count and Cherokee month names
+- [#5](https://github.com/webaugur/TimeWarp/issues/5) Live countdown timers
+- [#23](https://github.com/webaugur/TimeWarp/issues/23) Orthodox / Julian computus
+- [#24](https://github.com/webaugur/TimeWarp/issues/24) General Roman Calendar of saints (names and dates)
+- [#25](https://github.com/webaugur/TimeWarp/issues/25) Liturgical ranking
+- [#26](https://github.com/webaugur/TimeWarp/issues/26) Vernacular liturgical names
+- [#27](https://github.com/webaugur/TimeWarp/issues/27) Ember days
+- [#28](https://github.com/webaugur/TimeWarp/issues/28) 1962 vs 1970 liturgical calendar flag
+- [#29](https://github.com/webaugur/TimeWarp/issues/29) Western liturgy command
 - [#22](https://github.com/webaugur/TimeWarp/issues/22) Julian, French Republican, wandering Egyptian, and yoga
 - [#21](https://github.com/webaugur/TimeWarp/issues/21) `eras`: one civil day on several calendars
 - [#20](https://github.com/webaugur/TimeWarp/issues/20) panchanga: lunisolar daily date (Mahabharata elements)

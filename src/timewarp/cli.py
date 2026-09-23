@@ -110,7 +110,9 @@ Phase 2 (basic):
   cycle          Rosicrucian year (CE+1353; day starts at midnight) and Lewis periods
   astro          tropical/sidereal chart (angles, houses, aspects, lots)
   panchanga      lunisolar daily date: tithi, paksha, masa, nakshatra (alias: bharata)
-  eras           one civil day: Gregorian, Julian, French, Egyptian, RC, Masonic, Hebrew, Hijri, Coptic, panchanga+yoga
+  eras           one civil day, including Maya (GMT) and Cherokee month (English + syllabary)
+  maya           Tzolk'in, Haab, and Long Count (GMT 584283)
+  liturgy        Western computus, liturgical season, Roman Kalends count (alias: roman)
   shell          interactive TimeWarp prompt (portable double-click uses this)
   - / --stdin    run commands from stdin (one per line; also auto if piped with no args)
   demo           walk major features (clears the screen; --pause SEC, 0 = key)
@@ -166,6 +168,8 @@ Examples:
   {PROG} panchanga 2026-07-04 --city Greenwich
   {PROG} panchanga --explain --city Indianapolis
   {PROG} eras 2026-09-22
+  {PROG} maya 2012-12-21
+  {PROG} liturgy 2026-09-22
   {PROG} astro --city Indianapolis
   {PROG} astro --city Indianapolis --explain
   {PROG} astro --city Indianapolis --sidereal lahiri
@@ -666,15 +670,42 @@ def cmd_month(args: argparse.Namespace) -> int:
     return 0
 
 
+def _countdown_block(result, *, color: bool) -> None:
+    when = "until" if result.sign >= 0 else "since"
+    print_kv(
+        [
+            ("Now:", format_labeled(result.start)),
+            ("Target:", format_labeled(result.end)),
+            (icon("clock", emoji=color), f"Time {when}:", result.human(), ""),
+            ("ISO 8601:", result.iso()),
+            ("Total days:", str(result.total_days)),
+        ],
+        color=color,
+    )
+
+
+def _sleep_until_next_second() -> None:
+    # The display changes on the wall-clock second. No other signal exists.
+    import time
+
+    now = datetime.now().astimezone()
+    time.sleep(1.0 - now.microsecond / 1_000_000)
+
+
 def cmd_countdown(args: argparse.Namespace) -> int:
     assumed = not args.date
     target = parse_instant(args.date) if args.date else date.today()
     _maybe_echo_command(args, as_date(target).isoformat() if assumed else None)
-    if isinstance(target, datetime):
-        start: datetime | date = datetime.now(tz=target.tzinfo).replace(microsecond=0)
-    else:
-        start = date.today()
-    result = span(start, target)
+    once = bool(getattr(args, "once", False)) or args.json or args.quiet or not sys.stdout.isatty()
+
+    def current():
+        if isinstance(target, datetime):
+            start: datetime | date = datetime.now(tz=target.tzinfo).replace(microsecond=0)
+        else:
+            start = date.today()
+        return span(start, target)
+
+    result = current()
     if args.json:
         payload = result.to_dict()
         payload["mode"] = "countdown"
@@ -682,19 +713,21 @@ def cmd_countdown(args: argparse.Namespace) -> int:
     if args.quiet:
         print(result.iso())
         return 0
-    when = "until" if result.sign >= 0 else "since"
     em = _want_color(args)
-    print_kv(
-        [
-            ("Now:", format_labeled(result.start)),
-            ("Target:", format_labeled(result.end)),
-            (icon("clock", emoji=em), f"Time {when}:", result.human(), ""),
-            ("ISO 8601:", result.iso()),
-            ("Total days:", str(result.total_days)),
-        ],
-        color=em,
-    )
-    return 0
+    if once:
+        _countdown_block(result, color=em)
+        return 0
+    try:
+        while True:
+            result = current()
+            sys.stdout.write("\033[2J\033[H")
+            print(marked("clock", "Countdown", emoji=em))
+            _countdown_block(result, color=em)
+            sys.stdout.flush()
+            _sleep_until_next_second()
+    except KeyboardInterrupt:
+        print()
+        return 0
 
 
 def _place_from_args(args: argparse.Namespace) -> Place:
@@ -957,6 +990,9 @@ def cmd_eras(args: argparse.Namespace) -> int:
 
     from timewarp.cycle import GREENWICH
     from timewarp.eras import compute_eras, format_quiet as eras_quiet
+    from timewarp.cherokee import cherokee_line, cherokee_month
+    from timewarp.liturgy import compute_liturgy
+    from timewarp.maya import maya_from_gregorian
     from timewarp.panchanga import format_quiet as pan_quiet
 
     place = _optional_place(args) or GREENWICH
@@ -967,10 +1003,36 @@ def cmd_eras(args: argparse.Namespace) -> int:
         inst = datetime.now(ZoneInfo(place.tz)).replace(microsecond=0)
     _maybe_echo_command(args, as_date(inst).isoformat() if assumed else None)
     day = compute_eras(inst, place)
+    calendar = getattr(args, "calendar", None) or "1970"
+    lang = getattr(args, "lang", None) or "en"
+    lit = compute_liturgy(
+        day.civil,
+        calendar=calendar,
+        lang=lang,
+        orthodox=bool(getattr(args, "orthodox", False)),
+    )
+    maya = maya_from_gregorian(day.civil)
+    gloss, cname, syll = cherokee_month(day.civil)
     if args.json:
-        return _print_json(day.to_dict())
+        payload = day.to_dict()
+        payload["liturgy"] = lit.to_dict()
+        payload["maya"] = maya.to_dict()
+        payload["cherokee"] = {
+            "gloss": gloss,
+            "name": cname,
+            "syllabary": syll,
+            "note": "Kituwah month name for this Gregorian month; not a lunar observation",
+        }
+        return _print_json(payload)
     if args.quiet:
-        print(eras_quiet(day))
+        extra = lit.season
+        if lit.feast:
+            extra += f" {lit.feast}"
+        if lit.ember:
+            extra += " Ember"
+        if lit.orthodox_easter:
+            extra += f" OrthEaster {lit.orthodox_easter.isoformat()}"
+        print(f"{eras_quiet(day)}  {extra}  {lit.roman_abbr}")
         return 0
     em = _want_color(args)
     print(marked("calendar", f"Eras  {day.civil.isoformat()}", emoji=em))
@@ -993,7 +1055,111 @@ def cmd_eras(args: argparse.Namespace) -> int:
         ("Hebrew:", f"{day.hebrew_day} {day.hebrew_month} {day.hebrew_year}"),
         ("Hijri:", f"{day.hijri_day} {day.hijri_month} {day.hijri_year}  (tabular)"),
         ("Coptic:", f"{day.coptic_day} {day.coptic_month} {day.coptic_year}"),
+        ("Maya:", maya.line()),
+        ("Cherokee:", f"{cherokee_line(day.civil)}  (Kituwah, Gregorian month)"),
         ("Panchanga:", f"{pan_quiet(day.panchanga)}  yoga {day.panchanga.yoga}"),
+        (
+            "Liturgy:",
+            f"{lit.calendar}  {lit.season}"
+            + (f"  {lit.feast}" if lit.feast else "")
+            + (f"  ({lit.rank})" if lit.rank else "")
+            + ("  Ember" if lit.ember else ""),
+        ),
+        ("Roman:", lit.roman_abbr),
+    ]
+    if lit.orthodox_easter:
+        rows.append(
+            (
+                "Orthodox Easter:",
+                f"{lit.orthodox_easter.isoformat()}  ({lit.orthodox_easter_julian})",
+            )
+        )
+    print_kv(rows, color=em)
+    return 0
+
+
+def cmd_maya(args: argparse.Namespace) -> int:
+    from timewarp.maya import GMT as MAYA_GMT
+    from timewarp.maya import maya_from_gregorian
+
+    assumed = not getattr(args, "date", None)
+    if args.date:
+        inst = parse_instant(args.date)
+    else:
+        inst = date.today()
+    civil = as_date(inst)
+    _maybe_echo_command(args, civil.isoformat() if assumed else None)
+    maya = maya_from_gregorian(civil)
+    if args.json:
+        payload = maya.to_dict()
+        payload["gregorian"] = civil.isoformat()
+        return _print_json(payload)
+    if args.quiet:
+        print(maya.line())
+        return 0
+    em = _want_color(args)
+    print(marked("calendar", f"Maya  {civil.isoformat()}", emoji=em))
+    print_kv(
+        [
+            ("Tzolk'in:", f"{maya.tzolkin_number} {maya.tzolkin_name}"),
+            ("Haab:", f"{maya.haab_day} {maya.haab_month}"),
+            ("Long Count:", f"{maya.long_count()}  (GMT {MAYA_GMT})"),
+        ],
+        color=em,
+    )
+    return 0
+
+
+def cmd_liturgy(args: argparse.Namespace) -> int:
+    from timewarp.liturgy import compute_liturgy
+
+    assumed = not getattr(args, "date", None)
+    if args.date:
+        inst = parse_instant(args.date)
+    else:
+        inst = date.today()
+    _maybe_echo_command(args, as_date(inst).isoformat() if assumed else None)
+    calendar = getattr(args, "calendar", None) or "1970"
+    lang = getattr(args, "lang", None) or "en"
+    day = compute_liturgy(
+        inst,
+        calendar=calendar,
+        lang=lang,
+        orthodox=bool(getattr(args, "orthodox", False)),
+    )
+    if args.json:
+        return _print_json(day.to_dict())
+    if args.quiet:
+        from timewarp.liturgy import format_quiet
+
+        print(format_quiet(day))
+        return 0
+    em = _want_color(args)
+    print(marked("calendar", f"Liturgy  {day.day.isoformat()}", emoji=em))
+    feast = day.feast or "—"
+    rows = [
+        ("Date:", f"{day.weekday} {day.day.isoformat()}"),
+        ("Calendar:", day.calendar),
+        ("Season:", day.season),
+        ("Feast:", feast + (f"  ({day.rank})" if day.rank else "")),
+        ("Also:", ", ".join(day.also) if day.also else "—"),
+        ("Ember:", "yes" if day.ember else "no"),
+        ("Easter:", day.easter.isoformat()),
+        ("Ash Wednesday:", day.ash_wednesday.isoformat()),
+        ("Good Friday:", day.good_friday.isoformat()),
+        ("Ascension:", f"{day.ascension.isoformat()}  (Thursday)"),
+        ("Pentecost:", day.pentecost.isoformat()),
+        ("Corpus Christi:", day.corpus_christi.isoformat()),
+        (
+            "Orthodox Easter:",
+            (
+                f"{day.orthodox_easter.isoformat()}  ({day.orthodox_easter_julian})"
+                if day.orthodox_easter
+                else "—  (pass --orthodox)"
+            ),
+        ),
+        ("Roman:", f"{day.roman_abbr}  {day.roman_plain}"),
+        ("AUC:", f"{day.auc}  (convention: CE+753)"),
     ]
     print_kv(rows, color=em)
     return 0
@@ -1167,10 +1333,15 @@ def cmd_today(args: argparse.Namespace) -> int:
     def clk(when_dt):
         return format_clock(when_dt) if when_dt else dash
 
+    from timewarp.cherokee import cherokee_line
+    from timewarp.maya import maya_from_gregorian
+
     print(marked("calendar", f"{view.weekday} {view.date.isoformat()}", emoji=em))
     meta: list[tuple] = [
         ("Place:", f"{view.place.name} ({view.place.lat}, {view.place.lon}) {view.place.tz}"),
         ("ISO week:", view.iso_week),
+        ("Maya:", maya_from_gregorian(view.date).line()),
+        ("Cherokee:", f"{cherokee_line(view.date)}  (Kituwah month)"),
     ]
     if view.holiday:
         meta.append(
@@ -2009,6 +2180,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("countdown", help="Signed time from now to a date")
     _add_common(p)
     p.add_argument("date", nargs="?", help="ISO 8601 date (default: today)")
+    p.add_argument(
+        "--once",
+        action="store_true",
+        help="print once (a TTY otherwise ticks each second; -q and --json are always once)",
+    )
     _add_color_flags(p)
     p.set_defaults(func=cmd_countdown)
 
@@ -2115,9 +2291,38 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_common(p)
     p.add_argument("date", nargs="?", help="ISO 8601 date or instant (default: now)")
+    p.add_argument("--calendar", choices=("1970", "1962"), default="1970")
+    p.add_argument("--lang", choices=("en", "la"), default="en", help="liturgy names: en or Latin")
+    p.add_argument(
+        "--orthodox",
+        action="store_true",
+        help="add Julian-computus Easter (does not change the Western season)",
+    )
     _add_place(p)
     _add_color_flags(p)
     p.set_defaults(func=cmd_eras)
+
+    p = sub.add_parser("maya", help="Maya Tzolk'in, Haab, and Long Count (GMT 584283)")
+    _add_common(p)
+    p.add_argument("date", nargs="?", help="ISO 8601 date (default: today)")
+    _add_color_flags(p)
+    p.set_defaults(func=cmd_maya)
+
+    p = sub.add_parser(
+        "liturgy",
+        aliases=["roman"],
+        help="Western computus, liturgical season, and Roman Kalends count",
+    )
+    _add_common(p)
+    p.add_argument("date", nargs="?", help="ISO 8601 date (default: today)")
+    p.add_argument("--calendar", choices=("1970", "1962"), default="1970")
+    p.add_argument("--lang", choices=("en", "la"), default="en", help="en or Latin")
+    p.add_argument(
+        "--orthodox",
+        action="store_true",
+        help="also print Julian-computus Easter (does not change the Western season)",
+    )
+    p.set_defaults(func=cmd_liturgy)
 
     p = sub.add_parser(
         "astro",
@@ -2378,6 +2583,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             cmd_cycle,
             cmd_panchanga,
             cmd_eras,
+            cmd_maya,
+            cmd_liturgy,
             cmd_astro,
             cmd_today,
             cmd_passes,

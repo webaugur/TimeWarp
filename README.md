@@ -67,7 +67,7 @@ python3 -m PyInstaller --noconfirm --clean timewarp.spec
 dist/timewarp/timewarp --version
 ```
 
-Artifacts: **Actions → portable** (manual run or a `v*` tag). A tag build names both the Actions artifact and the zip from that tag, e.g. `timewarp-1.4.0-linux-x86_64` / `timewarp-1.4.0-linux-x86_64.zip`, and attaches the zip to the GitHub Release. A manual run uses the package version instead of a tag.
+Artifacts: **Actions → portable** (manual run or a `v*` tag). A tag build names both the Actions artifact and the zip from that tag, e.g. `timewarp-1.5.0-linux-x86_64` / `timewarp-1.5.0-linux-x86_64.zip`, and attaches the zip to the GitHub Release. A manual run uses the package version instead of a tag.
 
 Double-clicking `timewarp` / `timewarp.exe` opens an interactive **`timewarp>`** prompt in that folder (not a flash of help). Type commands without the program name (`sun --city Indianapolis`, `help rise`). `quit` / `exit` / `q` leaves. From a normal terminal, `timewarp` with no args still prints help; `timewarp shell` starts the same prompt.
 
@@ -207,7 +207,9 @@ On a color TTY, holiday **lists** (and `today`) use a small set of trailing glyp
 | Rosicrucian cycle | `timewarp cycle [DATE]` | Year CE+1353; RC **day** starts at **local midnight**. Star date `3379.162`. `--born` adds Lewis periods. Alias: `rosicrucian` |
 | Chart | `timewarp astro --city NAME [DATE]` | Tropical (or `--sidereal`) chart: ASC/MC, Placidus houses, planets, mean node/Lilith, Chiron, Arabic parts, major aspects. `--explain` is geometry in English |
 | Panchanga | `timewarp panchanga [DATE]` | Lunisolar daily date: tithi, paksha, masa, nakshatra, **yoga** (Lahiri). Alias `bharata`. `--purnimanta`. Not a Mahabharata war chronology |
-| Eras | `timewarp eras [DATE]` | One civil day: Gregorian, Julian, French Republican, wandering Egyptian (Nabonassar), Rosicrucian, Anno Lucis / Mundi / Inventionis / Ordinis, Hebrew, tabular Hijri, Coptic, panchanga (with yoga). Alias `calendars` |
+| Eras | `timewarp eras [DATE]` | One civil day, including Maya (GMT) and the Cherokee month (English gloss + syllabary). Alias `calendars` |
+| Maya | `timewarp maya [DATE]` | Tzolk'in, Haab, and Long Count. GMT 584283 |
+| Liturgy | `timewarp liturgy [DATE]` | Gregorian Easter and movable feasts, season, six fixed solemnities, Roman Kalends/Nones/Ides. Alias `roman`. Not the full saint calendar |
 | Satellite passes | `timewarp passes [SAT] [DATE] --city NAME` | AOS / max / LOS vs twilight, moon, and visual mag; `--catalog visual`; `--tle FILE`; `--min-elev` (default 10°) |
 | Help | `timewarp help [COMMAND]` | Overview, or one command’s usage (`--help` works too; alias: `?`) |
 | Demo | `timewarp demo` | Walk major features: clear the screen, run a command, pause (`--pause SEC`, default 5; `0` waits for a key) |
@@ -249,6 +251,7 @@ timewarp cycle --born 1960-03-22 --city Indianapolis
 timewarp panchanga 2026-07-04
 timewarp panchanga --explain --city Indianapolis
 timewarp eras 2026-09-22
+timewarp liturgy 2026-09-22
 timewarp astro --city Indianapolis
 timewarp astro --city Indianapolis --explain
 timewarp astro --city Indianapolis --sidereal lahiri
@@ -278,7 +281,13 @@ timewarp demo --pause 0
 
 `timewarp panchanga [DATE]` (alias `bharata`) converts a **modern** civil instant to the lunisolar pieces the Mahabharata uses to date events: **tithi**, **paksha** (Shukla/Krishna), **masa** (amanta by default; `--purnimanta`), **nakshatra** (27 equal spans), weekday, and a **Kali year** using the conventional epoch JD 588465.5 (18 Feb 3102 BCE). It uses Schlyter sun/moon and Lahiri ayanamsa. That is good enough for **which tithi today**; it is **not** a reconstruction of the war sky and is not valid at 3100 BCE. `--explain` is geometry only.
 
-`timewarp eras [DATE]` (alias `calendars`) is that same civil day on several systems at once: Gregorian, **Julian** (13 days behind in 1900–2099), Rosicrucian star date, **Anno Lucis** (CE+4000), **Anno Mundi** (the Hebrew year — Scottish Rite), **Anno Inventionis** (CE+530), **Anno Ordinis** (CE−1118), the Hebrew date, **tabular** Hijri (not moon-sighting), **Coptic** (fixed Egyptian 12×30+5), **wandering Egyptian** (365-day Nabonassar year; 1 Thoth = 26 Feb 747 BCE Julian), **French Republican** arithmetic (22 Sep 1792 = 1 Vendémiaire I; leap years III, VII, XI, … — not the Paris equinox, and only official through year XIV), and the panchanga line including **yoga**. AL / AI / AO are year stamps, not different days.
+`timewarp eras [DATE]` (alias `calendars`) is that same civil day on several systems at once: Gregorian, **Julian** (13 days behind in 1900–2099), Rosicrucian star date, **Anno Lucis** (CE+4000), **Anno Mundi** (the Hebrew year — Scottish Rite), **Anno Inventionis** (CE+530), **Anno Ordinis** (CE−1118), the Hebrew date, **tabular** Hijri (not moon-sighting), **Coptic** (fixed Egyptian 12×30+5), **wandering Egyptian** (365-day Nabonassar year; 1 Thoth = 26 Feb 747 BCE Julian), **French Republican** arithmetic (22 Sep 1792 = 1 Vendémiaire I; leap years III, VII, XI, … — not the Paris equinox, and only official through year XIV), and the panchanga line including **yoga**. AL / AI / AO are year stamps, not different days. The liturgy lines are the Western **season**, the day’s feast and rank, **Ember** when it falls, and the Roman Kalends count. `--calendar 1962`, `--lang la`, and `--orthodox` match `liturgy` (`--orthodox` adds Julian Easter; it does not replace the Western season).
+
+**Maya** (also `timewarp maya`) is the Tzolk'in, Haab, and Long Count using correlation **GMT 584283** (11 Aug 3114 BCE Gregorian = 0.0.0.0.0). **Cherokee** is the Kituwah month name for that Gregorian month: English gloss (omitted when the sources do not give one), transliteration, and syllabary. It is not a lunar observation and not a pan-Indian calendar. `today` prints the same two lines.
+
+`timewarp liturgy [DATE]` (alias `roman`) uses the **Gregorian computus** for Easter Sunday, then Ash Wednesday (−46), Palm Sunday, the Triduum, Ascension (**Thursday**, +39), Pentecost (+49), Trinity, and Corpus Christi (+60). The season is Advent, Christmas, Lent, Paschal Triduum, Easter, or Ordinary Time. Principal days of the General Roman Calendar are named (solemnity, feast, memorial, optional memorial); a privileged Sunday outranks a saint. `--lang la` prints the Latin name. `--calendar 1962` uses Septuagesima / After Epiphany / After Pentecost, Christ the King on the last Sunday of October, and the 1962 rank of 1 May. `--orthodox` adds Julian-computus Easter beside the Western season (it does not replace it). Ember days are the Wednesday, Friday, and Saturday after 13 Dec, the first Sunday of Lent, Pentecost, and 14 Sep. The Roman row is the ancient count: Kalends, Nones, Ides, and inclusive *ante diem* (22 Sep is `a.d. X Kal. Oct.`). AUC is the convention CE+753.
+
+On a TTY, `timewarp countdown` redraws every wall-clock second. `-q`, `--json`, and `--once` print a single span.
 
 `timewarp astro --city NAME` is a **chart** from TimeWarp’s existing ecliptic longitudes (Schlyter planets, ~1–2′). Tropical by default; `--sidereal lahiri` (or `fagan`, `krishnamurti`) subtracts a **mean ayanamsa**, not DE. Houses default to **Placidus** (`--houses equal|whole`; Equal if the latitude is too high for Placidus). Rows: Sun through Pluto, mean lunar node, mean Lilith (lunar apogee), Chiron if the SBDB dump has it. Arabic parts: Fortune, Spirit, Necessity, Eros, Courage, Victory, Nemesis (day/night formulas). Major aspects (conjunction, sextile, square, trine, opposition) with orbs. `--born` is a natal chart; with a DATE it lists **transits to natal**. `--explain` restates that geometry in English — not personality or fortune-telling. `-q`: frame, ASC, Sun, Moon.
 
@@ -309,6 +318,7 @@ Later work is tracked in [GitHub issues](https://github.com/webaugur/TimeWarp/is
 | `cycle` | `rosicrucian` |
 | `panchanga` | `bharata` |
 | `eras` | `calendars` |
+| `liturgy` | `roman` |
 | `help` | `?` |
 | `load` | `show` |
 | `unload` | `clear` |

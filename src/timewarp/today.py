@@ -235,9 +235,14 @@ def snapshot(
 
 
 def format_quiet(view: TodayView) -> str:
+    from timewarp.cherokee import cherokee_line
+    from timewarp.maya import maya_from_gregorian
+
     rise = format_clock(view.sun.sunrise) if view.sun.sunrise else "none"
     sset = format_clock(view.sun.sunset) if view.sun.sunset else "none"
     return (
         f"{view.date.isoformat()} {view.weekday}  {rise}–{sset}  "
-        f"{view.stamp}  {view.daily['letter']}"
+        f"{view.stamp}  {view.daily['letter']}  "
+        f"Maya {maya_from_gregorian(view.date).long_count()}  "
+        f"Cherokee {cherokee_line(view.date)}"
     )

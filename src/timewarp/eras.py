@@ -229,6 +229,19 @@ def gregorian_jdn(year: int, month: int, day: int) -> int:
     return day + (153 * m + 2) // 5 + 365 * y + y // 4 - y // 100 + y // 400 - 32045
 
 
+def gregorian_from_jdn(jdn: int) -> date:
+    a = jdn + 32044
+    b = (4 * a + 3) // 146097
+    c = a - (146097 * b) // 4
+    d = (4 * c + 3) // 1461
+    e = c - (1461 * d) // 4
+    m = (5 * e + 2) // 153
+    day = e - (153 * m + 2) // 5 + 1
+    month = m + 3 - 12 * (m // 10)
+    year = 100 * b + d - 4800 + (m // 10)
+    return date(year, month, day)
+
+
 def julian_from_gregorian(day: date) -> tuple[int, int, int]:
     """Proleptic Julian civil date for a proleptic Gregorian day."""
     jdn = gregorian_jdn(day.year, day.month, day.day)
@@ -440,6 +453,9 @@ def compute_eras(when: Instant, place: Place | None = None) -> ErasDay:
 
 
 def format_quiet(day: ErasDay) -> str:
+    from timewarp.cherokee import cherokee_line
+    from timewarp.maya import maya_from_gregorian
+
     p = day.panchanga
     return (
         f"{day.civil.isoformat()}  RC {day.rc_stamp}  "
@@ -450,5 +466,7 @@ def format_quiet(day: ErasDay) -> str:
         f"FR {day.french_day} {day.french_month} {day.french_year}  "
         f"Eg {day.egyptian_day} {day.egyptian_month} {day.egyptian_year}  "
         f"{day.coptic_day} {day.coptic_month} {day.coptic_year}  "
-        f"{panchanga_line(p)} {p.yoga}"
+        f"{panchanga_line(p)} {p.yoga}  "
+        f"Maya {maya_from_gregorian(day.civil).long_count()}  "
+        f"Cherokee {cherokee_line(day.civil)}"
     )

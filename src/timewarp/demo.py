@@ -27,6 +27,8 @@ _SCENES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Moon", ("moon", "--city", "New York", "2026-07-04")),
     ("Seasons", ("seasons", "2026")),
     ("Rosicrucian cycle", ("cycle", "2026-08-29")),
+    ("Eras", ("eras", "2026-09-22")),
+    ("Maya", ("maya", "2012-12-21")),
     ("Chart", ("astro", "--city", "Indianapolis", "2026-07-04")),
     ("Rise / set", ("rise", "--city", "New York", "2026-07-04")),
     ("Eclipses", ("eclipse", "2026")),
