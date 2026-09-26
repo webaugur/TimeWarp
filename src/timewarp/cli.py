@@ -110,7 +110,7 @@ Phase 2 (basic):
   cycle          Rosicrucian year (CE+1353; day starts at midnight) and Lewis periods
   astro          tropical/sidereal chart (angles, houses, aspects, lots)
   panchanga      lunisolar daily date: tithi, paksha, masa, nakshatra (alias: bharata)
-  eras           one civil day, including Maya (GMT) and Cherokee month (English + syllabary)
+  eras           one civil day; English plus native script (Maya numerals, Cherokee syllabary)
   maya           Tzolk'in, Haab, and Long Count (GMT 584283)
   liturgy        Western computus, liturgical season, Roman Kalends count (alias: roman)
   shell          interactive TimeWarp prompt (portable double-click uses this)
@@ -942,7 +942,19 @@ def cmd_panchanga(args: argparse.Namespace) -> int:
     from zoneinfo import ZoneInfo
 
     from timewarp.cycle import GREENWICH
-    from timewarp.panchanga import KALI_JD, compute_panchanga, explain, format_quiet
+    from timewarp.native import beside
+    from timewarp.panchanga import (
+        KALI_JD,
+        compute_panchanga,
+        explain,
+        format_quiet,
+        masa_native,
+        nakshatra_native,
+        paksha_native,
+        tithi_native,
+        weekday_native,
+        yoga_native,
+    )
 
     place = _optional_place(args) or GREENWICH
     assumed = not getattr(args, "date", None)
@@ -968,12 +980,12 @@ def cmd_panchanga(args: argparse.Namespace) -> int:
     rows = [
         ("When:", format_instant(p.when)),
         ("Place:", f"{p.place.name} {p.place.tz}"),
-        ("Vara:", p.weekday),
-        ("Masa:", f"{p.masa} ({sys_name})"),
-        ("Paksha:", p.paksha),
-        ("Tithi:", f"{p.tithi} {p.tithi_name}  {p.tithi_frac:.0%} elapsed"),
-        ("Nakshatra:", f"{p.nakshatra} ({p.nakshatra_n}/27)"),
-        ("Yoga:", f"{p.yoga_n} {p.yoga}  {p.yoga_frac:.0%} elapsed"),
+        ("Vara:", beside(p.weekday, weekday_native(p.weekday))),
+        ("Masa:", f"{beside(p.masa, masa_native(p.masa))} ({sys_name})"),
+        ("Paksha:", beside(p.paksha, paksha_native(p.paksha))),
+        ("Tithi:", f"{p.tithi} {beside(p.tithi_name, tithi_native(p.tithi_name))}  {p.tithi_frac:.0%} elapsed"),
+        ("Nakshatra:", f"{beside(p.nakshatra, nakshatra_native(p.nakshatra))} ({p.nakshatra_n}/27)"),
+        ("Yoga:", f"{p.yoga_n} {beside(p.yoga, yoga_native(p.yoga))}  {p.yoga_frac:.0%} elapsed"),
         ("Kali year:", f"{p.kali_year}  (epoch JD {KALI_JD} convention)"),
         ("Elongation:", f"{p.elong:.2f}°  Lahiri {p.ayanamsa:.2f}°"),
     ]
@@ -989,11 +1001,18 @@ def cmd_eras(args: argparse.Namespace) -> int:
     from zoneinfo import ZoneInfo
 
     from timewarp.cycle import GREENWICH
-    from timewarp.eras import compute_eras, format_quiet as eras_quiet
+    from timewarp.eras import (
+        compute_eras,
+        format_coptic,
+        format_egyptian,
+        format_hebrew,
+        format_hijri,
+        format_quiet as eras_quiet,
+    )
     from timewarp.cherokee import cherokee_line, cherokee_month
     from timewarp.liturgy import compute_liturgy
     from timewarp.maya import maya_from_gregorian
-    from timewarp.panchanga import format_quiet as pan_quiet
+    from timewarp.panchanga import format_with_yoga
 
     place = _optional_place(args) or GREENWICH
     assumed = not getattr(args, "date", None)
@@ -1045,19 +1064,19 @@ def cmd_eras(args: argparse.Namespace) -> int:
         ),
         (
             "Egyptian:",
-            f"{day.egyptian_day} {day.egyptian_month} {day.egyptian_year}  (Nabonassar, 365d)",
+            format_egyptian(day.egyptian_day, day.egyptian_month, day.egyptian_year),
         ),
         ("Rosicrucian:", f"{day.rc_stamp}  {day.rc_letter}  {day.rc_color}"),
         ("Anno Lucis:", f"{day.anno_lucis} A.L.  (Craft, CE+4000)"),
         ("Anno Mundi:", f"{day.anno_mundi} A.M.  (Scottish Rite, Hebrew year)"),
         ("Anno Inventionis:", f"{day.anno_inventionis} A.I.  (Royal Arch, CE+530)"),
         ("Anno Ordinis:", f"{day.anno_ordinis} A.O.  (Templar, CE−1118)"),
-        ("Hebrew:", f"{day.hebrew_day} {day.hebrew_month} {day.hebrew_year}"),
-        ("Hijri:", f"{day.hijri_day} {day.hijri_month} {day.hijri_year}  (tabular)"),
-        ("Coptic:", f"{day.coptic_day} {day.coptic_month} {day.coptic_year}"),
+        ("Hebrew:", format_hebrew(day.hebrew_day, day.hebrew_month, day.hebrew_year)),
+        ("Hijri:", format_hijri(day.hijri_day, day.hijri_month, day.hijri_year)),
+        ("Coptic:", format_coptic(day.coptic_day, day.coptic_month, day.coptic_year)),
         ("Maya:", maya.line()),
         ("Cherokee:", f"{cherokee_line(day.civil)}  (Kituwah, Gregorian month)"),
-        ("Panchanga:", f"{pan_quiet(day.panchanga)}  yoga {day.panchanga.yoga}"),
+        ("Panchanga:", format_with_yoga(day.panchanga)),
         (
             "Liturgy:",
             f"{lit.calendar}  {lit.season}"
@@ -1101,9 +1120,9 @@ def cmd_maya(args: argparse.Namespace) -> int:
     print(marked("calendar", f"Maya  {civil.isoformat()}", emoji=em))
     print_kv(
         [
-            ("Tzolk'in:", f"{maya.tzolkin_number} {maya.tzolkin_name}"),
-            ("Haab:", f"{maya.haab_day} {maya.haab_month}"),
-            ("Long Count:", f"{maya.long_count()}  (GMT {MAYA_GMT})"),
+            ("Tzolk'in:", maya.tzolkin_text()),
+            ("Haab:", maya.haab_text()),
+            ("Long Count:", f"{maya.long_count_text()}  (GMT {MAYA_GMT})"),
         ],
         color=em,
     )
@@ -2287,7 +2306,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "eras",
         aliases=["calendars"],
-        help="One civil day: Gregorian, Julian, French, Egyptian, RC, Masonic, Hebrew, Hijri, Coptic, panchanga+yoga",
+        help="One civil day. English names, plus native script where Unicode has it",
     )
     _add_common(p)
     p.add_argument("date", nargs="?", help="ISO 8601 date or instant (default: now)")
@@ -2302,7 +2321,10 @@ def build_parser() -> argparse.ArgumentParser:
     _add_color_flags(p)
     p.set_defaults(func=cmd_eras)
 
-    p = sub.add_parser("maya", help="Maya Tzolk'in, Haab, and Long Count (GMT 584283)")
+    p = sub.add_parser(
+        "maya",
+        help="Maya Tzolk'in, Haab, and Long Count (GMT 584283); names plus Mayan numerals",
+    )
     _add_common(p)
     p.add_argument("date", nargs="?", help="ISO 8601 date (default: today)")
     _add_color_flags(p)

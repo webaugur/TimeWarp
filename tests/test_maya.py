@@ -2,7 +2,7 @@ import unittest
 from datetime import date
 
 from timewarp.cherokee import cherokee_month
-from timewarp.maya import maya_from_gregorian
+from timewarp.maya import maya_from_gregorian, mayan_numeral
 from tests.test_cli import run
 
 
@@ -19,6 +19,11 @@ class MayaTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("13.0.0.0.0", out)
         self.assertIn("4 Ajaw", out)
+        self.assertIn("\U0001D2E4", out)  # Mayan numeral 4
+        self.assertIn("\U0001D2ED", out)  # Mayan numeral 13
+        self.assertEqual(mayan_numeral(0), "\U0001D2E0")
+        self.assertEqual(mayan_numeral(19), "\U0001D2F3")
+        self.assertEqual(mayan_numeral(20), "20")
 
 
 class CherokeeTests(unittest.TestCase):

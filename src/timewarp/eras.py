@@ -14,8 +14,8 @@ from zoneinfo import ZoneInfo
 from timewarp.cycle import GREENWICH, daily_period, rosicrucian_stamp
 from timewarp.errors import TimeWarpError
 from timewarp.iso import Instant, as_date, format_instant, weekday_name
-from timewarp.panchanga import Panchanga, compute_panchanga
-from timewarp.panchanga import format_quiet as panchanga_line
+from timewarp.native import named_date, spelling
+from timewarp.panchanga import Panchanga, compute_panchanga, format_with_yoga
 from timewarp.places import Place
 
 # Rata Die: day 1 = 1 Jan 1 CE (proleptic Gregorian).
@@ -102,6 +102,73 @@ _EGYPTIAN_MONTHS = (
     "Epagomenal",
 )
 
+# Unpointed spellings of the Hebrew column on
+# https://en.wikipedia.org/wiki/Hebrew_calendar (niqqud removed).
+# Heshvan and Kislev keep the unpointed forms printed there.
+# Leap Adar I / Adar II use alef or bet plus geresh, as in that table.
+_HEBREW_NATIVE = {
+    "Nisan": "ניסן",
+    "Iyar": "אייר",
+    "Sivan": "סיוון",
+    "Tammuz": "תמוז",
+    "Av": "אב",
+    "Elul": "אלול",
+    "Tishri": "תשרי",
+    "Heshvan": "מרחשוון",
+    "Kislev": "כסליו",
+    "Tevet": "טבת",
+    "Shevat": "שבט",
+    "Adar": "אדר",
+}
+# Unvocalized Arabic from the Arabic-name column (no harakat) on
+# https://en.wikipedia.org/wiki/Islamic_calendar
+_HIJRI_NATIVE = {
+    "Muharram": "المحرم",
+    "Safar": "صفر",
+    "Rabi I": "ربيع الأول",
+    "Rabi II": "ربيع الثاني",
+    "Jumada I": "جمادى الأولى",
+    "Jumada II": "جمادى الآخرة",
+    "Rajab": "رجب",
+    "Shaban": "شعبان",
+    "Ramadan": "رمضان",
+    "Shawwal": "شوال",
+    "Dhu al-Qidah": "ذو القعدة",
+    "Dhu al-Hijjah": "ذو الحجة",
+}
+# Bohairic column of https://en.wikipedia.org/wiki/Coptic_calendar
+_COPTIC_NATIVE = {
+    "Thout": "Ⲑⲱⲟⲩⲧ",
+    "Paopi": "Ⲡⲁⲟⲡⲓ",
+    "Hathor": "Ⲁⲑⲱⲣ",
+    "Koiak": "Ⲭⲟⲓⲁⲕ",
+    "Tobi": "Ⲧⲱⲃⲓ",
+    "Meshir": "Ⲙⲉϣⲓⲣ",
+    "Paremhat": "Ⲡⲁⲣⲉⲙϩⲁⲧ",
+    "Parmouti": "Ⲫⲁⲣⲙⲟⲩⲑⲓ",
+    "Pashons": "Ⲡⲁϣⲟⲛⲥ",
+    "Paoni": "Ⲡⲁⲱⲛⲓ",
+    "Epip": "Ⲉⲡⲓⲡ",
+    "Mesori": "Ⲙⲉⲥⲱⲣⲓ",
+    "Epagomenal": "Ⲡⲓⲕⲟⲩϫⲓ ⲛ̀ⲁ̀ⲃⲟⲧ",
+}
+# Same Bohairic month, beside the Greek name this calendar prints.
+_EGYPTIAN_NATIVE = {
+    "Thoth": "Ⲑⲱⲟⲩⲧ",
+    "Phaophi": "Ⲡⲁⲟⲡⲓ",
+    "Athyr": "Ⲁⲑⲱⲣ",
+    "Choiak": "Ⲭⲟⲓⲁⲕ",
+    "Tybi": "Ⲧⲱⲃⲓ",
+    "Mechir": "Ⲙⲉϣⲓⲣ",
+    "Phamenoth": "Ⲡⲁⲣⲉⲙϩⲁⲧ",
+    "Pharmuthi": "Ⲫⲁⲣⲙⲟⲩⲑⲓ",
+    "Pachon": "Ⲡⲁϣⲟⲛⲥ",
+    "Payni": "Ⲡⲁⲱⲛⲓ",
+    "Epiphi": "Ⲉⲡⲓⲡ",
+    "Mesore": "Ⲙⲉⲥⲱⲣⲓ",
+    "Epagomenal": "Ⲡⲓⲕⲟⲩϫⲓ ⲛ̀ⲁ̀ⲃⲟⲧ",
+}
+
 
 def _aware(when: Instant, place: Place) -> datetime:
     tz = ZoneInfo(place.tz)
@@ -128,6 +195,44 @@ def gregorian_to_rd(year: int, month: int, day: int) -> int:
 
 def _hebrew_leap(year: int) -> bool:
     return (7 * year + 1) % 19 < 7
+
+
+def hebrew_month_native(year: int, month: str) -> str:
+    """Hebrew spelling. Leap-year Adar is Adar I; the English label stays Adar."""
+    if month == "Adar II":
+        return "אדר ב\u05f3"
+    if month == "Adar" and _hebrew_leap(year):
+        return "אדר א\u05f3"
+    return spelling(_HEBREW_NATIVE, month, "Hebrew")
+
+
+def hijri_month_native(month: str) -> str:
+    return spelling(_HIJRI_NATIVE, month, "Arabic")
+
+
+def coptic_month_native(month: str) -> str:
+    return spelling(_COPTIC_NATIVE, month, "Coptic")
+
+
+def egyptian_month_native(month: str) -> str:
+    return spelling(_EGYPTIAN_NATIVE, month, "Coptic")
+
+
+def format_hebrew(day: int, month: str, year: int) -> str:
+    return named_date(day, month, year, hebrew_month_native(year, month))
+
+
+def format_hijri(day: int, month: str, year: int) -> str:
+    return f"{named_date(day, month, year, hijri_month_native(month))}  (tabular)"
+
+
+def format_coptic(day: int, month: str, year: int) -> str:
+    return named_date(day, month, year, coptic_month_native(month))
+
+
+def format_egyptian(day: int, month: str, year: int) -> str:
+    native = egyptian_month_native(month)
+    return f"{named_date(day, month, year, native)}  (Nabonassar, 365d)"
 
 
 def _hebrew_elapsed_days(year: int) -> int:
@@ -375,6 +480,7 @@ class ErasDay:
                 "year": self.egyptian_year,
                 "month": self.egyptian_month,
                 "day": self.egyptian_day,
+                "month_native": egyptian_month_native(self.egyptian_month),
             },
             "rosicrucian": {
                 "stamp": self.rc_stamp,
@@ -389,16 +495,19 @@ class ErasDay:
                 "year": self.hebrew_year,
                 "month": self.hebrew_month,
                 "day": self.hebrew_day,
+                "month_native": hebrew_month_native(self.hebrew_year, self.hebrew_month),
             },
             "hijri_tabular": {
                 "year": self.hijri_year,
                 "month": self.hijri_month,
                 "day": self.hijri_day,
+                "month_native": hijri_month_native(self.hijri_month),
             },
             "coptic": {
                 "year": self.coptic_year,
                 "month": self.coptic_month,
                 "day": self.coptic_day,
+                "month_native": coptic_month_native(self.coptic_month),
             },
             "panchanga": self.panchanga.to_dict(),
         }
@@ -456,17 +565,16 @@ def format_quiet(day: ErasDay) -> str:
     from timewarp.cherokee import cherokee_line
     from timewarp.maya import maya_from_gregorian
 
-    p = day.panchanga
     return (
         f"{day.civil.isoformat()}  RC {day.rc_stamp}  "
         f"AL {day.anno_lucis}  AM {day.anno_mundi}  "
-        f"{day.hebrew_day} {day.hebrew_month} {day.hebrew_year}  "
-        f"{day.hijri_day} {day.hijri_month} {day.hijri_year}  "
+        f"{format_hebrew(day.hebrew_day, day.hebrew_month, day.hebrew_year)}  "
+        f"{format_hijri(day.hijri_day, day.hijri_month, day.hijri_year)}  "
         f"Jul {day.julian_year:04d}-{day.julian_month:02d}-{day.julian_day:02d}  "
         f"FR {day.french_day} {day.french_month} {day.french_year}  "
-        f"Eg {day.egyptian_day} {day.egyptian_month} {day.egyptian_year}  "
-        f"{day.coptic_day} {day.coptic_month} {day.coptic_year}  "
-        f"{panchanga_line(p)} {p.yoga}  "
-        f"Maya {maya_from_gregorian(day.civil).long_count()}  "
+        f"Eg {format_egyptian(day.egyptian_day, day.egyptian_month, day.egyptian_year)}  "
+        f"{format_coptic(day.coptic_day, day.coptic_month, day.coptic_year)}  "
+        f"{format_with_yoga(day.panchanga)}  "
+        f"Maya {maya_from_gregorian(day.civil).line()}  "
         f"Cherokee {cherokee_line(day.civil)}"
     )

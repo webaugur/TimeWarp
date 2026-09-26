@@ -10,6 +10,8 @@ _(none)_
 
 ## Later
 
+- [#37](https://github.com/webaugur/TimeWarp/issues/37) Maya day-sign glyphs when Unicode encodes them
+- [#38](https://github.com/webaugur/TimeWarp/issues/38) Hieroglyphic spellings of the Egyptian month names
 - [#33](https://github.com/webaugur/TimeWarp/issues/33) Aztec tonalpohualli / xiuhpohualli
 - [#30](https://github.com/webaugur/TimeWarp/issues/30) Inca / Quechua
 - [#34](https://github.com/webaugur/TimeWarp/issues/34) Hawaiian months

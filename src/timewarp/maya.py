@@ -11,6 +11,7 @@ from datetime import date
 
 from timewarp.eras import gregorian_jdn
 from timewarp.errors import TimeWarpError
+from timewarp.native import beside
 
 # JDN = long-count days + GMT.
 GMT = 584283
@@ -59,6 +60,16 @@ _HAAB = (
     "Wayeb",
 )
 
+# Unicode Mayan Numerals are U+1D2E0..U+1D2F3 (0..19). Day-sign glyphs
+# are not encoded. A coefficient outside that range stays decimal digits.
+
+
+def mayan_numeral(n: int) -> str:
+    """One Mayan numeral, or decimal digits when n is outside 0..19."""
+    if 0 <= n <= 19:
+        return chr(0x1D2E0 + n)
+    return str(n)
+
 
 def maya_days(day: date) -> int:
     """Days since 0.0.0.0.0 under GMT 584283."""
@@ -81,11 +92,30 @@ class MayaDate:
     def long_count(self) -> str:
         return f"{self.baktun}.{self.katun}.{self.tun}.{self.winal}.{self.kin}"
 
+    def long_count_mayan(self) -> str:
+        parts = (self.baktun, self.katun, self.tun, self.winal, self.kin)
+        return ".".join(mayan_numeral(n) for n in parts)
+
+    def tzolkin_text(self) -> str:
+        return (
+            f"{self.tzolkin_number} "
+            f"{beside(self.tzolkin_name, mayan_numeral(self.tzolkin_number))}"
+        )
+
+    def haab_text(self) -> str:
+        return (
+            f"{self.haab_day} "
+            f"{beside(self.haab_month, mayan_numeral(self.haab_day))}"
+        )
+
+    def long_count_text(self) -> str:
+        return beside(self.long_count(), self.long_count_mayan())
+
     def line(self) -> str:
         return (
-            f"{self.tzolkin_number} {self.tzolkin_name}  "
-            f"{self.haab_day} {self.haab_month}  "
-            f"{self.long_count()} (GMT {GMT})"
+            f"{self.tzolkin_text()}  "
+            f"{self.haab_text()}  "
+            f"{self.long_count_text()} (GMT {GMT})"
         )
 
     def to_dict(self) -> dict:
@@ -94,8 +124,11 @@ class MayaDate:
             "correlation_constant": GMT,
             "days": self.days,
             "long_count": self.long_count(),
+            "long_count_mayan": self.long_count_mayan(),
             "tzolkin": f"{self.tzolkin_number} {self.tzolkin_name}",
+            "tzolkin_numeral": mayan_numeral(self.tzolkin_number),
             "haab": f"{self.haab_day} {self.haab_month}",
+            "haab_day_numeral": mayan_numeral(self.haab_day),
         }
 
 

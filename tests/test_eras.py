@@ -1,12 +1,21 @@
+import json
 import unittest
-from datetime import date
+from datetime import date, timedelta
 
 from timewarp.eras import (
+    _COPTIC_MONTHS,
+    _EGYPTIAN_MONTHS,
+    _HEBREW_MONTHS,
+    _HIJRI_MONTHS,
     coptic_from_gregorian,
+    coptic_month_native,
     egyptian_from_gregorian,
+    egyptian_month_native,
     french_from_gregorian,
     hebrew_from_gregorian,
+    hebrew_month_native,
     hijri_from_gregorian,
+    hijri_month_native,
     julian_from_gregorian,
 )
 from tests.test_cli import run
@@ -77,3 +86,51 @@ class ErasCliTests(unittest.TestCase):
         self.assertIn("Maya:", out)
         self.assertIn("Cherokee:", out)
         self.assertIn("ᏚᎵᏍᏗ", out)
+
+    def test_native_spellings_and_json(self):
+        for name in _HEBREW_MONTHS[1:]:
+            native = hebrew_month_native(5787 if name == "Adar II" else 1, name)
+            self.assertTrue(_in_block(native, 0x0590, 0x05FF), name)
+        for name in _HIJRI_MONTHS[1:]:
+            self.assertTrue(_in_block(hijri_month_native(name), 0x0600, 0x06FF), name)
+        for name in _COPTIC_MONTHS[1:]:
+            self.assertTrue(_in_block(coptic_month_native(name), 0x2C80, 0x2CFF), name)
+        for name in _EGYPTIAN_MONTHS:
+            self.assertTrue(_in_block(egyptian_month_native(name), 0x2C80, 0x2CFF), name)
+        self.assertEqual(hebrew_month_native(1, "Adar"), "אדר")
+        self.assertEqual(hebrew_month_native(3, "Adar"), "אדר א\u05f3")
+        self.assertEqual(hebrew_month_native(3, "Adar II"), "אדר ב\u05f3")
+        found = set()
+        day = date(2027, 2, 1)
+        while day < date(2027, 4, 1):
+            year, _month, _dom, name = hebrew_from_gregorian(day)
+            if name.startswith("Adar"):
+                found.add((year, name, hebrew_month_native(year, name)))
+            day += timedelta(days=1)
+        self.assertIn((5787, "Adar", "אדר א\u05f3"), found)
+        self.assertIn((5787, "Adar II", "אדר ב\u05f3"), found)
+
+        code, out, err = run("eras", "--no-color", "2026-09-22")
+        self.assertEqual(code, 0, err)
+        self.assertIn("\u2068תשרי\u2069", out)
+        self.assertIn("\u2068Ⲑⲱⲟⲩⲧ\u2069", out)
+        arabic = hijri_month_native(hijri_from_gregorian(date(2026, 9, 22))[3])
+        self.assertTrue(_in_block(arabic, 0x0600, 0x06FF))
+        self.assertIn(f"\u2068{arabic}\u2069", out)
+        self.assertTrue(_in_block(out, 0x0900, 0x097F))
+        self.assertTrue(_in_block(out, 0x1D2E0, 0x1D2F3))
+
+        code, out, err = run("eras", "--json", "2026-09-22")
+        self.assertEqual(code, 0, err)
+        payload = json.loads(out)
+        self.assertEqual(payload["hebrew"]["month"], "Tishri")
+        self.assertEqual(payload["hebrew"]["month_native"], "תשרי")
+        self.assertNotIn("\u2068", payload["hebrew"]["month_native"])
+        self.assertIn("month_native", payload["hijri_tabular"])
+        self.assertIn("month_native", payload["coptic"])
+        self.assertIn("month_native", payload["egyptian_nabonassar"])
+        self.assertNotIn("month_hieroglyphs", payload["egyptian_nabonassar"])
+
+
+def _in_block(text: str, start: int, end: int) -> bool:
+    return any(start <= ord(ch) <= end for ch in text)

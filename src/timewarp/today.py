@@ -243,6 +243,6 @@ def format_quiet(view: TodayView) -> str:
     return (
         f"{view.date.isoformat()} {view.weekday}  {rise}–{sset}  "
         f"{view.stamp}  {view.daily['letter']}  "
-        f"Maya {maya_from_gregorian(view.date).long_count()}  "
+        f"Maya {maya_from_gregorian(view.date).line()}  "
         f"Cherokee {cherokee_line(view.date)}"
     )
