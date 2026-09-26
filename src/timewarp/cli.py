@@ -74,6 +74,20 @@ from timewarp.workdays import add_workdays, count_workdays, parse_workday_count
 
 PROG = "timewarp"
 
+# Two families that cover every native glyph eras prints. Mayan numerals
+# (U+1D2E0–U+1D2F3) are named first: they are the block most terminals lack.
+# Day signs are still unencoded, so neither family can draw them.
+FONT_NOTE = """\
+Fonts for Hebrew, Arabic, Coptic, Devanagari, Cherokee, and Mayan numerals
+(U+1D2E0–U+1D2F3). Install a face that draws the Mayan numerals:
+  Noto Sans Mayan Numerals, plus Noto Sans Hebrew, Arabic, Coptic,
+  Devanagari, and Cherokee — https://fonts.google.com/noto
+  GNU Unifont and Unifont Upper — https://unifoundry.com/unifont/
+  Upper is the file that draws the Mayan numerals.
+Maya day signs have no Unicode code points yet, so these fonts draw the
+numerals and the other scripts on the screen.
+"""
+
 HELP = f"""\
 {PROG} — local date calculators (ISO 8601 in, ISO 8601 out)
 Human views: ASCII columns, emoji at the end of the line (`--color` after the subcommand).
@@ -215,7 +229,8 @@ Portable zip: double-click timewarp / timewarp.exe for an interactive prompt
 (2-line or 3-line; catalog field may be Alpha-5).
 Negative offsets after the date may need -- so they are not flags:
   {PROG} add 2026-07-04 -- -P7M
-"""
+
+{FONT_NOTE}"""
 
 
 def _want_color(args: argparse.Namespace | None = None) -> bool:
@@ -2290,6 +2305,8 @@ def build_parser() -> argparse.ArgumentParser:
         "panchanga",
         aliases=["bharata"],
         help="Lunisolar daily date: tithi, paksha, masa, nakshatra",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=FONT_NOTE,
     )
     _add_common(p)
     p.add_argument("date", nargs="?", help="ISO 8601 date or instant (default: now)")
@@ -2307,6 +2324,8 @@ def build_parser() -> argparse.ArgumentParser:
         "eras",
         aliases=["calendars"],
         help="One civil day. English names, plus native script where Unicode has it",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=FONT_NOTE,
     )
     _add_common(p)
     p.add_argument("date", nargs="?", help="ISO 8601 date or instant (default: now)")
@@ -2324,6 +2343,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "maya",
         help="Maya Tzolk'in, Haab, and Long Count (GMT 584283); names plus Mayan numerals",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=FONT_NOTE,
     )
     _add_common(p)
     p.add_argument("date", nargs="?", help="ISO 8601 date (default: today)")
@@ -2375,6 +2396,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "today",
         help="One-screen civil day: sun, moon, RC note, holiday, ISS",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=FONT_NOTE,
     )
     _add_common(p)
     p.add_argument("date", nargs="?", help="ISO 8601 date or instant (default: now)")

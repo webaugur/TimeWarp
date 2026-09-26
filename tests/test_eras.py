@@ -87,6 +87,17 @@ class ErasCliTests(unittest.TestCase):
         self.assertIn("Cherokee:", out)
         self.assertIn("ᏚᎵᏍᏗ", out)
 
+    def test_help_names_mayan_fonts(self):
+        code, out, err = run("help")
+        self.assertEqual(code, 0, err)
+        self.assertIn("Noto Sans Mayan Numerals", out)
+        self.assertIn("Unifont Upper", out)
+        for topic in ("eras", "maya", "panchanga", "today"):
+            code, out, err = run("help", topic)
+            self.assertEqual(code, 0, err)
+            self.assertIn("Noto Sans Mayan Numerals", out)
+            self.assertIn("Unifont Upper", out)
+
     def test_native_spellings_and_json(self):
         for name in _HEBREW_MONTHS[1:]:
             native = hebrew_month_native(5787 if name == "Adar II" else 1, name)
