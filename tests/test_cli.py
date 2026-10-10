@@ -499,6 +499,7 @@ class HelpAndErrorTests(unittest.TestCase):
         code, out, err = run("help")
         self.assertEqual(code, 0, err)
         self.assertIn("timewarp add", out)
+        self.assertIn("gpredict", out)
         self.assertIn("Command help:", out)
         self.assertIn("cache orbits --file", out)
         self.assertIn("save --tle", out)
@@ -536,6 +537,41 @@ class HelpAndErrorTests(unittest.TestCase):
         code, _, err = run("month", "2026-13", "--city", "Indianapolis")
         self.assertEqual(code, 2)
         self.assertIn("month", err.lower())
+
+    def test_gpredict_writes_file_and_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = root / "elements.tle"
+            code, out, err = run("gpredict", "-o", str(dest), str(_ISS_FIXTURE))
+            self.assertEqual(code, 0, err)
+            self.assertEqual(out, "")
+            text = dest.read_text(encoding="utf-8")
+            self.assertTrue(text.startswith("ISS (ZARYA)\n1 25544U"))
+            self.assertIn(
+                "gpredict: 1 satellites, 0 older epochs dropped, "
+                "0 alpha-5 skipped, 0 bad lines skipped",
+                err,
+            )
+            code, out, err = run("gpredict", str(_ISS_FIXTURE))
+            self.assertEqual(code, 0, err)
+            self.assertEqual(out, text)
+            self.assertIn("1 satellites", err)
+
+    def test_gpredict_refuses_to_overwrite_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "iss.tle"
+            src.write_bytes(_ISS_FIXTURE.read_bytes())
+            before = src.read_bytes()
+            code, _, err = run("gpredict", "-o", str(src), str(src))
+            self.assertEqual(code, 2)
+            self.assertIn("refusing to overwrite", err)
+            self.assertEqual(src.read_bytes(), before)
+
+    def test_gpredict_help(self):
+        code, out, err = run("help", "gpredict")
+        self.assertEqual(code, 0, err)
+        self.assertIn("Add new satellites", out)
+        self.assertIn("0 NAME", out)
 
     def test_help_unknown_topic(self):
         code, _, err = run("help", "frobnicate")

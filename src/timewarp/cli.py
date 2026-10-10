@@ -59,6 +59,7 @@ from timewarp.cache import (
 from timewarp.passes import (
     DEFAULT_MIN_ELEV,
     DEFAULT_SAT,
+    export_gpredict,
     fetch_tle,
     load_tle_file,
     passes_for_day,
@@ -111,6 +112,7 @@ Phase 2 (basic):
   moon           moon phase and next new/full/quarter times
   seasons        equinoxes and solstices
   passes         satellite passes (TLE / catalogs) vs twilight, moon, and mag
+  gpredict       merge TLE/3LE files into one set Gpredict can load
   rise           rise times for visible bodies (today, or a date / date range)
   set            set times for the same bodies and period
   moonrise       alias for: rise moon
@@ -165,6 +167,7 @@ Examples:
   {PROG} save --tle path/to/iss.tle
   {PROG} save --tle
   {PROG} save --catalog visual
+  {PROG} gpredict -o elements.tle 3le.txt analyst.tle 2026-241.txt
   {PROG} rise --city "New York"
   {PROG} rise --city "New York" 2026-07-04
   {PROG} rise --city Indianapolis --13 --33
@@ -227,6 +230,11 @@ Portable zip: double-click timewarp / timewarp.exe for an interactive prompt
 (`timewarp shell`). Empty `timewarp` in a real terminal still prints this help.
 `sun` includes civil/nautical/astronomical twilight. `passes` needs sgp4 and a TLE
 (2-line or 3-line; catalog field may be Alpha-5).
+`gpredict` merges those files into one 3-line set (newest epoch per catalog
+number) for Gpredict: Edit, Update TLE from local files. The file name must
+end in .tle or .txt. Turn on Add new satellites, or Gpredict only refreshes
+satellites it already has. Alpha-5 catalog numbers are left out (Gpredict
+reads that field as an integer).
 Negative offsets after the date may need -- so they are not flags:
   {PROG} add 2026-07-04 -- -P7M
 
@@ -1537,6 +1545,48 @@ def cmd_passes(args: argparse.Namespace) -> int:
     return 0
 
 
+_GPREDICT_NOTE = """\
+Merge 2-line and 3-line element files into one set Gpredict can load.
+One satellite per catalog number; the newest epoch is kept. A Space-Track
+name line ("0 NAME") is written as NAME. A set with no name is named by
+its catalog number. Alpha-5 catalog numbers are skipped: Gpredict reads
+columns 3-7 as an integer, so those objects would all land on catalog 0.
+
+In Gpredict: Edit, Update TLE from local files, and choose this file
+(the name must end in .tle or .txt). Turn on Add new satellites, or
+Gpredict only refreshes satellites it already has.
+"""
+
+
+def cmd_gpredict(args: argparse.Namespace) -> int:
+    paths = [Path(p) for p in args.files]
+    dest = Path(args.output) if args.output else None
+    if dest is not None:
+        for src in paths:
+            try:
+                same = src.resolve() == dest.resolve()
+            except OSError as exc:
+                raise TimeWarpError(f"could not write {dest}: {exc}") from exc
+            if same:
+                raise TimeWarpError(f"refusing to overwrite input {src}")
+    result = export_gpredict(paths)
+    if dest is None:
+        sys.stdout.write(result.text)
+    else:
+        try:
+            dest.write_text(result.text, encoding="utf-8")
+        except OSError as exc:
+            raise TimeWarpError(f"could not write {dest}: {exc}") from exc
+    print(
+        f"gpredict: {result.satellites} satellites, "
+        f"{result.dropped_older} older epochs dropped, "
+        f"{result.skipped_alpha5} alpha-5 skipped, "
+        f"{result.skipped_bad} bad lines skipped",
+        file=sys.stderr,
+    )
+    return 0
+
+
 def _fmt_az(deg: float | None) -> str:
     if deg is None:
         return ""
@@ -2447,6 +2497,20 @@ def build_parser() -> argparse.ArgumentParser:
     _add_place(p)
     _add_color_flags(p)
     p.set_defaults(func=cmd_passes)
+
+    p = sub.add_parser(
+        "gpredict",
+        help="Merge TLE/3LE files into one set Gpredict can load",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=_GPREDICT_NOTE,
+    )
+    p.add_argument("files", nargs="+", help="TLE or 3LE files to merge")
+    p.add_argument(
+        "-o",
+        "--output",
+        help="write the merged file here (default: stdout)",
+    )
+    p.set_defaults(func=cmd_gpredict)
 
     def _add_sky_when(parser: argparse.ArgumentParser) -> None:
         parser.add_argument(

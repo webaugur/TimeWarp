@@ -309,6 +309,186 @@ def catalog_from_tle_field(field: str) -> int:
         n -= 1
     return n * 10_000 + int(rest)
 
+
+def tle_checksum_ok(line: str) -> bool:
+    """NORAD checksum: digits add, '-' adds 1, the last character is the sum mod 10."""
+    if len(line) != 69:
+        return False
+    total = 0
+    for ch in line[:68]:
+        if ch.isdigit():
+            total += int(ch)
+        elif ch == "-":
+            total += 1
+    return line[68] == str(total % 10)
+
+
+@dataclass(frozen=True)
+class GpredictExport:
+    """One 3-line element file, plus the counts that explain what was left out."""
+
+    text: str
+    satellites: int
+    dropped_older: int
+    skipped_alpha5: int
+    skipped_bad: int
+
+
+@dataclass(frozen=True)
+class _GpredictSet:
+    catalog: int
+    epoch: tuple[int, float]
+    name: str | None
+    line1: str
+    line2: str
+
+
+def _tle_epoch_key(line1: str) -> tuple[int, float]:
+    """Epoch as (year, day-fraction). Years 57-99 are 19xx, matching Gpredict."""
+    raw = line1[18:32]
+    if len(raw) != 14 or not raw[0:2].isdigit():
+        raise ValueError("bad TLE epoch")
+    yy = int(raw[0:2])
+    day = float(raw[2:])
+    if not (1.0 <= day < 367.0):
+        raise ValueError("bad TLE epoch day")
+    year = 1900 + yy if yy >= 57 else 2000 + yy
+    return year, day
+
+
+def _gpredict_name(raw: str | None) -> str | None:
+    """Space-Track 3LE puts '0 ' in front of the name. Gpredict would keep it."""
+    if raw is None:
+        return None
+    name = raw.strip()
+    if name.startswith("0 "):
+        name = name[2:].strip()
+    if not name or name == "0":
+        return None
+    # Gpredict reads the name with fgets of 80 bytes. A longer line splits,
+    # and the next element line is no longer one record.
+    if len(name) > 69:
+        name = name[:69].strip()
+    return name or None
+
+
+def _valid_tle_line(line: str, kind: str) -> bool:
+    return line.startswith(kind) and tle_checksum_ok(line)
+
+
+def _scan_tle_text(text: str) -> tuple[list[_GpredictSet], list[str], int]:
+    """Numeric sets, Alpha-5 catalog fields, and lines that were not a valid pair.
+
+    A bad element line advances one line, so the next good pair is still read.
+    """
+    lines = text.splitlines()
+    sets: list[_GpredictSet] = []
+    alpha: list[str] = []
+    bad = 0
+    pending: str | None = None
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        if not line.strip():
+            i += 1
+            continue
+        nxt = lines[i + 1] if i + 1 < n else None
+        if _valid_tle_line(line, "1") and nxt is not None and _valid_tle_line(nxt, "2"):
+            try:
+                catalog = catalog_from_tle_field(line[2:7])
+                epoch = _tle_epoch_key(line)
+            except (ValueError, IndexError):
+                bad += 2
+                pending = None
+                i += 2
+                continue
+            if catalog >= 100_000:
+                alpha.append(line[2:7].strip())
+                pending = None
+                i += 2
+                continue
+            sets.append(_GpredictSet(catalog, epoch, _gpredict_name(pending), line, nxt))
+            pending = None
+            i += 2
+            continue
+        if line[:1] in "12":
+            bad += 1
+            pending = None
+            i += 1
+            continue
+        if pending is not None:
+            bad += 1
+        pending = line
+        i += 1
+    if pending is not None:
+        bad += 1
+    return sets, alpha, bad
+
+
+def export_gpredict(paths: list[Path]) -> GpredictExport:
+    """Merge 2-line and 3-line files into one Gpredict element set.
+
+    One record per integer catalog number. The newer epoch wins. A name from
+    any set for that catalog is kept, and the name on the winning epoch wins
+    when it has one. Alpha-5 objects are omitted: Gpredict parses columns 3-7
+    with a plain numeric conversion, so they would all share catalog 0.
+    """
+    if not paths:
+        raise TimeWarpError("give at least one TLE file")
+    kept: dict[int, _GpredictSet] = {}
+    alpha_ids: set[str] = set()
+    bad = 0
+    numeric = 0
+    for path in paths:
+        if path.is_dir():
+            raise TimeWarpError(f"TLE path is a directory: {path}")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise TimeWarpError(f"TLE {path} is not UTF-8") from exc
+        except OSError as exc:
+            raise TimeWarpError(f"could not read TLE {path}: {exc}") from exc
+        found, file_alpha, file_bad = _scan_tle_text(text)
+        alpha_ids.update(file_alpha)
+        bad += file_bad
+        for item in found:
+            numeric += 1
+            old = kept.get(item.catalog)
+            if old is None:
+                kept[item.catalog] = item
+                continue
+            if item.epoch > old.epoch:
+                kept[item.catalog] = _GpredictSet(
+                    item.catalog,
+                    item.epoch,
+                    item.name or old.name,
+                    item.line1,
+                    item.line2,
+                )
+            elif old.name is None and item.name:
+                kept[item.catalog] = _GpredictSet(
+                    old.catalog, old.epoch, item.name, old.line1, old.line2
+                )
+    if not kept:
+        raise TimeWarpError(
+            "no numeric TLE records to export "
+            f"({len(alpha_ids)} alpha-5 skipped, {bad} bad lines skipped)"
+        )
+    parts: list[str] = []
+    for cat in sorted(kept):
+        item = kept[cat]
+        name = item.name or str(cat)
+        parts.append(f"{name}\n{item.line1}\n{item.line2}\n")
+    return GpredictExport(
+        text="".join(parts),
+        satellites=len(kept),
+        dropped_older=numeric - len(kept),
+        skipped_alpha5=len(alpha_ids),
+        skipped_bad=bad,
+    )
+
+
 def parse_tle_text(text: str) -> list[TleSat]:
     _need_sgp4()
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
