@@ -6,7 +6,7 @@ When we decide work in chat, file an issue (or update one) and edit this list. D
 
 ## In progress
 
-_(none)_
+- Grandfather-clock face (`clockface/`): eframe/egui Roman-numeral kiosk for Raspberry Pi OS 64-bit (glow). Local time with DST, adjustable diameter and placement. Next: calendar and moon from TimeWarp `--json`.
 
 ## Later
 
