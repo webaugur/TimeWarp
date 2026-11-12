@@ -690,13 +690,11 @@ fn paint_status(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
         Stroke::new(1.0, shade_bezel(Vec2::new(0.0, -1.0), 0.5)),
         egui::StrokeKind::Inside,
     );
-    painter.text(
-        bar.left_center() + Vec2::new(12.0, 0.0),
-        Align2::LEFT_CENTER,
-        model.status.text(),
-        FontId::new((0.06 * layout.radius).clamp(18.0, 24.0), serif()),
-        INK,
-    );
+    let size = layout::status_font_size(layout.radius);
+    let width = (bar.width() - 24.0).max(8.0);
+    let galley = painter.layout(model.status.text(), FontId::new(size, serif()), INK, width);
+    let y = bar.top() + ((bar.height() - galley.size().y) * 0.5).max(4.0);
+    painter.galley(Pos2::new(bar.left() + 12.0, y), galley, INK);
 }
 
 fn paint_panel(painter: &Painter, rect: Rect) {

@@ -60,6 +60,9 @@ impl Default for Place {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     pub diameter: f32,
+    /// Set when a config file or `--diameter` chose the size. Otherwise the
+    /// face is fitted to the window so the column stays on screen.
+    pub diameter_explicit: bool,
     pub center_x: Option<f32>,
     pub center_y: Option<f32>,
     pub windowed: bool,
@@ -73,6 +76,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             diameter: DEFAULT_DIAMETER,
+            diameter_explicit: false,
             center_x: None,
             center_y: None,
             windowed: false,
@@ -90,6 +94,30 @@ impl Settings {
         Pos2::new(
             self.center_x.unwrap_or(viewport.x * 0.5),
             self.center_y.unwrap_or(self.diameter * 0.5),
+        )
+    }
+
+    /// Face center and diameter for this viewport.
+    ///
+    /// With no explicit diameter, the face is the largest one whose column
+    /// (face, mural windows, three frames, status bar) fits. `--diameter` and
+    /// a config file keep the requested size.
+    pub fn placement(&self, viewport: Vec2) -> (Pos2, f32) {
+        let diameter = if self.diameter_explicit {
+            self.diameter
+        } else {
+            crate::layout::fit_diameter(viewport)
+        };
+        let y = if let Some(y) = self.center_y {
+            y
+        } else if self.diameter_explicit {
+            diameter * 0.5
+        } else {
+            crate::layout::TOP_MARGIN + diameter * 0.5
+        };
+        (
+            Pos2::new(self.center_x.unwrap_or(viewport.x * 0.5), y),
+            diameter,
         )
     }
 }
@@ -163,6 +191,7 @@ pub fn load_settings(path: Option<&Path>, over: &SettingsOverride) -> Result<Set
 fn apply_file(settings: &mut Settings, file: FileConfig) -> Result<(), String> {
     if let Some(diameter) = file.diameter {
         settings.diameter = diameter;
+        settings.diameter_explicit = true;
     }
     if file.center_x.is_some() {
         settings.center_x = file.center_x;
@@ -202,6 +231,7 @@ fn apply_file(settings: &mut Settings, file: FileConfig) -> Result<(), String> {
 fn apply_override(settings: &mut Settings, over: &SettingsOverride) -> Result<(), String> {
     if let Some(diameter) = over.diameter {
         settings.diameter = diameter;
+        settings.diameter_explicit = true;
     }
     if over.center_x.is_some() {
         settings.center_x = over.center_x;
@@ -252,6 +282,25 @@ mod tests {
     use super::*;
 
     #[test]
+    #[test]
+    fn omitted_diameter_fits_a_1080p_frame_and_a_desktop_window() {
+        let settings = Settings::default();
+        let (center, diameter) = settings.placement(egui::vec2(1920.0, 1080.0));
+        let column = crate::layout::preferred_column_height(diameter);
+        assert!(
+            diameter < 1080.0,
+            "fitted {diameter} should be smaller than the frame"
+        );
+        assert!(column <= 1080.0 - crate::layout::TOP_MARGIN - crate::layout::BOTTOM_MARGIN + 0.5);
+        assert!((center.y - (crate::layout::TOP_MARGIN + diameter * 0.5)).abs() < 0.5);
+        let (_, windowed) = settings.placement(egui::vec2(1200.0, 800.0));
+        assert!(windowed < diameter);
+        assert!(
+            crate::layout::preferred_column_height(windowed)
+                <= 800.0 - crate::layout::TOP_MARGIN - crate::layout::BOTTOM_MARGIN + 0.5
+        );
+    }
+
     fn default_center_is_mid_width_and_radius_from_the_top() {
         let settings = Settings::default();
         let center = settings.center(egui::vec2(1920.0, 1080.0));
@@ -282,6 +331,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(settings.diameter, 800.0);
+        assert!(settings.diameter_explicit);
         assert_eq!(settings.center_x, Some(100.0));
         assert_eq!(settings.center_y, Some(20.0));
         assert!(settings.windowed);

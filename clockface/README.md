@@ -76,10 +76,11 @@ Force a backend with `EBOARD_BACKEND=kms` or `EBOARD_BACKEND=linuxfb`.
 
 ## Run
 
-Fullscreen, diameter 600, centered horizontally, sitting against the top edge:
+With no `--diameter`, the face is the largest one that keeps the whole column on screen: the dial, the squared windows, the three frames, and a status bar tall enough for three wrapped lines. Width and height both limit it. On a 1920×1080 frame that is a 611 pixel face. A window defaults to 1200×800 so it fits a 1080p desktop with a panel, a title bar, and a dock; there the face is 435 pixels.
 
 ```bash
 ./target/release/clockface
+./target/release/clockface --windowed
 ```
 
 Custom diameter and position (center is in pixels, origin at the top-left):

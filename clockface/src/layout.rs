@@ -16,6 +16,10 @@ pub const SKY_WEDGE: (f32, f32) = (90.0, 180.0);
 /// the same width as the face diameter (left tangent to right tangent).
 const ROW_HALF: f32 = 1.0;
 const GUTTER: f32 = 0.08;
+/// Inset so the column is not flush with a window border or a panel.
+pub const TOP_MARGIN: f32 = 16.0;
+pub const BOTTOM_MARGIN: f32 = 12.0;
+pub const SIDE_MARGIN: f32 = 28.0;
 
 #[derive(Clone, Copy, Debug)]
 pub struct KioskLayout {
@@ -33,11 +37,12 @@ impl KioskLayout {
         let col_right = center.x + ROW_HALF * radius;
         let col_width = col_right - col_left;
         let box_w = ((col_width - 2.0 * gutter) / 3.0).max(8.0);
-        let status_h = (0.14 * radius).max(40.0);
-        let status_top = screen.bottom() - status_h;
+        let status_h = status_height(radius);
+        let status_bottom = screen.bottom() - BOTTOM_MARGIN;
+        let status_top = status_bottom - status_h;
         let status = Rect::from_min_max(
             Pos2::new(col_left.max(screen.left()), status_top),
-            Pos2::new(col_right.min(screen.right()), screen.bottom()),
+            Pos2::new(col_right.min(screen.right()), status_bottom),
         );
         // The squared windows end on the bottom tangent of the dial.
         let preferred_top = center.y + radius + gutter;
@@ -67,6 +72,52 @@ impl KioskLayout {
     pub fn point(&self, degrees: f32, radius_of_face: f32) -> Pos2 {
         self.center + direction(degrees) * (radius_of_face * self.radius)
     }
+}
+
+/// Point size of the status line for a face of this radius.
+pub fn status_font_size(radius: f32) -> f32 {
+    (0.06 * radius).clamp(18.0, 24.0)
+}
+
+/// Room for three wrapped status lines (hostname, several addresses, sync).
+pub fn status_height(radius: f32) -> f32 {
+    let font = status_font_size(radius);
+    (font + 4.0) * 3.0 + 16.0
+}
+
+/// Height from the top of the face through the status bar, when the info frames
+/// are at their preferred size. This is what [`fit_diameter`] reserves.
+pub fn preferred_column_height(diameter: f32) -> f32 {
+    let radius = (diameter * 0.5).max(1.0);
+    let gutter = GUTTER * radius;
+    let box_w = ((diameter - 2.0 * gutter) / 3.0).max(8.0);
+    let box_h = (1.70 * box_w).min(1.55 * radius);
+    let gap = (0.05 * radius).max(10.0);
+    diameter + gutter + box_h + gap + status_height(radius)
+}
+
+/// Largest face diameter whose column fits in `viewport`.
+///
+/// The column is the face, the squared windows under it, the three frames (one
+/// face-diameter wide), and a status bar tall enough to wrap. Width and height
+/// both constrain it, with a small inset from the edges.
+pub fn fit_diameter(viewport: egui::Vec2) -> f32 {
+    let available_w = (viewport.x - 2.0 * SIDE_MARGIN).max(120.0);
+    let available_h = (viewport.y - TOP_MARGIN - BOTTOM_MARGIN).max(120.0);
+    let mut lo = 80.0_f32;
+    let mut hi = available_w.min(available_h);
+    if preferred_column_height(lo) > available_h {
+        return lo.min(available_w);
+    }
+    for _ in 0..28 {
+        let mid = (lo + hi) * 0.5;
+        if preferred_column_height(mid) <= available_h {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo.min(available_w)
 }
 
 /// Where a ray from the shaft meets the straight outer edge of a mural window, in face radii.
@@ -150,6 +201,31 @@ mod tests {
             );
             assert!((layout.boxes[0].left() - (center.x - diameter * 0.5)).abs() < 0.5);
             assert!((layout.boxes[2].right() - (center.x + diameter * 0.5)).abs() < 0.5);
+        }
+    }
+
+    #[test]
+    #[test]
+    fn fitted_diameter_keeps_the_column_on_screen() {
+        for (w, h) in [(1920.0, 1080.0), (1200.0, 800.0), (1280.0, 720.0)] {
+            let viewport = vec2(w, h);
+            let diameter = fit_diameter(viewport);
+            let center = Pos2::new(w * 0.5, TOP_MARGIN + diameter * 0.5);
+            let screen = Rect::from_min_size(Pos2::ZERO, viewport);
+            let layout = KioskLayout::new(screen, center, diameter);
+            let span = layout.boxes[2].right() - layout.boxes[0].left();
+            assert!(
+                (span - diameter).abs() < 1.0,
+                "{w}x{h} span {span} diameter {diameter}"
+            );
+            assert!(layout.boxes[0].bottom() <= layout.status.top() + 0.5);
+            assert!(layout.status.bottom() <= h - BOTTOM_MARGIN + 0.5);
+            assert!(
+                layout.boxes[0].height() > 0.45 * layout.radius,
+                "{w}x{h} frame height {}",
+                layout.boxes[0].height()
+            );
+            assert!(center.y - diameter * 0.5 >= TOP_MARGIN - 0.5);
         }
     }
 

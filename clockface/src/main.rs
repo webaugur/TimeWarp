@@ -29,7 +29,7 @@ struct Cli {
     #[arg(long)]
     config: Option<std::path::PathBuf>,
 
-    /// Face diameter in pixels (default 600).
+    /// Face diameter in pixels. Omit it and the face is sized so the whole column fits the window.
     #[arg(long)]
     diameter: Option<f32>,
 
@@ -56,12 +56,18 @@ struct Cli {
     screenshot: Option<std::path::PathBuf>,
 
     /// Window or screenshot width in pixels. The kms build uses the display mode instead.
-    #[arg(long, default_value_t = 1920)]
-    width: u32,
+    ///
+    /// A window defaults to 1200, which fits a 1080p desktop with a panel and a dock.
+    /// `--screenshot` defaults to 1920 when this is omitted.
+    #[arg(long)]
+    width: Option<u32>,
 
     /// Window or screenshot height in pixels. The kms build uses the display mode instead.
-    #[arg(long, default_value_t = 1080)]
-    height: u32,
+    ///
+    /// A window defaults to 800 so the title bar still fits under a desktop panel.
+    /// `--screenshot` defaults to 1080 when this is omitted.
+    #[arg(long)]
+    height: Option<u32>,
 
     /// Latitude, decimal degrees. Overrides --city and the config file.
     #[arg(long)]
@@ -115,22 +121,25 @@ fn run() -> Result<(), String> {
     )?;
 
     if let Some(path) = cli.screenshot.as_deref() {
-        let center = settings.center(egui::vec2(cli.width as f32, cli.height as f32));
+        let width = cli.width.unwrap_or(1920);
+        let height = cli.height.unwrap_or(1080);
+        let viewport = egui::vec2(width as f32, height as f32);
+        let (center, diameter) = settings.placement(viewport);
         let rgba = render_rgba(
-            cli.width,
-            cli.height,
+            width,
+            height,
             center,
-            settings.diameter,
+            diameter,
             clockface::screenshot_time(),
             &settings.place,
         )?;
-        write_png(path, cli.width, cli.height, &rgba)?;
+        write_png(path, width, height, &rgba)?;
         println!(
-            "wrote {} ({}x{}, diameter {}, center {:.1},{:.1}, local 10:08:37)",
+            "wrote {} ({}x{}, diameter {:.1}, center {:.1},{:.1}, local 10:08:37)",
             path.display(),
-            cli.width,
-            cli.height,
-            settings.diameter,
+            width,
+            height,
+            diameter,
             center.x,
             center.y
         );
@@ -143,7 +152,14 @@ fn run() -> Result<(), String> {
     }
     #[cfg(all(feature = "desktop", not(all(feature = "kms", target_os = "linux"))))]
     {
-        return run_desktop(settings, cli.width, cli.height);
+        // 1200×800 fits a 1080p desktop under a panel, a title bar, and a dock.
+        // A requested 1920×1080 client is taller than that work area, so the
+        // frames and the status bar end up off the window.
+        return run_desktop(
+            settings,
+            cli.width.unwrap_or(1200),
+            cli.height.unwrap_or(800),
+        );
     }
     #[cfg(not(any(feature = "desktop", all(feature = "kms", target_os = "linux"))))]
     {
@@ -189,6 +205,7 @@ fn show_clock(ui: &mut egui::Ui, app: &mut ClockApp) {
     }
     let events = app.settings.events.clone().unwrap_or_else(example_events);
     let screen = ui.ctx().viewport_rect();
+    let (center, diameter) = app.settings.placement(screen.size());
     let model = KioskModel {
         now: Local::now(),
         place: app.settings.place.clone(),
@@ -196,13 +213,7 @@ fn show_clock(ui: &mut egui::Ui, app: &mut ClockApp) {
         events,
         status,
     };
-    paint_kiosk(
-        ui.painter(),
-        screen,
-        app.settings.center(screen.size()),
-        app.settings.diameter,
-        &model,
-    );
+    paint_kiosk(ui.painter(), screen, center, diameter, &model);
 }
 
 fn refresh_weather_if_stale(app: &ClockApp) {
