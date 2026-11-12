@@ -14,8 +14,8 @@ use chrono::{DateTime, Datelike, Local, Timelike};
 
 use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Stroke, Vec2};
 
-use crate::brass::{mix, shade_bezel, shade_dial};
-use crate::draw::{paint_annulus, paint_disc, paint_pie, stroke_arc};
+use crate::brass::{mix, shade_bezel};
+use crate::draw::{paint_disc, paint_pie, stroke_arc};
 use crate::events::{self, CalendarEvent};
 use crate::layout::{self, KioskLayout, APERTURE_R, SKY_WEDGE, YEAR_WEDGE};
 use crate::roman::{self, direction};
@@ -86,11 +86,8 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
     paint_stars(painter, center, radius);
     paint_date_words(painter, center, radius, model.now);
 
-    // Brass annulus over the discs, then the bezel, then the markings and hands.
-    paint_annulus(painter, center, aperture, radius, 96, |p| {
-        shade_dial(center, p, radius, 1.0)
-    });
-    roman::paint_bezel(painter, center, radius);
+    // Same brass mesh the window and the screenshot both fill.
+    roman::paint_brass(painter, center, radius, aperture);
     paint_aperture_rims(painter, center, radius);
     roman::paint_markings_and_hands(
         painter,

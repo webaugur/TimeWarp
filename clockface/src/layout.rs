@@ -135,7 +135,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn three_frames_are_exactly_one_face_diameter_wide() {
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(1920.0, 1080.0));
         for (diameter, center) in [

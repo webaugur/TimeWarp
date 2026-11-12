@@ -10,7 +10,7 @@ The painter is shared. The default build opens it in an eframe window (X11 or Wa
 
 Lengths below are fractions of the face radius. Angles are clockwise from 12. Everything is positioned from the clock center, so changing the diameter or the center moves the complications with the face. Hands, numerals, ticks, and the brass ring are painted after the discs they cross.
 
-- **Brass dial.** Warm metal, lit from the upper left, with a deeper antique falloff toward the rim. The bezel is a rounded brass ring (highlight on the upper left, shade on the lower right). Hour teardrops are metallic gold, the quarters a little brighter. Minute ticks stay dark red. Numerals are solid black. The hour and minute hands are black; the second hand is red.
+- **Brass dial.** A polished dish: tight specular, a softer reflection, turned rings, and a round bezel. Hour markers are raised gold pins. Minute ticks stay dark red. Numerals are solid black. The hour and minute hands are black; the second hand is red. The window and `--screenshot` fill the same mesh, so the metal and the pin length match.
 - **Weather** (upper left, 9 o'clock to 12). Temperature, a short condition, and a small scene (sun, cloud, rain, snow, or night).
 - **Moon** (upper right, 12 to 3). Northern hemisphere. Waxing lights the right side of the disc. The phase is the mean age since the new moon of 2000-01-06 18:14 UTC, using a synodic month of 29.530588853 days. It is a mean-phase clock, not a full lunar ephemeris.
 - **Date** (lower half, 3 o'clock through 6 to 9). Weekday, month, and day, on a cream complication disc.

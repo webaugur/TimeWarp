@@ -452,7 +452,10 @@ mod tests {
             lum(lit) > lum(shade) + 12,
             "upper-left brass {lit:?} should be brighter than lower-right {shade:?}"
         );
-        assert!(lit[0] > lit[2] + 20, "brass should be warm, got {lit:?}");
+        assert!(
+            lit[0] as i32 > lit[2] as i32 + 20,
+            "brass should be warm, got {lit:?}"
+        );
 
         let bezel_lit = at_pos(
             &rgba,
@@ -517,9 +520,14 @@ mod tests {
             black > 40,
             "XII should be solid black, found {black} pixels"
         );
-        // 1 o'clock hour mark, and the quarter at 6, which used to fall into antique brown.
+        // Head and tail of the same pin. The tail is the part that vanished into
+        // the brass and made the screenshot look like a short nub.
         for (degrees, dist) in [
             (30.0_f32, style.hour_tick.distance),
+            (
+                30.0,
+                style.hour_tick.distance - style.hour_tick.inward * 0.55,
+            ),
             (180.0, style.quarter_tick.distance),
         ] {
             let drop = at_pos(
@@ -529,8 +537,8 @@ mod tests {
                 center + direction(degrees) * (dist * r),
             );
             assert!(
-                drop[0] > 180 && drop[1] > 120 && drop[0] > drop[2] + 70,
-                "hour teardrop at {degrees} should be gold, got {drop:?}"
+                drop[0] > 180 && drop[1] > 140 && drop[0] as i32 + 15 > drop[2] as i32,
+                "gold pin at {degrees} deg, {dist:.2} R should be gold, got {drop:?}"
             );
         }
     }

@@ -39,6 +39,7 @@ pub fn paint_disc(
 }
 
 /// Annulus from `inner` to `outer` (pixels).
+#[allow(dead_code)]
 pub fn paint_annulus(
     painter: &Painter,
     center: Pos2,

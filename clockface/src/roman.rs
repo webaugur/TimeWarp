@@ -202,8 +202,7 @@ pub fn paint_with(
         return;
     }
     let r = diameter * 0.5;
-    paint_face(painter, center, r);
-    paint_bezel(painter, center, r);
+    paint_brass(painter, center, r, 0.0);
     paint_markings_and_hands(painter, center, diameter, now, style);
 }
 
@@ -245,32 +244,32 @@ pub(crate) fn direction(degrees_clockwise_from_12: f32) -> Vec2 {
     Vec2::new(rad.sin(), -rad.cos())
 }
 
-fn paint_face(painter: &Painter, center: Pos2, r: f32) {
-    crate::draw::paint_disc(painter, center, r, 96, |p| {
-        crate::brass::shade_dial(center, p, r, 1.0)
-    });
-}
-
-/// Polished brass bezel, fully inside the dial. Upper-left is lit, lower-right falls off.
-pub(crate) fn paint_bezel(painter: &Painter, center: Pos2, r: f32) {
-    let inner = r * 0.952;
-    let outer = r;
-    let segments = 96u32;
+/// Brass dish and bezel. `inner` is a hole radius in pixels (0 for a solid face).
+///
+/// The mesh is fine on purpose. Both the window and `--screenshot` fill these
+/// triangles, so a coarse fan would smear the specular into a different-looking
+/// gradient on each path.
+pub(crate) fn paint_brass(painter: &Painter, center: Pos2, radius: f32, inner: f32) {
+    let angular = 192u32;
+    let radial = 40u32;
+    let cols = radial + 1;
     let mut mesh = Mesh::default();
-    for i in 0..=segments {
-        let t = i as f32 / segments as f32 * std::f32::consts::TAU;
+    for i in 0..=angular {
+        let t = i as f32 / angular as f32 * std::f32::consts::TAU;
         let dir = Vec2::new(t.cos(), t.sin());
-        for across in [0.0_f32, 0.5, 1.0] {
-            let p = center + dir * (inner + (outer - inner) * across);
-            mesh.colored_vertex(p, crate::brass::shade_bezel(dir, across));
+        for j in 0..=radial {
+            let u = j as f32 / radial as f32;
+            let dist = inner + (radius - inner) * u;
+            let p = center + dir * dist;
+            mesh.colored_vertex(p, crate::brass::shade_dial(center, p, radius, 1.0));
         }
     }
-    for i in 0..segments {
-        let base = i * 3;
-        mesh.add_triangle(base, base + 1, base + 3);
-        mesh.add_triangle(base + 1, base + 4, base + 3);
-        mesh.add_triangle(base + 1, base + 2, base + 4);
-        mesh.add_triangle(base + 2, base + 5, base + 4);
+    for i in 0..angular {
+        for j in 0..radial {
+            let a = i * cols + j;
+            mesh.add_triangle(a, a + 1, a + cols);
+            mesh.add_triangle(a + 1, a + cols + 1, a + cols);
+        }
     }
     painter.add(Shape::mesh(mesh));
 }
@@ -321,16 +320,7 @@ fn paint_teardrop(
     let right = hub - perp * radius;
     let tip = center + dir * (d - tick.inward * r);
     if let Some(gain) = metal {
-        let color = |p: Pos2| crate::brass::shade_gold(hub, p, radius.max(1.0), gain);
-        crate::draw::paint_disc(painter, hub, radius.max(0.0), 10, color);
-        if tick.inward > 0.0 && width > 0.0 {
-            let mut mesh = Mesh::default();
-            for p in [left, right, tip] {
-                mesh.colored_vertex(p, color(p));
-            }
-            mesh.add_triangle(0, 1, 2);
-            painter.add(Shape::mesh(mesh));
-        }
+        paint_gold_pin(painter, hub, tip, perp, radius, gain);
     } else {
         painter.circle_filled(hub, radius.max(0.0), tick.color);
         if tick.inward > 0.0 && width > 0.0 {
@@ -341,6 +331,54 @@ fn paint_teardrop(
             ));
         }
     }
+}
+
+/// Raised gold pin: a tapered round body and a domed head.
+///
+/// The point sits at `tip` and the dome at `hub`. Length comes only from those
+/// two points, so the window and the screenshot cannot grow a different spike.
+fn paint_gold_pin(painter: &Painter, hub: Pos2, tip: Pos2, perp: Vec2, radius: f32, gain: f32) {
+    let light_bias = perp.dot(crate::brass::light_vec2());
+    let stations = 12u32;
+    let across = 4u32;
+    let cols = across + 1;
+    let mut mesh = Mesh::default();
+    for i in 0..=stations {
+        let t = i as f32 / stations as f32;
+        // t = 0 at the point, t = 1 at the head. The last fifth is the dome.
+        let (along, half) = if t < 0.82 {
+            let u = t / 0.82;
+            (u, radius * u.powf(0.72))
+        } else {
+            let u = (t - 0.82) / 0.18;
+            let dome = (1.0 - u * u).max(0.0).sqrt();
+            (1.0, radius * dome.max(0.08))
+        };
+        let axis = tip + (hub - tip) * along.min(1.0);
+        // The dome sits on the head, slightly outward of the hub along hub-tip.
+        let axis = if t >= 0.82 {
+            let u = (t - 0.82) / 0.18;
+            hub + (hub - tip).normalized() * (radius * u * 0.85)
+        } else {
+            axis
+        };
+        for j in 0..=across {
+            let cross = -1.0 + 2.0 * (j as f32 / across as f32);
+            let p = axis + perp * (half * cross);
+            mesh.colored_vertex(
+                p,
+                crate::brass::shade_gold_pin(cross, along, light_bias, gain),
+            );
+        }
+    }
+    for i in 0..stations {
+        for j in 0..across {
+            let a = i * cols + j;
+            mesh.add_triangle(a, a + 1, a + cols);
+            mesh.add_triangle(a + 1, a + cols + 1, a + cols);
+        }
+    }
+    painter.add(Shape::mesh(mesh));
 }
 
 fn paint_numerals(painter: &Painter, center: Pos2, r: f32, style: &RomanClockStyle) {
