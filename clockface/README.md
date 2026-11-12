@@ -14,8 +14,9 @@ Lengths below are fractions of the face radius. Angles are clockwise from 12. Ev
 - **Weather** (upper left, 9 o'clock to 12). Temperature, a short condition, and a small scene (sun, cloud, rain, snow, or night).
 - **Moon** (upper right, 12 to 3). Northern hemisphere. Waxing lights the right side of the disc. The phase is the mean age since the new moon of 2000-01-06 18:14 UTC, using a synodic month of 29.530588853 days. It is a mean-phase clock, not a full lunar ephemeris.
 - **Date** (lower half, 3 o'clock through 6 to 9). Weekday, month, and day, on a cream complication disc.
-- **Year wheel** (lower left). A rounded window from about 6:30 to 8 o'clock. The mural turns once per tropical year. The middle of the window shows the current day of the year, blended between the solstices and equinoxes, so the season eases instead of jumping. Winter is snow, spring blossom, summer green, autumn color.
-- **Sky wheel** (lower right). The mirror of that window, about 4 o'clock to 5:30. It turns once per local civil day. The middle of the window is "now": midnight is night, dawn and dusk are the color change, noon is day.
+- **Year wheel** (lower left). The window is the square corner outside the dial, between the 9 o'clock tangent and the 6 o'clock tangent. The mural is still a disc on the shaft and turns once per tropical year. The middle of the window shows the current day of the year, blended between the solstices and equinoxes, so the season eases instead of jumping.
+- **Sky wheel** (lower right). The mirror corner, between 3 o'clock and 6. It turns once per local civil day. The middle of the window is "now": midnight is night, dawn and dusk are the color change, noon is day.
+- **Movement.** Toothed brass wheels and pinions in the open field to the left and right of the dial, including the upper sides. They sit behind the face, the windows, the panels, and the status bar.
 - **Calendar, forecast, sun and moon.** Three brass-edged panels under the wheels. Sun and moon times are computed on the machine (NOAA sunrise equation). They are shown in the system timezone, which should be the place's zone.
 - **Status bar.** Hostname, local addresses, and whether `timedatectl` reports the clock in sync. A failed weather fetch is prefixed on that line. Addresses that cannot be read are said to be missing; none are invented.
 

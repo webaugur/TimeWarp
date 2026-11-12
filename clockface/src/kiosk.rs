@@ -5,8 +5,9 @@
 //! so moving or resizing the face moves the complications with it.
 //!
 //! The year wheel (lower left) turns once per tropical year. The sky wheel (lower right)
-//! turns once per local civil day. Sampling is
-//! `shown = content + (angle - wedge_center) / 360`, so the middle of each wedge shows the
+//! turns once per local civil day. Each window is the square corner outside the dial: the
+//! arc, the side tangent, and the bottom tangent. Sampling is
+//! `shown = content + (angle - wedge_center) / 360`, so the middle of each window shows the
 //! current season or time of day and the mural eases instead of snapping.
 
 use chrono::{DateTime, Datelike, Local, Timelike};
@@ -117,11 +118,12 @@ fn paint_wedge(
     let mut mesh = egui::Mesh::default();
     for i in 0..=steps {
         let deg = wedge.0 + span * (i as f32 / steps as f32);
-        let outer = layout::wedge_outer(wedge.0, wedge.1, deg);
+        let outer = layout::window_outer(wedge, deg);
         let inner_p = layout.point(deg, 1.0);
         let outer_p = layout.point(deg, outer);
+        let outward = ((outer - 1.0) / (std::f32::consts::SQRT_2 - 1.0)).clamp(0.0, 1.0);
         crate::draw::vertex_color(&mut mesh, inner_p, color_at(deg, 0.0));
-        crate::draw::vertex_color(&mut mesh, outer_p, color_at(deg, (outer - 1.0) / 0.55));
+        crate::draw::vertex_color(&mut mesh, outer_p, color_at(deg, outward));
     }
     for i in 0..steps {
         let base = i * 2;
@@ -132,19 +134,15 @@ fn paint_wedge(
 }
 
 fn paint_wedge_rim(painter: &Painter, center: Pos2, radius: f32, wedge: (f32, f32)) {
-    let steps = 28u32;
-    let span = (wedge.1 - wedge.0).rem_euclid(360.0);
-    let mut points = Vec::with_capacity(steps as usize + 1);
-    for i in 0..=steps {
-        let deg = wedge.0 + span * (i as f32 / steps as f32);
-        let outer = layout::wedge_outer(wedge.0, wedge.1, deg);
-        points.push(center + direction(deg) * (outer * radius));
-    }
-    let brass = shade_bezel(direction((wedge.0 + wedge.1) * 0.5), 0.4);
-    painter.add(egui::Shape::line(
-        points,
-        Stroke::new(radius * 0.018, brass),
-    ));
+    // Straight outer edges: the side tangent and the bottom tangent. The dial is the inner edge.
+    let side = if wedge.0 >= 180.0 { -1.0 } else { 1.0 };
+    let nine_or_three = center + Vec2::new(side * radius, 0.0);
+    let corner = center + Vec2::new(side * radius, radius);
+    let six = center + Vec2::new(0.0, radius);
+    let brass = shade_bezel(Vec2::new(side, 0.2), 0.45);
+    let width = (radius * 0.02).max(1.5);
+    painter.line_segment([nine_or_three, corner], Stroke::new(width, brass));
+    painter.line_segment([corner, six], Stroke::new(width, brass));
 }
 
 fn paint_aperture(
@@ -440,7 +438,7 @@ fn paint_year_marks(painter: &Painter, center: Pos2, radius: f32, content: f32) 
     ];
     for (shown, dist, color) in marks {
         let deg = content_angle(content, shown, YEAR_WEDGE);
-        if !angle_in(deg, YEAR_WEDGE) {
+        if !in_opening(deg, dist, YEAR_WEDGE) {
             continue;
         }
         paint_disc(
@@ -455,7 +453,7 @@ fn paint_year_marks(painter: &Painter, center: Pos2, radius: f32, content: f32) 
 
 fn paint_sky_marks(painter: &Painter, center: Pos2, radius: f32, content: f32) {
     let sun = content_angle(content, 0.5, SKY_WEDGE);
-    if angle_in(sun, SKY_WEDGE) {
+    if in_opening(sun, 1.32, SKY_WEDGE) {
         paint_disc(
             painter,
             center + direction(sun) * (1.32 * radius),
@@ -466,7 +464,7 @@ fn paint_sky_marks(painter: &Painter, center: Pos2, radius: f32, content: f32) {
     }
     for shown in [0.02, 0.08, 0.14, 0.88, 0.93, 0.97] {
         let deg = content_angle(content, shown, SKY_WEDGE);
-        if angle_in(deg, SKY_WEDGE) {
+        if in_opening(deg, 1.28, SKY_WEDGE) {
             paint_disc(
                 painter,
                 center + direction(deg) * (1.28 * radius),
@@ -486,6 +484,10 @@ fn content_angle(content: f32, shown: f32, wedge: (f32, f32)) -> f32 {
 fn angle_in(deg: f32, wedge: (f32, f32)) -> bool {
     let span = (wedge.1 - wedge.0).rem_euclid(360.0);
     (deg - wedge.0).rem_euclid(360.0) <= span
+}
+
+fn in_opening(deg: f32, dist: f32, wedge: (f32, f32)) -> bool {
+    angle_in(deg, wedge) && dist > 1.03 && dist < layout::window_outer(wedge, deg) - 0.03
 }
 
 fn paint_moon_disc(painter: &Painter, center: Pos2, radius: f32, phase: f64) {
@@ -566,10 +568,10 @@ fn paint_boxes(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
             panel.left_top() + Vec2::new(10.0, 8.0),
             Align2::LEFT_TOP,
             title,
-            FontId::new((0.055 * layout.radius).clamp(13.0, 22.0), serif()),
-            Color32::from_rgb(0xe6, 0xc2, 0x7a),
+            FontId::new((0.08 * layout.radius).clamp(22.0, 32.0), serif()),
+            TITLE,
         );
-        let body_top = panel.top() + (0.10 * layout.radius).clamp(26.0, 36.0);
+        let body_top = panel.top() + (0.12 * layout.radius).clamp(36.0, 48.0);
         match title {
             "Calendar" => paint_calendar(&inner, *panel, body_top, layout.radius, model),
             "Forecast" => paint_forecast(&inner, *panel, body_top, layout.radius, model),
@@ -581,45 +583,51 @@ fn paint_boxes(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
 fn paint_calendar(painter: &Painter, panel: Rect, top: f32, radius: f32, model: &KioskModel) {
     let today = model.now.date_naive();
     let rows = events::upcoming(&model.events, today, 4);
-    let size = (0.042 * radius).clamp(12.0, 18.0);
+    let size = (0.07 * radius).clamp(20.0, 28.0);
+    let width = (panel.width() - 24.0).max(40.0);
     if rows.is_empty() {
-        painter.text(
-            Pos2::new(panel.left() + 10.0, top),
-            Align2::LEFT_TOP,
+        paint_wrapped(
+            painter,
+            Pos2::new(panel.left() + 12.0, top),
+            width,
             "Nothing on the calendar",
-            FontId::new(size, serif()),
-            Color32::from_rgb(0xf3, 0xe6, 0xcf),
+            size,
+            INK,
         );
         return;
     }
-    for (i, event) in rows.iter().enumerate() {
-        let y = top + i as f32 * (size * 2.15);
-        painter.text(
-            Pos2::new(panel.left() + 10.0, y),
-            Align2::LEFT_TOP,
-            event.title.clone(),
-            FontId::new(size, serif()),
-            Color32::from_rgb(0xf3, 0xe6, 0xcf),
+    let mut y = top;
+    for event in rows.iter().take(4) {
+        let title = paint_wrapped(
+            painter,
+            Pos2::new(panel.left() + 12.0, y),
+            width,
+            &event.title,
+            size,
+            INK,
         );
-        painter.text(
-            Pos2::new(panel.left() + 10.0, y + size * 0.85),
-            Align2::LEFT_TOP,
-            events::short_when(event),
-            FontId::new(size * 0.78, serif()),
-            Color32::from_rgb(0xc8, 0xb4, 0x8e),
+        y += title.height() + 2.0;
+        let when = paint_wrapped(
+            painter,
+            Pos2::new(panel.left() + 12.0, y),
+            width,
+            &events::short_when(event),
+            size * 0.82,
+            INK_DIM,
         );
+        y += when.height() + size * 0.45;
     }
 }
 
 fn paint_forecast(painter: &Painter, panel: Rect, top: f32, radius: f32, model: &KioskModel) {
-    let size = (0.04 * radius).clamp(12.0, 17.0);
+    let size = (0.064 * radius).clamp(20.0, 26.0);
     if model.weather.daily.is_empty() {
         painter.text(
-            Pos2::new(panel.left() + 10.0, top),
+            Pos2::new(panel.left() + 12.0, top),
             Align2::LEFT_TOP,
             "Forecast unavailable",
             FontId::new(size, serif()),
-            Color32::from_rgb(0xf3, 0xe6, 0xcf),
+            INK,
         );
         return;
     }
@@ -628,27 +636,27 @@ fn paint_forecast(painter: &Painter, panel: Rect, top: f32, radius: f32, model: 
         crate::settings::Units::Metric => "°",
     };
     for (i, day) in model.weather.daily.iter().take(5).enumerate() {
-        let y = top + i as f32 * (size + 4.0);
+        let y = top + i as f32 * (size + 8.0);
         let line = format!(
-            "{}   {}   {:.0}{unit} / {:.0}{unit}",
+            "{}   {}   {:.0}{unit}/{:.0}{unit}",
             weather::weekday_short(&day.date),
-            weather::condition_name(day.code),
+            brief_condition(day.code),
             day.high,
             day.low,
         );
         painter.text(
-            Pos2::new(panel.left() + 10.0, y),
+            Pos2::new(panel.left() + 12.0, y),
             Align2::LEFT_TOP,
             line,
             FontId::new(size, serif()),
-            Color32::from_rgb(0xf3, 0xe6, 0xcf),
+            INK,
         );
     }
 }
 
 fn paint_sun(painter: &Painter, panel: Rect, top: f32, radius: f32, model: &KioskModel) {
-    let size = (0.042 * radius).clamp(12.0, 18.0);
-    let color = Color32::from_rgb(0xf3, 0xe6, 0xcf);
+    let size = (0.07 * radius).clamp(20.0, 28.0);
+    let color = INK;
     let date = model.now.date_naive();
     let sun = sky::sun_times(date, model.place.latitude, model.place.longitude);
     let (rise, set) = match sun {
@@ -666,7 +674,7 @@ fn paint_sun(painter: &Painter, panel: Rect, top: f32, radius: f32, model: &Kios
     ];
     for (i, line) in lines.iter().enumerate() {
         painter.text(
-            Pos2::new(panel.left() + 10.0, top + i as f32 * (size + 6.0)),
+            Pos2::new(panel.left() + 12.0, top + i as f32 * (size + 10.0)),
             Align2::LEFT_TOP,
             line,
             FontId::new(size, serif()),
@@ -678,7 +686,7 @@ fn paint_sun(painter: &Painter, panel: Rect, top: f32, radius: f32, model: &Kios
 
 fn paint_status(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
     let bar = layout.status;
-    painter.rect_filled(bar, 0.0, Color32::from_rgb(0x14, 0x0e, 0x0a));
+    painter.rect_filled(bar, 0.0, Color32::from_rgb(0x2a, 0x1c, 0x12));
     painter.rect_stroke(
         bar,
         0.0,
@@ -689,19 +697,49 @@ fn paint_status(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
         bar.left_center() + Vec2::new(12.0, 0.0),
         Align2::LEFT_CENTER,
         model.status.text(),
-        FontId::new((0.04 * layout.radius).clamp(12.0, 16.0), serif()),
-        Color32::from_rgb(0xf3, 0xe6, 0xcf),
+        FontId::new((0.06 * layout.radius).clamp(18.0, 24.0), serif()),
+        INK,
     );
 }
 
 fn paint_panel(painter: &Painter, rect: Rect) {
-    painter.rect_filled(rect, 0.0, Color32::from_rgb(0x1c, 0x14, 0x0e));
+    painter.rect_filled(rect, 0.0, Color32::from_rgb(0x1a, 0x12, 0x0c));
     painter.rect_stroke(
         rect,
         0.0,
-        Stroke::new(1.6, shade_bezel(Vec2::new(-0.2, -0.8), 0.55)),
+        Stroke::new(2.0, shade_bezel(Vec2::new(-0.2, -0.8), 0.35)),
         egui::StrokeKind::Inside,
     );
+}
+
+const INK: Color32 = Color32::from_rgb(0xff, 0xf8, 0xea);
+const INK_DIM: Color32 = Color32::from_rgb(0xf3, 0xdc, 0xa8);
+const TITLE: Color32 = Color32::from_rgb(0xff, 0xe0, 0x7a);
+
+fn paint_wrapped(
+    painter: &Painter,
+    pos: Pos2,
+    width: f32,
+    text: &str,
+    size: f32,
+    color: Color32,
+) -> Rect {
+    let galley = painter.layout(text.to_owned(), FontId::new(size, serif()), color, width);
+    let rect = Rect::from_min_size(pos, galley.size());
+    painter.galley(pos, galley, color);
+    rect
+}
+
+fn brief_condition(code: i32) -> &'static str {
+    match code {
+        0 => "clear",
+        1..=3 => "cloud",
+        45 | 48 => "fog",
+        51..=67 | 80..=82 => "rain",
+        71..=77 | 85 | 86 => "snow",
+        95..=99 => "storm",
+        _ => "—",
+    }
 }
 
 fn moon_name(phase: f64) -> &'static str {

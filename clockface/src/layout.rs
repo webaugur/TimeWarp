@@ -8,13 +8,11 @@ use crate::roman::direction;
 
 /// Outer radius of the three face apertures, just inside the black ring at 0.68 R.
 pub const APERTURE_R: f32 = 0.64;
-/// Mural wheels, hidden by the face except for the wedges.
-pub const WHEEL_R: f32 = 1.55;
-/// Left (year) window, 6:30 through 8 o'clock.
-pub const YEAR_WEDGE: (f32, f32) = (195.0, 240.0);
-/// Right (sky) window, the mirror of the year wedge across the 12–6 axis.
-pub const SKY_WEDGE: (f32, f32) = (120.0, 165.0);
-const ROW_HALF: f32 = 1.15;
+/// Year window: outside the dial, from 6 o'clock to 9, cut off by the left and bottom tangents.
+pub const YEAR_WEDGE: (f32, f32) = (180.0, 270.0);
+/// Sky window: the mirror, from 3 o'clock to 6, cut off by the right and bottom tangents.
+pub const SKY_WEDGE: (f32, f32) = (90.0, 180.0);
+const ROW_HALF: f32 = 1.28;
 const GUTTER: f32 = 0.08;
 
 #[derive(Clone, Copy, Debug)]
@@ -33,19 +31,20 @@ impl KioskLayout {
         let col_right = center.x + ROW_HALF * radius;
         let col_width = col_right - col_left;
         let box_w = ((col_width - 2.0 * gutter) / 3.0).max(8.0);
-        let status_h = (0.11 * radius).max(28.0);
+        let status_h = (0.14 * radius).max(40.0);
         let status_top = screen.bottom() - status_h;
         let status = Rect::from_min_max(
             Pos2::new(col_left.max(screen.left()), status_top),
             Pos2::new(col_right.min(screen.right()), screen.bottom()),
         );
-        let preferred_top = center.y + WHEEL_R * radius + gutter;
+        // The squared windows end on the bottom tangent of the dial.
+        let preferred_top = center.y + radius + gutter;
         let min_top = center.y + 1.05 * radius;
         let gap_above_bar = (0.05 * radius).max(10.0);
         let limit = status.top() - gap_above_bar;
         let mut top = preferred_top.max(screen.top());
-        let mut height = (1.15 * box_w)
-            .min(1.20 * radius)
+        let mut height = (1.70 * box_w)
+            .min(1.55 * radius)
             .min((limit - top).max(0.0));
         if height < 0.55 * box_w {
             top = (limit - 0.72 * box_w).max(min_top.min(limit - 8.0));
@@ -68,15 +67,29 @@ impl KioskLayout {
     }
 }
 
-/// Outer radius of a wedge, in face-radii. Meets the dial at the sides and reaches [`WHEEL_R`]
-/// on the bisector, so the window reads as a rounded triangle rather than a hard slice.
-pub fn wedge_outer(start_deg: f32, end_deg: f32, degrees: f32) -> f32 {
-    let span = (end_deg - start_deg).rem_euclid(360.0).max(0.5);
-    let along = ((degrees - start_deg).rem_euclid(360.0) / span).clamp(0.0, 1.0);
-    // Peaks at 1 on the bisector and is 0 on both edges. `sin(π·along).powf` is NaN at the
-    // endpoints because `sin(π)` is a tiny negative and a non-integer power of that is NaN.
-    let flare = (4.0 * along * (1.0 - along)).powf(0.9);
-    1.0 + (WHEEL_R - 1.0) * flare
+/// Where a ray from the shaft meets the straight outer edge of a mural window, in face radii.
+///
+/// The left window is the square corner outside the dial: the 9 o'clock tangent, the 6 o'clock
+/// tangent, and the arc between them. The right window is the mirror. The ray length is 1 on
+/// the tangency points and `sqrt(2)` at the outer corner, so the opening squares off instead of
+/// bulging into a lobe.
+pub fn window_outer(wedge: (f32, f32), degrees: f32) -> f32 {
+    let dir = direction(degrees);
+    let left = wedge.0 >= 180.0;
+    let mut reach = f32::MAX;
+    if left && dir.x < -1.0e-4 {
+        reach = reach.min(-1.0 / dir.x);
+    } else if !left && dir.x > 1.0e-4 {
+        reach = reach.min(1.0 / dir.x);
+    }
+    if dir.y > 1.0e-4 {
+        reach = reach.min(1.0 / dir.y);
+    }
+    if reach.is_finite() {
+        reach.max(1.0)
+    } else {
+        1.0
+    }
 }
 
 /// Fraction of the wheel shown at a screen angle.
@@ -120,10 +133,16 @@ mod tests {
     }
 
     #[test]
-    fn wedge_bisector_is_the_long_side() {
-        let mid = 195.0 + (240.0 - 195.0) * 0.5;
-        let outer = wedge_outer(YEAR_WEDGE.0, YEAR_WEDGE.1, mid);
-        assert!((outer - WHEEL_R).abs() < 0.02, "{outer}");
-        assert!(wedge_outer(YEAR_WEDGE.0, YEAR_WEDGE.1, YEAR_WEDGE.0) < 1.05);
+    fn window_corner_is_the_long_side_and_the_ends_meet_the_dial() {
+        let mid = 225.0;
+        let outer = window_outer(YEAR_WEDGE, mid);
+        assert!(
+            (outer - std::f32::consts::SQRT_2).abs() < 0.02,
+            "corner reach {outer}"
+        );
+        assert!((window_outer(YEAR_WEDGE, 180.0) - 1.0).abs() < 0.03);
+        assert!((window_outer(YEAR_WEDGE, 270.0) - 1.0).abs() < 0.03);
+        let right = window_outer(SKY_WEDGE, 135.0);
+        assert!((right - std::f32::consts::SQRT_2).abs() < 0.02, "{right}");
     }
 }

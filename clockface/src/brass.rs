@@ -1,16 +1,16 @@
-//! Polished-brass shading shared by the dial, bezel, hour markers, aperture rims, and gears.
+//! Polished-brass shading for the dial, bezel, hour markers, and movement.
 //!
-//! The base metals are the old cream dial (`#f7dbb7` toward `#e5caa7`) pushed with a soft
-//! upper-left specular highlight and a deeper antique falloff. It is a domed brass surface,
-//! not a flat fill and not a chrome mirror.
+//! The metal is yellow gold, not a cream fill. Light comes from the upper left. A tight
+//! specular sits on the annulus (the center of the dial is an aperture), and the lower right
+//! falls off into antique brown.
 
 use egui::{Color32, Pos2, Vec2};
 
-const CENTER: [u8; 3] = [0xf7, 0xdb, 0xb7];
-const MID: [u8; 3] = [0xe8, 0xc4, 0x8a];
-const DEEP: [u8; 3] = [0x8a, 0x5a, 0x28];
-const EDGE: [u8; 3] = [0x5c, 0x3a, 0x18];
-const SPEC: [u8; 3] = [0xff, 0xf6, 0xdf];
+const BRIGHT: [u8; 3] = [0xee, 0xc9, 0x6a];
+const GOLD: [u8; 3] = [0xc4, 0x92, 0x38];
+const DEEP: [u8; 3] = [0x7a, 0x4a, 0x18];
+const SHADOW: [u8; 3] = [0x4a, 0x2c, 0x0e];
+const GLINT: [u8; 3] = [0xff, 0xf6, 0xd2];
 
 /// Light comes from the upper left. Screen +Y is down, so the light vector points up-left.
 fn light() -> Vec2 {
@@ -52,23 +52,27 @@ fn scale(color: Color32, gain: f32) -> Color32 {
 /// `gain` brightens quarter markers (`~1.15`) relative to the other hour markers (`~0.92`).
 pub fn shade_dial(center: Pos2, point: Pos2, radius: f32, gain: f32) -> Color32 {
     let rel = (point - center) / radius.max(1.0);
-    let dist = rel.length().clamp(0.0, 1.35);
-    let base = if dist < 0.55 {
-        mix(rgb(CENTER), rgb(MID), dist / 0.55)
-    } else {
-        mix(rgb(MID), rgb(DEEP), ((dist - 0.55) / 0.5).clamp(0.0, 1.0))
-    };
-    // Wide specular blob centered up and to the left of the shaft, plus a gentle center sheen.
-    let highlight = rel - Vec2::new(-0.26, -0.32);
-    let spec = (-highlight.length() * 1.55).exp();
-    let sheen = (1.0 - dist).clamp(0.0, 1.0).powf(1.5) * 0.18;
+    let dist = rel.length();
     let facing = if dist > 0.04 {
         rel.normalized().dot(light())
     } else {
-        0.65
+        0.55
     };
-    let lit = (0.78 + facing * 0.22 + spec * 0.48 + sheen) * gain;
-    scale(mix(base, rgb(SPEC), (spec * 0.55).clamp(0.0, 0.65)), lit)
+    // Upper-left is bright gold; lower-right is antique. Stay yellow, not peach.
+    let lit = (0.55 + facing * 0.45).clamp(0.0, 1.0);
+    let base = if lit > 0.5 {
+        mix(rgb(GOLD), rgb(BRIGHT), (lit - 0.5) * 2.0)
+    } else {
+        mix(rgb(SHADOW), rgb(GOLD), lit * 2.0)
+    };
+    let base = mix(base, rgb(DEEP), (dist - 0.75).clamp(0.0, 0.35));
+    // Tight glint on the upper-left of the ring, plus a softer sheen so the annulus is not flat.
+    let glint_at = Vec2::new(-0.62, -0.52);
+    let d2 = (rel - glint_at).length_sq();
+    let spec = (-d2 * 22.0).exp();
+    let sheen = (-d2 * 3.2).exp() * 0.28;
+    let color = mix(base, rgb(GLINT), (spec * 0.82 + sheen).clamp(0.0, 0.88));
+    scale(color, (0.78 + facing * 0.22) * gain)
 }
 
 /// Rounded brass ring. `across` is 0 at the inner edge and 1 at the outer edge.
@@ -80,16 +84,22 @@ pub fn shade_bezel(normal: Vec2, across: f32) -> Color32 {
         Vec2::Y
     };
     let facing = n.dot(light());
-    // Tube: brighter along the middle of the band, with a thin lip on both edges.
-    let tube = 1.0 - 4.0 * (across - 0.5).powi(2);
-    let lip = if across < 0.14 || across > 0.86 {
-        0.22
+    let lit = (0.5 + facing * 0.5).clamp(0.0, 1.0);
+    let base = mix(rgb(SHADOW), rgb(BRIGHT), lit);
+    // Rounded stock: a bright thread along the lit shoulder, dark on the far side.
+    let tube = (1.0 - 5.0 * (across - 0.42).powi(2)).clamp(0.0, 1.0);
+    let lip = if across < 0.1 || across > 0.9 {
+        0.28
     } else {
         0.0
     };
-    let base = mix(rgb(DEEP), rgb(MID), (0.45 + facing * 0.55).clamp(0.0, 1.0));
-    let body = mix(base, rgb(SPEC), (tube * 0.28 + lip).clamp(0.0, 0.7));
-    // Lower-right of the ring falls off toward antique brown.
-    let falloff = (1.0 - facing) * 0.5;
-    scale(mix(body, rgb(EDGE), falloff * 0.65), 0.92 + tube * 0.12)
+    let spec = facing.max(0.0).powf(2.4);
+    scale(
+        mix(
+            base,
+            rgb(GLINT),
+            (spec * 0.72 + lip + tube * 0.12).clamp(0.0, 0.92),
+        ),
+        0.82 + tube * 0.22,
+    )
 }

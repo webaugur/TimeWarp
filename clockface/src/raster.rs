@@ -478,7 +478,7 @@ mod tests {
             "moon aperture should be night sky, got {sky:?}"
         );
 
-        let wedge = at_pos(&rgba, width, height, center + direction(217.5) * (1.25 * r));
+        let wedge = at_pos(&rgba, width, height, center + direction(225.0) * (1.15 * r));
         assert!(
             lum(wedge) > 40,
             "year wedge should show the season mural, got {wedge:?}"
