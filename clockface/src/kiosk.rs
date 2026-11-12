@@ -1,4 +1,4 @@
-//! Full kiosk: gears, mural wedges, aperture discs, brass dial, info boxes, status bar.
+//! Full kiosk: mural wedges, aperture discs, brass dial, info boxes, status bar.
 //!
 //! Paint order is back to front. Hands, numerals, ticks, and the brass ring are drawn after
 //! the discs they overlap. Every region is placed from the clock center and the face radius,
@@ -17,7 +17,6 @@ use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Stroke, Vec
 use crate::brass::{mix, shade_bezel, shade_dial};
 use crate::draw::{paint_annulus, paint_disc, paint_pie, stroke_arc};
 use crate::events::{self, CalendarEvent};
-use crate::gears;
 use crate::layout::{self, KioskLayout, APERTURE_R, SKY_WEDGE, YEAR_WEDGE};
 use crate::roman::{self, direction};
 use crate::settings::Place;
@@ -53,9 +52,7 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
     painter.rect_filled(screen, 0.0, Color32::BLACK);
     let layout = KioskLayout::new(screen, center, diameter);
     let radius = layout.radius;
-    let seconds = model.now.timestamp() as f64 + model.now.timestamp_subsec_nanos() as f64 / 1e9;
 
-    gears::paint(painter, center, radius, seconds);
     paint_wedge(painter, &layout, YEAR_WEDGE, |deg, frac| {
         season_color(
             layout::wheel_sample(sky::year_fraction(model.now), deg, YEAR_WEDGE),
@@ -672,16 +669,19 @@ fn paint_sun(painter: &Painter, panel: Rect, top: f32, radius: f32, model: &Kios
         format!("{}", season_name(date)),
         format!("Moon  {}", moon_name(sky::moon_phase(model.now))),
     ];
-    for (i, line) in lines.iter().enumerate() {
-        painter.text(
-            Pos2::new(panel.left() + 12.0, top + i as f32 * (size + 10.0)),
-            Align2::LEFT_TOP,
+    let width = (panel.width() - 24.0).max(8.0);
+    let mut y = top;
+    for line in &lines {
+        let drawn = paint_wrapped(
+            painter,
+            Pos2::new(panel.left() + 12.0, y),
+            width,
             line,
-            FontId::new(size, serif()),
+            size,
             color,
         );
+        y = drawn.bottom() + 8.0;
     }
-    let _ = panel;
 }
 
 fn paint_status(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {

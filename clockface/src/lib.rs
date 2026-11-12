@@ -8,7 +8,6 @@ mod brass;
 mod draw;
 mod events;
 mod fonts;
-mod gears;
 mod kiosk;
 mod layout;
 mod raster;

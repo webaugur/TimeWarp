@@ -512,19 +512,27 @@ mod tests {
         );
 
         let numeral = center + direction(0.0) * (style.numeral_radius * r);
-        let brown = count_near(
-            &rgba,
-            width,
-            height,
-            numeral,
-            0.16 * r,
-            [0x47, 0x30, 0x13],
-            48,
-        );
+        let black = count_near(&rgba, width, height, numeral, 0.12 * r, [0, 0, 0], 28);
         assert!(
-            brown > 40,
-            "XII should be painted in #473013, found {brown} pixels"
+            black > 40,
+            "XII should be solid black, found {black} pixels"
         );
+        // 1 o'clock hour mark, and the quarter at 6, which used to fall into antique brown.
+        for (degrees, dist) in [
+            (30.0_f32, style.hour_tick.distance),
+            (180.0, style.quarter_tick.distance),
+        ] {
+            let drop = at_pos(
+                &rgba,
+                width,
+                height,
+                center + direction(degrees) * (dist * r),
+            );
+            assert!(
+                drop[0] > 180 && drop[1] > 120 && drop[0] > drop[2] + 70,
+                "hour teardrop at {degrees} should be gold, got {drop:?}"
+            );
+        }
     }
 
     fn at(buf: &[u8], width: u32, x: i32, y: i32) -> [u8; 4] {

@@ -107,7 +107,7 @@ impl Default for RomanClockStyle {
                 width: 0.01,
                 color: Color32::from_rgb(0x77, 0x00, 0x00),
             },
-            numeral_color: Color32::from_rgb(0x47, 0x30, 0x13),
+            numeral_color: Color32::BLACK,
             numeral_size: 0.24,
             numeral_radius: 0.84,
             numeral_font: FontFamily::Name("serif".into()),
@@ -290,11 +290,12 @@ fn paint_inner_ring(painter: &Painter, center: Pos2, r: f32, style: &RomanClockS
 fn paint_ticks(painter: &Painter, center: Pos2, r: f32, style: &RomanClockStyle) {
     for step in 0..60 {
         let degrees = step as f32 * 6.0;
-        // Quarters a little brighter than the other hour markers. Minute ticks stay red.
+        // Quarters a little brighter than the other hour markers. Both are gold.
+        // Minute ticks stay dark red.
         let (tick, metal) = if step % 15 == 0 {
-            (&style.quarter_tick, Some(1.18))
+            (&style.quarter_tick, Some(1.06))
         } else if step % 5 == 0 {
-            (&style.hour_tick, Some(0.92))
+            (&style.hour_tick, Some(1.0))
         } else {
             (&style.minute_tick, None)
         };
@@ -320,7 +321,7 @@ fn paint_teardrop(
     let right = hub - perp * radius;
     let tip = center + dir * (d - tick.inward * r);
     if let Some(gain) = metal {
-        let color = |p: Pos2| crate::brass::shade_dial(center, p, r, gain);
+        let color = |p: Pos2| crate::brass::shade_gold(hub, p, radius.max(1.0), gain);
         crate::draw::paint_disc(painter, hub, radius.max(0.0), 10, color);
         if tick.inward > 0.0 && width > 0.0 {
             let mut mesh = Mesh::default();

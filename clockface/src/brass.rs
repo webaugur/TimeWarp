@@ -1,4 +1,4 @@
-//! Polished-brass shading for the dial, bezel, hour markers, and movement.
+//! Polished-brass shading for the dial, bezel, and hour markers.
 //!
 //! The metal is yellow gold, not a cream fill. Light comes from the upper left. A tight
 //! specular sits on the annulus (the center of the dial is an aperture), and the lower right
@@ -45,6 +45,29 @@ fn scale(color: Color32, gain: f32) -> Color32 {
         (g as f32 * gain).round().clamp(0.0, 255.0) as u8,
         (b as f32 * gain).round().clamp(0.0, 255.0) as u8,
     )
+}
+
+/// Metallic gold for an hour teardrop. `hub` is the round end, `drop_r` its radius.
+///
+/// The shade stays yellow gold. It does not pick up the dial's antique brown.
+pub fn shade_gold(hub: Pos2, point: Pos2, drop_r: f32, gain: f32) -> Color32 {
+    let rel = (point - hub) / drop_r.max(0.5);
+    let facing = if rel.length() > 0.02 {
+        rel.normalized().dot(light())
+    } else {
+        0.25
+    };
+    let lit = (0.35 + facing * 0.65).clamp(0.0, 1.0);
+    let deep = rgb([0xb8, 0x86, 0x0b]);
+    let gold = rgb([0xf0, 0xc1, 0x3a]);
+    let bright = rgb([0xff, 0xe0, 0x8a]);
+    let base = if lit > 0.5 {
+        mix(gold, bright, (lit - 0.5) * 2.0)
+    } else {
+        mix(deep, gold, lit * 2.0)
+    };
+    let spec = facing.max(0.0).powf(1.6);
+    scale(mix(base, rgb(GLINT), spec * 0.7), gain)
 }
 
 /// Brass color at a point on a dial of the given radius.

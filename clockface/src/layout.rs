@@ -12,7 +12,9 @@ pub const APERTURE_R: f32 = 0.64;
 pub const YEAR_WEDGE: (f32, f32) = (180.0, 270.0);
 /// Sky window: the mirror, from 3 o'clock to 6, cut off by the right and bottom tangents.
 pub const SKY_WEDGE: (f32, f32) = (90.0, 180.0);
-const ROW_HALF: f32 = 1.28;
+/// Half-width of the three info frames, in face radii. 1.0 makes their outer edges
+/// the same width as the face diameter (left tangent to right tangent).
+const ROW_HALF: f32 = 1.0;
 const GUTTER: f32 = 0.08;
 
 #[derive(Clone, Copy, Debug)]
@@ -130,6 +132,26 @@ mod tests {
             );
         }
         assert!(layout.status.bottom() <= screen.bottom() + 0.5);
+    }
+
+    #[test]
+    #[test]
+    fn three_frames_are_exactly_one_face_diameter_wide() {
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(1920.0, 1080.0));
+        for (diameter, center) in [
+            (600.0, Pos2::new(960.0, 300.0)),
+            (420.0, Pos2::new(700.0, 210.0)),
+            (880.0, Pos2::new(960.0, 440.0)),
+        ] {
+            let layout = KioskLayout::new(screen, center, diameter);
+            let span = layout.boxes[2].right() - layout.boxes[0].left();
+            assert!(
+                (span - diameter).abs() < 0.5,
+                "span {span} should equal diameter {diameter}"
+            );
+            assert!((layout.boxes[0].left() - (center.x - diameter * 0.5)).abs() < 0.5);
+            assert!((layout.boxes[2].right() - (center.x + diameter * 0.5)).abs() < 0.5);
+        }
     }
 
     #[test]

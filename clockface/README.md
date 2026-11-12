@@ -1,6 +1,6 @@
 # clockface
 
-Roman-numeral grandfather clock for a Raspberry Pi. The dial is polished brass. Three apertures in the face show the weather, the moon, and the date. Two mural wheels turn behind the dial (the year, and the civil day). Under them are a calendar, a forecast, and sun and moon times, with a status line pinned to the bottom of the screen. Brass gears sit in the black field around the movement.
+Roman-numeral grandfather clock for a Raspberry Pi. The dial is polished brass. Three apertures in the face show the weather, the moon, and the date. Two mural wheels turn behind the dial (the year, and the civil day). Under them are a calendar, a forecast, and sun and moon times, with a status line pinned to the bottom of the screen. The three frames together are exactly as wide as the face.
 
 Time comes from `chrono::Local`, so the zoneinfo rules on the machine apply, including DST. The kiosk this replaces hardcoded EDT (UTC−4).
 
@@ -10,14 +10,13 @@ The painter is shared. The default build opens it in an eframe window (X11 or Wa
 
 Lengths below are fractions of the face radius. Angles are clockwise from 12. Everything is positioned from the clock center, so changing the diameter or the center moves the complications with the face. Hands, numerals, ticks, and the brass ring are painted after the discs they cross.
 
-- **Brass dial.** Warm metal, lit from the upper left, with a deeper antique falloff toward the rim. The bezel is a rounded brass ring (highlight on the upper left, shade on the lower right). Quarter markers are a brighter brass than the other hour markers. Minute ticks stay dark red. Numerals stay dark engraved brown. The hour and minute hands are black; the second hand is red.
+- **Brass dial.** Warm metal, lit from the upper left, with a deeper antique falloff toward the rim. The bezel is a rounded brass ring (highlight on the upper left, shade on the lower right). Hour teardrops are metallic gold, the quarters a little brighter. Minute ticks stay dark red. Numerals are solid black. The hour and minute hands are black; the second hand is red.
 - **Weather** (upper left, 9 o'clock to 12). Temperature, a short condition, and a small scene (sun, cloud, rain, snow, or night).
 - **Moon** (upper right, 12 to 3). Northern hemisphere. Waxing lights the right side of the disc. The phase is the mean age since the new moon of 2000-01-06 18:14 UTC, using a synodic month of 29.530588853 days. It is a mean-phase clock, not a full lunar ephemeris.
 - **Date** (lower half, 3 o'clock through 6 to 9). Weekday, month, and day, on a cream complication disc.
 - **Year wheel** (lower left). The window is the square corner outside the dial, between the 9 o'clock tangent and the 6 o'clock tangent. The mural is still a disc on the shaft and turns once per tropical year. The middle of the window shows the current day of the year, blended between the solstices and equinoxes, so the season eases instead of jumping.
 - **Sky wheel** (lower right). The mirror corner, between 3 o'clock and 6. It turns once per local civil day. The middle of the window is "now": midnight is night, dawn and dusk are the color change, noon is day.
-- **Movement.** Toothed brass wheels and pinions in the open field to the left and right of the dial, including the upper sides. They sit behind the face, the windows, the panels, and the status bar.
-- **Calendar, forecast, sun and moon.** Three brass-edged panels under the wheels. Sun and moon times are computed on the machine (NOAA sunrise equation). They are shown in the system timezone, which should be the place's zone.
+- **Calendar, forecast, sun and moon.** Three brass-edged panels under the wheels. Their outer edges line up with the left and right edges of the face, so the row is one face-diameter wide at any diameter. Sun and moon times are computed on the machine (NOAA sunrise equation). They are shown in the system timezone, which should be the place's zone.
 - **Status bar.** Hostname, local addresses, and whether `timedatectl` reports the clock in sync. A failed weather fetch is prefixed on that line. Addresses that cannot be read are said to be missing; none are invented.
 
 ## Build on Raspberry Pi OS 64-bit
