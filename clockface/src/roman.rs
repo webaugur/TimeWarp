@@ -202,12 +202,24 @@ pub fn paint_with(
         return;
     }
     let r = diameter * 0.5;
-    paint_face(painter, center, r, style);
-    paint_outline(painter, center, r, diameter, style);
-    paint_inner_ring(painter, center, r, style);
-    paint_ticks(painter, center, r, style);
-    paint_numerals(painter, center, r, style);
-    let (hour, minute, second) = hand_angles(now, style);
+    paint_face(painter, center, r);
+    paint_bezel(painter, center, r);
+    paint_markings_and_hands(painter, center, diameter, now, style);
+}
+
+/// Inner ring, ticks, numerals, and hands. The kiosk paints these after the aperture discs.
+pub(crate) fn paint_markings_and_hands(
+    painter: &Painter,
+    center: Pos2,
+    diameter: f32,
+    now: DateTime<Local>,
+    style: &RomanClockStyle,
+) {
+    let r = diameter * 0.5;
+    paint_inner_ring(painter, center, r, &style);
+    paint_ticks(painter, center, r, &style);
+    paint_numerals(painter, center, r, &style);
+    let (hour, minute, second) = hand_angles(now, &style);
     // Hour, then minute, then second, so the second hand (and its cap) is on top.
     paint_hand(painter, center, r, hour, &style.hour_hand, &style.shadow);
     paint_hand(
@@ -233,34 +245,34 @@ pub(crate) fn direction(degrees_clockwise_from_12: f32) -> Vec2 {
     Vec2::new(rad.sin(), -rad.cos())
 }
 
-fn paint_face(painter: &Painter, center: Pos2, r: f32, style: &RomanClockStyle) {
-    // Triangle fan. Edge vertices share one color, so the disk reads as a
-    // radial blend from `face_center` to `face_edge`. The rim covers the
-    // aliased circumference.
-    const SEGMENTS: u32 = 128;
-    let mut mesh = Mesh::default();
-    mesh.colored_vertex(center, style.face_center);
-    for i in 0..=SEGMENTS {
-        let t = i as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
-        let p = center + Vec2::new(t.cos(), t.sin()) * r;
-        mesh.colored_vertex(p, style.face_edge);
-    }
-    for i in 0..SEGMENTS {
-        mesh.add_triangle(0, 1 + i, 2 + i);
-    }
-    painter.add(Shape::mesh(mesh));
+fn paint_face(painter: &Painter, center: Pos2, r: f32) {
+    crate::draw::paint_disc(painter, center, r, 96, |p| {
+        crate::brass::shade_dial(center, p, r, 1.0)
+    });
 }
 
-fn paint_outline(painter: &Painter, center: Pos2, r: f32, diameter: f32, style: &RomanClockStyle) {
-    // The visible band is `outline_width_of_diameter` of the diameter, lying
-    // entirely inside the face. A stroke centered on the circumference would
-    // lose its outer half to the clip; insetting by half the width matches that.
-    let width = style.outline_width_of_diameter * diameter;
-    if width <= 0.0 {
-        return;
+/// Polished brass bezel, fully inside the dial. Upper-left is lit, lower-right falls off.
+pub(crate) fn paint_bezel(painter: &Painter, center: Pos2, r: f32) {
+    let inner = r * 0.952;
+    let outer = r;
+    let segments = 96u32;
+    let mut mesh = Mesh::default();
+    for i in 0..=segments {
+        let t = i as f32 / segments as f32 * std::f32::consts::TAU;
+        let dir = Vec2::new(t.cos(), t.sin());
+        for across in [0.0_f32, 0.5, 1.0] {
+            let p = center + dir * (inner + (outer - inner) * across);
+            mesh.colored_vertex(p, crate::brass::shade_bezel(dir, across));
+        }
     }
-    let radius = r - width * 0.5;
-    painter.circle_stroke(center, radius.max(0.0), Stroke::new(width, style.outline));
+    for i in 0..segments {
+        let base = i * 3;
+        mesh.add_triangle(base, base + 1, base + 3);
+        mesh.add_triangle(base + 1, base + 4, base + 3);
+        mesh.add_triangle(base + 1, base + 2, base + 4);
+        mesh.add_triangle(base + 2, base + 5, base + 4);
+    }
+    painter.add(Shape::mesh(mesh));
 }
 
 fn paint_inner_ring(painter: &Painter, center: Pos2, r: f32, style: &RomanClockStyle) {
@@ -278,18 +290,26 @@ fn paint_inner_ring(painter: &Painter, center: Pos2, r: f32, style: &RomanClockS
 fn paint_ticks(painter: &Painter, center: Pos2, r: f32, style: &RomanClockStyle) {
     for step in 0..60 {
         let degrees = step as f32 * 6.0;
-        let tick = if step % 15 == 0 {
-            &style.quarter_tick
+        // Quarters a little brighter than the other hour markers. Minute ticks stay red.
+        let (tick, metal) = if step % 15 == 0 {
+            (&style.quarter_tick, Some(1.18))
         } else if step % 5 == 0 {
-            &style.hour_tick
+            (&style.hour_tick, Some(0.92))
         } else {
-            &style.minute_tick
+            (&style.minute_tick, None)
         };
-        paint_teardrop(painter, center, r, degrees, tick);
+        paint_teardrop(painter, center, r, degrees, tick, metal);
     }
 }
 
-fn paint_teardrop(painter: &Painter, center: Pos2, r: f32, degrees: f32, tick: &TickStyle) {
+fn paint_teardrop(
+    painter: &Painter,
+    center: Pos2,
+    r: f32,
+    degrees: f32,
+    tick: &TickStyle,
+    metal: Option<f32>,
+) {
     let dir = direction(degrees);
     let perp = Vec2::new(-dir.y, dir.x);
     let d = tick.distance * r;
@@ -299,13 +319,26 @@ fn paint_teardrop(painter: &Painter, center: Pos2, r: f32, degrees: f32, tick: &
     let left = hub + perp * radius;
     let right = hub - perp * radius;
     let tip = center + dir * (d - tick.inward * r);
-    painter.circle_filled(hub, radius.max(0.0), tick.color);
-    if tick.inward > 0.0 && width > 0.0 {
-        painter.add(Shape::convex_polygon(
-            vec![left, right, tip],
-            tick.color,
-            Stroke::NONE,
-        ));
+    if let Some(gain) = metal {
+        let color = |p: Pos2| crate::brass::shade_dial(center, p, r, gain);
+        crate::draw::paint_disc(painter, hub, radius.max(0.0), 10, color);
+        if tick.inward > 0.0 && width > 0.0 {
+            let mut mesh = Mesh::default();
+            for p in [left, right, tip] {
+                mesh.colored_vertex(p, color(p));
+            }
+            mesh.add_triangle(0, 1, 2);
+            painter.add(Shape::mesh(mesh));
+        }
+    } else {
+        painter.circle_filled(hub, radius.max(0.0), tick.color);
+        if tick.inward > 0.0 && width > 0.0 {
+            painter.add(Shape::convex_polygon(
+                vec![left, right, tip],
+                tick.color,
+                Stroke::NONE,
+            ));
+        }
     }
 }
 

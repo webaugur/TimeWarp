@@ -6,7 +6,7 @@ When we decide work in chat, file an issue (or update one) and edit this list. D
 
 ## In progress
 
-- Grandfather-clock face (`clockface/`): eframe/egui Roman-numeral kiosk for Raspberry Pi OS 64-bit (glow). Local time with DST, adjustable diameter and placement. Next: calendar and moon from TimeWarp `--json`.
+- Grandfather-clock face (`clockface/`): brass Roman dial with weather, moon, date, year and sky wheels, and a status line. Default build is eframe/glow (X11 or Wayland). `kms` uses eboard on DRM/KMS or the framebuffer. Next: calendar and moon from TimeWarp `--json`.
 
 ## Later
 

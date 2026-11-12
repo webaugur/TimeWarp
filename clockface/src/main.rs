@@ -1,15 +1,21 @@
-//! Fullscreen kiosk shell around [`clockface::paint`].
+//! Kiosk shell around the shared clock painter.
+//!
+//! The default build opens an eframe window (X11 or Wayland, glow). The `kms`
+//! feature on Linux starts eboard instead, which talks to DRM/KMS or the
+//! framebuffer and does not need a display server. `--screenshot` uses the
+//! software rasterizer in either build.
 
-use std::path::PathBuf;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use chrono::Local;
 use clap::Parser;
-use eframe::egui::{self, Color32, Vec2};
-use eframe::Renderer;
 
 use clockface::{
-    install_fonts, load_settings, paint, render_rgba, write_png, Settings, SettingsOverride,
+    example_events, fetch_weather, gather_status, install_fonts, load_cache, load_settings,
+    now_unix, paint_kiosk, render_rgba, store_cache, write_png, KioskModel, Place, Settings,
+    SettingsOverride, StatusLine, Units, WeatherReport,
 };
 
 #[derive(Parser, Debug)]
@@ -19,9 +25,9 @@ use clockface::{
     about = "Roman-numeral grandfather clock for a Raspberry Pi kiosk"
 )]
 struct Cli {
-    /// TOML file with diameter, center_x, center_y, and windowed. Flags override it.
+    /// TOML file. Flags override it. See clockface.example.toml.
     #[arg(long)]
-    config: Option<PathBuf>,
+    config: Option<std::path::PathBuf>,
 
     /// Face diameter in pixels (default 600).
     #[arg(long)]
@@ -36,6 +42,8 @@ struct Cli {
     center_y: Option<f32>,
 
     /// Open a decorated window instead of fullscreen.
+    ///
+    /// Ignored on the `kms` build: eboard is always fullscreen on the display.
     #[arg(long)]
     windowed: bool,
 
@@ -43,17 +51,33 @@ struct Cli {
     #[arg(long)]
     fullscreen: bool,
 
-    /// Write one PNG at local time 10:08:37 and exit. No window is opened.
+    /// Write one PNG of the full kiosk at local time 10:08:37 and exit. No display is opened.
     #[arg(long, value_name = "FILE")]
-    screenshot: Option<PathBuf>,
+    screenshot: Option<std::path::PathBuf>,
 
-    /// Window or screenshot width in pixels.
+    /// Window or screenshot width in pixels. The kms build uses the display mode instead.
     #[arg(long, default_value_t = 1920)]
     width: u32,
 
-    /// Window or screenshot height in pixels.
+    /// Window or screenshot height in pixels. The kms build uses the display mode instead.
     #[arg(long, default_value_t = 1080)]
     height: u32,
+
+    /// Latitude, decimal degrees. Overrides --city and the config file.
+    #[arg(long)]
+    lat: Option<f64>,
+
+    /// Longitude, decimal degrees, east-positive. Overrides --city and the config file.
+    #[arg(long)]
+    lon: Option<f64>,
+
+    /// Named place: indianapolis, chicago, new york, london, denver.
+    #[arg(long)]
+    city: Option<String>,
+
+    /// imperial (°F, mph) or metric (°C, km/h). Default imperial.
+    #[arg(long, value_parser = ["imperial", "metric"])]
+    units: Option<String>,
 }
 
 fn main() {
@@ -72,6 +96,10 @@ fn run() -> Result<(), String> {
     } else {
         None
     };
+    let units = match cli.units.as_deref() {
+        Some(text) => Some(Units::parse(text).ok_or_else(|| format!("unknown units {text:?}"))?),
+        None => None,
+    };
     let settings = load_settings(
         cli.config.as_deref(),
         &SettingsOverride {
@@ -79,17 +107,22 @@ fn run() -> Result<(), String> {
             center_x: cli.center_x,
             center_y: cli.center_y,
             windowed,
+            city: cli.city.clone(),
+            latitude: cli.lat,
+            longitude: cli.lon,
+            units,
         },
     )?;
 
     if let Some(path) = cli.screenshot.as_deref() {
-        let center = settings.center(Vec2::new(cli.width as f32, cli.height as f32));
+        let center = settings.center(egui::vec2(cli.width as f32, cli.height as f32));
         let rgba = render_rgba(
             cli.width,
             cli.height,
             center,
             settings.diameter,
             clockface::screenshot_time(),
+            &settings.place,
         )?;
         write_png(path, cli.width, cli.height, &rgba)?;
         println!(
@@ -104,51 +137,159 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
 
+    #[cfg(all(feature = "kms", target_os = "linux"))]
+    {
+        return run_kms(settings);
+    }
+    #[cfg(all(feature = "desktop", not(all(feature = "kms", target_os = "linux"))))]
+    {
+        return run_desktop(settings, cli.width, cli.height);
+    }
+    #[cfg(not(any(feature = "desktop", all(feature = "kms", target_os = "linux"))))]
+    {
+        let _ = settings;
+        Err("this build has no display backend; pass --screenshot or enable desktop or kms".into())
+    }
+}
+
+struct ClockApp {
+    settings: Settings,
+    weather: Arc<Mutex<WeatherReport>>,
+    status: StatusLine,
+    status_at: Instant,
+    fetching: Arc<AtomicBool>,
+}
+
+impl ClockApp {
+    fn new(settings: Settings) -> Self {
+        let weather = load_cache(&settings.place)
+            .unwrap_or_else(|| WeatherReport::unavailable(&settings.place));
+        Self {
+            settings,
+            weather: Arc::new(Mutex::new(weather)),
+            status: gather_status(),
+            status_at: Instant::now(),
+            fetching: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+fn show_clock(ui: &mut egui::Ui, app: &mut ClockApp) {
+    ui.ctx()
+        .request_repaint_after(Duration::from_nanos(16_666_667));
+    if app.status_at.elapsed() >= Duration::from_secs(30) {
+        app.status = gather_status();
+        app.status_at = Instant::now();
+    }
+    refresh_weather_if_stale(app);
+    let weather = app.weather.lock().expect("weather lock").clone();
+    let mut status = app.status.clone();
+    if !weather.note.is_empty() {
+        status.alert = weather.note.clone();
+    }
+    let events = app.settings.events.clone().unwrap_or_else(example_events);
+    let screen = ui.ctx().viewport_rect();
+    let model = KioskModel {
+        now: Local::now(),
+        place: app.settings.place.clone(),
+        weather,
+        events,
+        status,
+    };
+    paint_kiosk(
+        ui.painter(),
+        screen,
+        app.settings.center(screen.size()),
+        app.settings.diameter,
+        &model,
+    );
+}
+
+fn refresh_weather_if_stale(app: &ClockApp) {
+    let weather = app.weather.lock().expect("weather lock").clone();
+    let refresh = (app.settings.refresh_minutes as i64).saturating_mul(60);
+    if weather.is_fresh(now_unix(), refresh) {
+        return;
+    }
+    if app.fetching.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let place: Place = app.settings.place.clone();
+    let slot = Arc::clone(&app.weather);
+    let flag = Arc::clone(&app.fetching);
+    std::thread::spawn(move || {
+        match fetch_weather(&place) {
+            Ok(report) => {
+                store_cache(&report);
+                *slot.lock().expect("weather lock") = report;
+            }
+            Err(err) => {
+                slot.lock().expect("weather lock").note = err;
+            }
+        }
+        flag.store(false, Ordering::SeqCst);
+    });
+}
+
+#[cfg(all(feature = "desktop", not(all(feature = "kms", target_os = "linux"))))]
+fn run_desktop(settings: Settings, width: u32, height: u32) -> Result<(), String> {
+    let windowed = settings.windowed;
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Clockface")
-            .with_inner_size([cli.width as f32, cli.height as f32])
-            .with_fullscreen(!settings.windowed)
-            .with_decorations(settings.windowed)
+            .with_inner_size([width as f32, height as f32])
+            .with_fullscreen(!windowed)
+            .with_decorations(windowed)
             .with_resizable(true),
-        renderer: Renderer::Glow,
-        vsync: true,
+        renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
-
     eframe::run_native(
         "clockface",
         native,
         Box::new(move |cc| {
             install_fonts(&cc.egui_ctx);
-            Ok(Box::new(ClockApp { settings }))
+            Ok(Box::new(ClockApp::new(settings)))
         }),
     )
     .map_err(|err| err.to_string())
 }
 
-struct ClockApp {
-    settings: Settings,
-}
-
+#[cfg(all(feature = "desktop", not(all(feature = "kms", target_os = "linux"))))]
 impl eframe::App for ClockApp {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         [0.0, 0.0, 0.0, 1.0]
     }
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // ~60 Hz. Vsync caps this at the display refresh; the timer keeps the
-        // hour and minute hands moving when the window would otherwise idle,
-        // and it feeds the second-hand bounce in the first 250 ms of each second.
-        ctx.request_repaint_after(Duration::from_nanos(16_666_667));
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        show_clock(ui, self);
+    }
+}
 
-        let settings = self.settings.clone();
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(Color32::BLACK))
-            .show(ctx, |ui| {
-                let screen = ctx.screen_rect();
-                let center = settings.center(screen.size());
-                paint(ui.painter(), center, settings.diameter, Local::now());
-            });
+#[cfg(all(feature = "kms", target_os = "linux"))]
+fn run_kms(settings: Settings) -> Result<(), String> {
+    if settings.windowed {
+        eprintln!("clockface: --windowed is ignored; the kms build is always fullscreen");
+    }
+    let options = eboard::Options {
+        backend: eboard::Backend::Auto,
+        vsync: true,
+        ..eboard::Options::default()
+    };
+    eboard::run(options, move |cc| {
+        install_fonts(&cc.egui_ctx);
+        Ok(Box::new(ClockApp::new(settings)) as Box<dyn eboard::App>)
+    })
+    .map_err(|err| err.to_string())
+}
+
+#[cfg(all(feature = "kms", target_os = "linux"))]
+impl eboard::App for ClockApp {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 1.0]
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _board: &mut eboard::Board) {
+        show_clock(ui, self);
     }
 }

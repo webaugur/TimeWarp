@@ -1,9 +1,9 @@
 //! CPU rasterizer for one egui frame.
 //!
-//! `--screenshot` and the pixel tests use this so the face can be checked
-//! without a display. It follows the egui_glow 0.31 path: tessellated meshes
-//! in points, vertex color multiplied by the texture in gamma space, then
-//! premultiplied blending (`src + dst * (1 - src_a)`).
+//! `--screenshot` and the pixel tests use this so the kiosk can be checked
+//! without a display, on both the eframe and the eboard builds. Tessellated
+//! meshes are in points; vertex color is multiplied by the texture in gamma
+//! space, then blended premultiplied (`src + dst * (1 - src_a)`).
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -15,7 +15,8 @@ use egui::epaint::{Color32, ImageData, ImageDelta, Primitive, Vertex};
 use egui::{ClippedPrimitive, Context, Pos2, Rect, TextureId, Vec2};
 
 use crate::fonts::install_fonts;
-use crate::roman;
+use crate::kiosk::{self, KioskModel};
+use crate::settings::Place;
 
 /// Render the clock on a black framebuffer. Row-major RGBA8, origin top-left.
 pub fn render_rgba(
@@ -24,6 +25,7 @@ pub fn render_rgba(
     center: Pos2,
     diameter: f32,
     now: DateTime<Local>,
+    place: &Place,
 ) -> Result<Vec<u8>, String> {
     if width == 0 || height == 0 || width > 8192 || height > 8192 {
         return Err(format!("screenshot size {width}x{height} is out of range"));
@@ -50,10 +52,10 @@ pub fn render_rgba(
         },
     );
 
-    let output = ctx.run(input, |ctx| {
+    let model = KioskModel::for_screenshot(now, place);
+    let output = ctx.run_pass(input, |ctx| {
         let painter = ctx.layer_painter(egui::LayerId::background());
-        painter.rect_filled(screen, 0.0, Color32::BLACK);
-        roman::paint(&painter, center, diameter, now);
+        kiosk::paint(&painter, screen, center, diameter, &model);
     });
 
     let mut textures = TextureSet::default();
@@ -107,11 +109,13 @@ struct Atlas {
 }
 
 impl TextureSet {
-    fn apply(&mut self, delta: egui::TexturesDelta) {
-        for (id, image) in delta.set {
-            self.apply_one(id, image);
+    fn apply(&mut self, mut delta: egui::TexturesDelta) {
+        for (id, images) in std::mem::take(&mut delta.set) {
+            for image in images {
+                self.apply_one(id, image);
+            }
         }
-        for id in delta.free {
+        for id in std::mem::take(&mut delta.free) {
             self.textures.remove(&id);
         }
     }
@@ -208,23 +212,13 @@ impl Atlas {
 }
 
 fn decode_image(image: &ImageData) -> (usize, usize, Vec<[u8; 4]>) {
-    match image {
-        ImageData::Color(image) => {
-            let pixels = image
-                .pixels
-                .iter()
-                .map(Color32::to_array)
-                .collect::<Vec<_>>();
-            (image.width(), image.height(), pixels)
-        }
-        ImageData::Font(image) => {
-            let pixels = image
-                .srgba_pixels(None)
-                .map(|color| color.to_array())
-                .collect();
-            (image.width(), image.height(), pixels)
-        }
-    }
+    let ImageData::Color(image) = image;
+    let pixels = image
+        .pixels
+        .iter()
+        .map(Color32::to_array)
+        .collect::<Vec<_>>();
+    (image.width(), image.height(), pixels)
 }
 
 fn paint_primitive(
@@ -427,38 +421,67 @@ mod tests {
 
     #[test]
     fn screenshot_frame_matches_the_spec_colors() {
-        let width = 960;
-        let height = 700;
+        let width = 1000;
+        let height = 820;
         let settings = Settings::default();
         let center = settings.center(Vec2::new(width as f32, height as f32));
         let diameter = settings.diameter;
-        let rgba = render_rgba(width, height, center, diameter, screenshot_time()).unwrap();
+        let rgba = render_rgba(
+            width,
+            height,
+            center,
+            diameter,
+            screenshot_time(),
+            &settings.place,
+        )
+        .unwrap();
         let r = diameter * 0.5;
 
-        let corner = at(&rgba, width, 4, height as i32 - 4);
-        assert_eq!(corner, [0, 0, 0, 255], "background should be black");
-
-        // Clear of hands (10:08:37) and of the tick ring: 20° at 0.40 r.
-        let face_at = center + direction(20.0) * (0.40 * r);
-        let face = at_pos(&rgba, width, height, face_at);
-        let t = 0.40;
-        let expect = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as i32;
-        let er = expect(0xf7, 0xe5);
-        let eg = expect(0xdb, 0xca);
-        let eb = expect(0xb7, 0xa7);
-        assert!(
-            (face[0] as i32 - er).abs() <= 3
-                && (face[1] as i32 - eg).abs() <= 3
-                && (face[2] as i32 - eb).abs() <= 3,
-            "face gradient at {face_at:?} was {face:?}, expected ~[{er}, {eg}, {eb}]"
+        let corner = at(&rgba, width, width as i32 - 8, 6);
+        assert_eq!(
+            corner,
+            [0, 0, 0, 255],
+            "background should be black, got {corner:?}"
         );
 
-        // The rim is a thin antialiased stroke; accept a pixel in the neighborhood.
-        let rim_at = center + direction(20.0) * (0.99 * r);
+        // Brass annulus, clear of ticks (hour marks end near 0.75 R) and the bezel (0.95 R).
+        let lit = at_pos(&rgba, width, height, center + direction(315.0) * (0.80 * r));
+        let shade = at_pos(&rgba, width, height, center + direction(135.0) * (0.80 * r));
+        let lum = |px: [u8; 4]| px[0] as i32 + px[1] as i32 + px[2] as i32;
         assert!(
-            near_color(&rgba, width, height, rim_at, [0x7c, 0x4e, 0x1f], 18),
-            "outline near {rim_at:?} was {}",
-            format!("{:?}", at_pos(&rgba, width, height, rim_at))
+            lum(lit) > lum(shade) + 12,
+            "upper-left brass {lit:?} should be brighter than lower-right {shade:?}"
+        );
+        assert!(lit[0] > lit[2] + 20, "brass should be warm, got {lit:?}");
+
+        let bezel_lit = at_pos(
+            &rgba,
+            width,
+            height,
+            center + direction(315.0) * (0.975 * r),
+        );
+        let bezel_dark = at_pos(
+            &rgba,
+            width,
+            height,
+            center + direction(135.0) * (0.975 * r),
+        );
+        assert!(
+            lum(bezel_lit) > lum(bezel_dark) + 8,
+            "bezel highlight {bezel_lit:?} vs shade {bezel_dark:?}"
+        );
+
+        // Night sky in the moon aperture, outside the moon disc.
+        let sky = at_pos(&rgba, width, height, center + direction(45.0) * (0.52 * r));
+        assert!(
+            sky[0] < 90,
+            "moon aperture should be night sky, got {sky:?}"
+        );
+
+        let wedge = at_pos(&rgba, width, height, center + direction(217.5) * (1.25 * r));
+        assert!(
+            lum(wedge) > 40,
+            "year wedge should show the season mural, got {wedge:?}"
         );
 
         let style = RomanClockStyle::default();
