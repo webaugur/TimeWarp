@@ -474,11 +474,17 @@ mod tests {
             "bezel highlight {bezel_lit:?} vs shade {bezel_dark:?}"
         );
 
-        // Night sky in the moon aperture, outside the moon disc.
-        let sky = at_pos(&rgba, width, height, center + direction(45.0) * (0.52 * r));
+        // Upper half is the daytime sky at 10:08 (light snow), not the cream date disc.
+        let sky = at_pos(&rgba, width, height, center + direction(0.0) * (0.42 * r));
         assert!(
-            sky[0] < 90,
-            "moon aperture should be night sky, got {sky:?}"
+            sky[2] > 100 && sky[2] as i32 + 10 > sky[0] as i32,
+            "upper half should be sky, got {sky:?}"
+        );
+        // Lower-left quarter, off the red second hand (222°) and off the date glyphs.
+        let date = at_pos(&rgba, width, height, center + direction(250.0) * (0.28 * r));
+        assert!(
+            date[0] > 180 && date[0] as i32 > date[2] as i32 + 30,
+            "lower-left quarter should be the cream date disc, got {date:?}"
         );
 
         let wedge = at_pos(&rgba, width, height, center + direction(225.0) * (1.15 * r));

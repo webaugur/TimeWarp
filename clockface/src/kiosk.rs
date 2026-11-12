@@ -71,20 +71,20 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
     paint_sky_marks(painter, center, radius, sky::day_fraction(model.now));
 
     let aperture = APERTURE_R * radius;
-    paint_aperture(painter, center, aperture, 270.0, 360.0, |p| {
-        weather_color(&model.weather, model.now, center, aperture, p)
+    // Upper half, horizon on the 9–3 line. One sky, not two quarters.
+    paint_sector(painter, center, aperture, 270.0, 180.0, |p| {
+        horizon_color(&model.weather, model.now, center, aperture, p)
     });
-    paint_aperture(painter, center, aperture, 0.0, 90.0, |p| {
-        moon_color(center, aperture, p, sky::moon_phase(model.now))
+    paint_aperture(painter, center, aperture, 180.0, 270.0, |p| {
+        date_disc_color(center, aperture, p)
     });
-    paint_aperture(painter, center, aperture, 90.0, 270.0, |p| {
+    paint_aperture(painter, center, aperture, 90.0, 180.0, |p| {
         date_disc_color(center, aperture, p)
     });
 
-    paint_weather_glyphs(painter, center, radius, &model.weather, model.now);
-    paint_moon_disc(painter, center, radius, sky::moon_phase(model.now));
-    paint_stars(painter, center, radius);
+    paint_horizon_scene(painter, center, radius, aperture, &model.weather, model.now);
     paint_date_words(painter, center, radius, model.now);
+    paint_condition_words(painter, center, radius, &model.weather, model.now);
 
     // Same brass mesh the window and the screenshot both fill.
     roman::paint_brass(painter, center, radius, aperture);
@@ -148,6 +148,38 @@ fn paint_aperture(
     color_at: impl FnMut(Pos2) -> Color32,
 ) {
     paint_pie(painter, center, radius, start, end, 36, color_at);
+}
+
+/// Sector of a disc, sampled on a grid so a horizon gradient survives the fill.
+/// `start` is degrees clockwise from 12. `sweep` is clockwise and positive.
+fn paint_sector(
+    painter: &Painter,
+    center: Pos2,
+    radius: f32,
+    start: f32,
+    sweep: f32,
+    mut color_at: impl FnMut(Pos2) -> Color32,
+) {
+    let angular = 48u32;
+    let radial = 14u32;
+    let cols = radial + 1;
+    let mut mesh = egui::Mesh::default();
+    for i in 0..=angular {
+        let deg = start + sweep * (i as f32 / angular as f32);
+        let dir = direction(deg);
+        for j in 0..=radial {
+            let p = center + dir * (radius * (j as f32 / radial as f32));
+            crate::draw::vertex_color(&mut mesh, p, color_at(p));
+        }
+    }
+    for i in 0..angular {
+        for j in 0..radial {
+            let a = i * cols + j;
+            mesh.add_triangle(a, a + 1, a + cols);
+            mesh.add_triangle(a + 1, a + cols + 1, a + cols);
+        }
+    }
+    crate::draw::add_mesh(painter, mesh);
 }
 
 fn season_color(shown: f32, outward: f32) -> Color32 {
@@ -229,7 +261,8 @@ fn sky_color(shown: f32, _outward: f32) -> Color32 {
     color
 }
 
-fn weather_color(
+/// Sky above the 9–3 horizon, land along that line. `radius` is the aperture radius.
+fn horizon_color(
     weather: &WeatherReport,
     now: DateTime<Local>,
     center: Pos2,
@@ -237,34 +270,45 @@ fn weather_color(
     point: Pos2,
 ) -> Color32 {
     let rel = (point - center) / radius.max(1.0);
-    let sky = match scene_now(weather, now) {
-        Scene::ClearDay => mix(
-            Color32::from_rgb(0x7e, 0xc8, 0xef),
-            Color32::from_rgb(0xc8, 0xe6, 0xf8),
-            rel.y.abs(),
-        ),
-        Scene::ClearNight => Color32::from_rgb(0x0c, 0x14, 0x2c),
-        Scene::Cloud | Scene::Unknown => mix(
-            Color32::from_rgb(0x8a, 0x96, 0xa4),
-            Color32::from_rgb(0xc5, 0xcc, 0xd4),
-            0.4,
-        ),
-        Scene::Rain => Color32::from_rgb(0x4e, 0x62, 0x74),
-        Scene::Snow => mix(
-            Color32::from_rgb(0xb7, 0xc6, 0xd4),
-            Color32::from_rgb(0xe7, 0xee, 0xf2),
-            0.5,
-        ),
-        Scene::Storm => Color32::from_rgb(0x2c, 0x34, 0x44),
-        Scene::Fog => Color32::from_rgb(0xc8, 0xcc, 0xce),
+    let up = (-rel.y).clamp(0.0, 1.0);
+    let day = sky::day_fraction(now);
+    // Positive while the sun is up. 6:00 is the horizon, noon is overhead.
+    let alt = ((day - 0.25) * std::f32::consts::TAU).sin();
+    let dayness = alt.clamp(0.0, 1.0);
+    let twilight = (1.0 - alt.abs() * 2.4).clamp(0.0, 1.0);
+    let zenith = mix(
+        Color32::from_rgb(0x07, 0x0c, 0x1e),
+        Color32::from_rgb(0x2c, 0x6e, 0xb8),
+        dayness,
+    );
+    let mut horizon = mix(
+        Color32::from_rgb(0x16, 0x24, 0x44),
+        Color32::from_rgb(0xc5, 0xdf, 0xf4),
+        dayness,
+    );
+    horizon = mix(horizon, Color32::from_rgb(0xe8, 0x86, 0x42), twilight * 0.8);
+    let mut color = mix(horizon, zenith, up.powf(0.55));
+    let scene = scene_now(weather, now);
+    let weather_tint = match scene {
+        Scene::Snow => (Color32::from_rgb(0xd8, 0xe4, 0xee), 0.5),
+        Scene::Rain => (Color32::from_rgb(0x5c, 0x6c, 0x7c), 0.45),
+        Scene::Cloud | Scene::Unknown => (Color32::from_rgb(0x9a, 0xa6, 0xb2), 0.4),
+        Scene::Storm => (Color32::from_rgb(0x2a, 0x32, 0x42), 0.6),
+        Scene::Fog => (Color32::from_rgb(0xcc, 0xd0, 0xd2), 0.65),
+        Scene::ClearDay | Scene::ClearNight => (color, 0.0),
     };
-    sky
-}
-
-fn moon_color(_center: Pos2, _radius: f32, _point: Pos2, _phase: f64) -> Color32 {
-    // Flat night. Stars are separate discs: a cream vertex on this fan would
-    // be interpolated into a ray across the whole quarter.
-    Color32::from_rgb(0x0b, 0x12, 0x22)
+    color = mix(color, weather_tint.0, weather_tint.1);
+    if up < 0.16 {
+        let ground = match scene {
+            Scene::Snow => Color32::from_rgb(0xe7, 0xee, 0xf2),
+            Scene::ClearNight | Scene::Storm => Color32::from_rgb(0x12, 0x16, 0x20),
+            Scene::Rain => Color32::from_rgb(0x3e, 0x4a, 0x3a),
+            _ if dayness < 0.25 => Color32::from_rgb(0x14, 0x18, 0x22),
+            _ => Color32::from_rgb(0x6d, 0x84, 0x58),
+        };
+        color = mix(ground, color, up / 0.16);
+    }
+    color
 }
 
 fn date_disc_color(center: Pos2, radius: f32, point: Pos2) -> Color32 {
@@ -277,103 +321,129 @@ fn date_disc_color(center: Pos2, radius: f32, point: Pos2) -> Color32 {
     )
 }
 
-fn paint_weather_glyphs(
+fn paint_horizon_scene(
     painter: &Painter,
     center: Pos2,
     radius: f32,
+    aperture: f32,
     weather: &WeatherReport,
     now: DateTime<Local>,
 ) {
-    let origin = center + direction(315.0) * (0.34 * radius);
-    let clip = Rect::from_center_size(origin, Vec2::splat(0.42 * radius));
+    // The rectangle covers the upper half. The brass ring, painted later, covers
+    // anything that falls outside the circular aperture.
+    let clip = Rect::from_min_max(
+        Pos2::new(center.x - aperture, center.y - aperture),
+        Pos2::new(center.x + aperture, center.y + 1.0),
+    );
     let painter = painter.with_clip_rect(clip);
-    let r = radius;
-    let ink = match scene_now(weather, now) {
-        Scene::ClearNight | Scene::Rain | Scene::Storm => Color32::from_rgb(0xf4, 0xec, 0xd8),
-        _ => Color32::from_rgb(0x2a, 0x1c, 0x10),
+    let day = sky::day_fraction(now);
+    let alt = ((day - 0.25) * std::f32::consts::TAU).sin();
+    let dayness = alt.clamp(0.0, 1.0);
+    let scene = scene_now(weather, now);
+    let night = dayness < 0.08;
+
+    if night {
+        paint_stars(&painter, center, radius);
+    }
+    if dayness > 0.05 && !matches!(scene, Scene::Storm) {
+        let t = ((day - 0.25) / 0.5).clamp(0.0, 1.0);
+        let x = aperture * (0.55 - 1.1 * t);
+        let y = -aperture * (0.12 + 0.62 * (t * std::f32::consts::PI).sin());
+        let sun = center + Vec2::new(x, y);
+        let dim = matches!(
+            scene,
+            Scene::Cloud | Scene::Rain | Scene::Snow | Scene::Fog | Scene::Unknown
+        );
+        paint_disc(
+            &painter,
+            sun,
+            if dim { 0.045 * radius } else { 0.07 * radius },
+            16,
+            |_| {
+                if dim {
+                    Color32::from_rgb(0xf0, 0xe2, 0xb0)
+                } else {
+                    Color32::from_rgb(0xff, 0xc8, 0x3a)
+                }
+            },
+        );
+    }
+    if night || dayness < 0.45 {
+        paint_moon_disc(&painter, center, radius, sky::moon_phase(now));
+    }
+
+    let cloud_color = match scene {
+        Scene::Storm => Color32::from_rgb(0x5c, 0x66, 0x74),
+        Scene::Rain => Color32::from_rgb(0xd0, 0xd8, 0xe0),
+        _ => Color32::from_rgb(0xf4, 0xf7, 0xfa),
     };
-    match scene_now(weather, now) {
-        Scene::ClearDay => {
-            paint_disc(
-                &painter,
-                origin + Vec2::new(-0.02 * r, -0.02 * r),
-                0.055 * r,
-                16,
-                |_| Color32::from_rgb(0xff, 0xc8, 0x3a),
-            );
+    match scene {
+        Scene::Cloud | Scene::Unknown | Scene::Fog | Scene::Rain | Scene::Snow | Scene::Storm => {
+            for (dx, dy, scale) in [
+                (-0.22, -0.28, 1.15),
+                (0.16, -0.42, 0.9),
+                (0.34, -0.22, 0.75),
+                (-0.02, -0.16, 1.0),
+            ] {
+                cloud(
+                    &painter,
+                    center + Vec2::new(dx * aperture, dy * aperture),
+                    radius * scale,
+                    cloud_color,
+                );
+            }
         }
-        Scene::ClearNight => {
-            paint_disc(&painter, origin, 0.05 * r, 16, |_| {
-                Color32::from_rgb(0xf0, 0xea, 0xc8)
-            });
-        }
-        Scene::Cloud | Scene::Unknown | Scene::Fog => {
-            cloud(&painter, origin, r, Color32::from_rgb(0xf4, 0xf6, 0xf8));
-        }
+        _ => {}
+    }
+    match scene {
         Scene::Rain => {
-            cloud(
-                &painter,
-                origin + Vec2::new(0.0, -0.02 * r),
-                r,
-                Color32::from_rgb(0xd5, 0xdc, 0xe2),
-            );
-            for i in 0..4 {
-                let x = (i as f32 - 1.5) * 0.03 * r;
+            for (dx, dy) in [
+                (-0.3, -0.2),
+                (-0.1, -0.35),
+                (0.12, -0.18),
+                (0.28, -0.32),
+                (0.02, -0.48),
+                (-0.22, -0.5),
+            ] {
+                let at = center + Vec2::new(dx * aperture, dy * aperture);
                 painter.line_segment(
-                    [
-                        origin + Vec2::new(x, 0.04 * r),
-                        origin + Vec2::new(x - 0.01 * r, 0.09 * r),
-                    ],
-                    Stroke::new(1.4, Color32::from_rgb(0x7e, 0xb6, 0xd8)),
+                    [at, at + Vec2::new(-0.012 * radius, 0.06 * radius)],
+                    Stroke::new(1.3, Color32::from_rgb(0x9e, 0xc4, 0xdc)),
                 );
             }
         }
         Scene::Snow => {
-            cloud(
-                &painter,
-                origin + Vec2::new(0.0, -0.03 * r),
-                r,
-                Color32::from_rgb(0xee, 0xf2, 0xf4),
-            );
-            for (i, (dx, dy)) in [(0.0, 0.05), (-0.04, 0.08), (0.045, 0.075), (0.01, 0.1)]
-                .iter()
-                .enumerate()
+            for (i, (dx, dy)) in [
+                (-0.32, -0.22),
+                (-0.14, -0.4),
+                (0.02, -0.18),
+                (0.2, -0.34),
+                (0.36, -0.16),
+                (-0.24, -0.52),
+                (0.1, -0.5),
+                (-0.04, -0.3),
+            ]
+            .iter()
+            .enumerate()
             {
                 paint_disc(
                     &painter,
-                    origin + Vec2::new(*dx * r, *dy * r),
-                    0.012 * r + (i as f32) * 0.001 * r,
-                    8,
+                    center + Vec2::new(dx * aperture, dy * aperture),
+                    0.01 * radius + (i as f32 % 3.0) * 0.003 * radius,
+                    6,
                     |_| Color32::WHITE,
                 );
             }
         }
         Scene::Storm => {
-            cloud(&painter, origin, r, Color32::from_rgb(0x6a, 0x74, 0x82));
+            let at = center + Vec2::new(0.05 * aperture, -0.25 * aperture);
             painter.line_segment(
-                [
-                    origin + Vec2::new(0.01 * r, 0.02 * r),
-                    origin + Vec2::new(-0.02 * r, 0.09 * r),
-                ],
+                [at, at + Vec2::new(-0.04 * radius, 0.1 * radius)],
                 Stroke::new(2.0, Color32::from_rgb(0xff, 0xe0, 0x6a)),
             );
         }
+        _ => {}
     }
-    let title = weather.temperature_text();
-    painter.text(
-        origin + Vec2::new(0.0, 0.13 * r),
-        Align2::CENTER_TOP,
-        title,
-        FontId::new(0.07 * r, serif()),
-        ink,
-    );
-    painter.text(
-        origin + Vec2::new(0.0, -0.14 * r),
-        Align2::CENTER_BOTTOM,
-        weather.condition.clone(),
-        FontId::new(0.038 * r, serif()),
-        ink,
-    );
 }
 
 fn scene_now(weather: &WeatherReport, now: DateTime<Local>) -> Scene {
@@ -506,30 +576,67 @@ fn paint_moon_disc(painter: &Painter, center: Pos2, radius: f32, phase: f64) {
     });
 }
 
+fn quarter_clip(center: Pos2, radius: f32, left: bool) -> Rect {
+    let aperture = APERTURE_R * radius;
+    let (x0, x1) = if left {
+        (center.x - aperture, center.x)
+    } else {
+        (center.x, center.x + aperture)
+    };
+    Rect::from_min_max(Pos2::new(x0, center.y), Pos2::new(x1, center.y + aperture))
+}
+
 fn paint_date_words(painter: &Painter, center: Pos2, radius: f32, now: DateTime<Local>) {
-    let origin = center + direction(180.0) * (0.38 * radius);
+    let painter = painter.with_clip_rect(quarter_clip(center, radius, true));
+    let origin = center + direction(225.0) * (0.36 * radius);
     let color = Color32::from_rgb(0x3a, 0x28, 0x16);
     let weekday = weekday_name(now.weekday().num_days_from_monday());
     let month = month_name(now.month());
     painter.text(
-        origin + Vec2::new(0.0, -0.07 * radius),
+        origin + Vec2::new(0.0, -0.055 * radius),
         Align2::CENTER_CENTER,
         weekday,
-        FontId::new(0.055 * radius, serif()),
+        FontId::new(0.042 * radius, serif()),
         color,
     );
     painter.text(
         origin,
         Align2::CENTER_CENTER,
         month,
-        FontId::new(0.05 * radius, serif()),
+        FontId::new(0.04 * radius, serif()),
         color,
     );
     painter.text(
-        origin + Vec2::new(0.0, 0.08 * radius),
+        origin + Vec2::new(0.0, 0.06 * radius),
         Align2::CENTER_CENTER,
         now.day().to_string(),
-        FontId::new(0.09 * radius, serif()),
+        FontId::new(0.07 * radius, serif()),
+        color,
+    );
+}
+
+fn paint_condition_words(
+    painter: &Painter,
+    center: Pos2,
+    radius: f32,
+    weather: &WeatherReport,
+    _now: DateTime<Local>,
+) {
+    let painter = painter.with_clip_rect(quarter_clip(center, radius, false));
+    let origin = center + direction(135.0) * (0.36 * radius);
+    let color = Color32::from_rgb(0x3a, 0x28, 0x16);
+    painter.text(
+        origin + Vec2::new(0.0, -0.02 * radius),
+        Align2::CENTER_CENTER,
+        weather.temperature_text(),
+        FontId::new(0.055 * radius, serif()),
+        color,
+    );
+    painter.text(
+        origin + Vec2::new(0.0, 0.045 * radius),
+        Align2::CENTER_CENTER,
+        weather.condition.clone(),
+        FontId::new(0.034 * radius, serif()),
         color,
     );
 }
@@ -546,11 +653,19 @@ fn paint_aperture_rims(painter: &Painter, center: Pos2, radius: f32) {
         width,
         brass,
     );
-    for deg in [0.0, 90.0, 270.0] {
-        let inner = center + direction(deg) * (0.12 * radius);
-        let outer = center + direction(deg) * (APERTURE_R * radius);
-        painter.line_segment([inner, outer], Stroke::new(width, brass));
-    }
+    let aperture = APERTURE_R * radius;
+    // Horizon across the 9–3 line, and the divider between the two lower quarters.
+    painter.line_segment(
+        [
+            Pos2::new(center.x - aperture, center.y),
+            Pos2::new(center.x + aperture, center.y),
+        ],
+        Stroke::new(width, brass),
+    );
+    painter.line_segment(
+        [center, center + direction(180.0) * aperture],
+        Stroke::new(width, brass),
+    );
 }
 
 fn paint_boxes(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {

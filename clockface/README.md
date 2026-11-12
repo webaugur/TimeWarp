@@ -1,6 +1,6 @@
 # clockface
 
-Roman-numeral grandfather clock for a Raspberry Pi. The dial is polished brass. Three apertures in the face show the weather, the moon, and the date. Two mural wheels turn behind the dial (the year, and the civil day). Under them are a calendar, a forecast, and sun and moon times, with a status line pinned to the bottom of the screen. The three frames together are exactly as wide as the face.
+Roman-numeral grandfather clock for a Raspberry Pi. The dial is polished brass. The upper half of the face is a horizon: one sky for the time of day and the weather, with the date and the temperature in the two lower quarters. Two mural wheels turn behind the dial (the year, and the civil day). Under them are a calendar, a forecast, and sun and moon times, with a status line pinned to the bottom of the screen. The three frames together are exactly as wide as the face.
 
 Time comes from `chrono::Local`, so the zoneinfo rules on the machine apply, including DST. The kiosk this replaces hardcoded EDT (UTC−4).
 
@@ -11,9 +11,9 @@ The painter is shared. The default build opens it in an eframe window (X11 or Wa
 Lengths below are fractions of the face radius. Angles are clockwise from 12. Everything is positioned from the clock center, so changing the diameter or the center moves the complications with the face. Hands, numerals, ticks, and the brass ring are painted after the discs they cross.
 
 - **Brass dial.** A polished dish: tight specular, a softer reflection, turned rings, and a round bezel. Hour markers are raised gold pins. Minute ticks stay dark red. Numerals are solid black. The hour and minute hands are black; the second hand is red. The window and `--screenshot` fill the same mesh, so the metal and the pin length match.
-- **Weather** (upper left, 9 o'clock to 12). Temperature, a short condition, and a small scene (sun, cloud, rain, snow, or night).
-- **Moon** (upper right, 12 to 3). Northern hemisphere. Waxing lights the right side of the disc. The phase is the mean age since the new moon of 2000-01-06 18:14 UTC, using a synodic month of 29.530588853 days. It is a mean-phase clock, not a full lunar ephemeris.
-- **Date** (lower half, 3 o'clock through 6 to 9). Weekday, month, and day, on a cream complication disc.
+- **Horizon** (upper half, sitting on the 9–3 line). One sky, not two quarters. Day, twilight, and night move the sun and the color of the sky. Weather is in the scene: cloud, rain, snow, storm, or fog. The moon is drawn in that sky when the sun is low. Northern hemisphere: waxing lights the right side. The phase is the mean age since the new moon of 2000-01-06 18:14 UTC, using a synodic month of 29.530588853 days. It is a mean-phase clock, not a full lunar ephemeris.
+- **Date** (lower left, 6 to 9). Weekday, month, and day, on a cream complication disc.
+- **Temperature** (lower right, 3 to 6). The reading and the condition name, on a matching cream disc.
 - **Year wheel** (lower left). The window is the square corner outside the dial, between the 9 o'clock tangent and the 6 o'clock tangent. The mural is still a disc on the shaft and turns once per tropical year. The middle of the window shows the current day of the year, blended between the solstices and equinoxes, so the season eases instead of jumping.
 - **Sky wheel** (lower right). The mirror corner, between 3 o'clock and 6. It turns once per local civil day. The middle of the window is "now": midnight is night, dawn and dusk are the color change, noon is day.
 - **Calendar, forecast, sun and moon.** Three brass-edged panels under the wheels. Their outer edges line up with the left and right edges of the face, so the row is one face-diameter wide at any diameter. Sun and moon times are computed on the machine (NOAA sunrise equation). They are shown in the system timezone, which should be the place's zone.
