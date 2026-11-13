@@ -5,6 +5,7 @@
 //! from the timeanddate.com script the MagicMirror kiosk used to embed.
 
 mod brass;
+mod cycles;
 mod draw;
 mod events;
 mod fonts;

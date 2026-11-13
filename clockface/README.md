@@ -10,7 +10,7 @@ The painter is shared. The default build opens it in an eframe window (X11 or Wa
 
 Lengths below are fractions of the face radius. Angles are clockwise from 12. Everything is positioned from the clock center, so changing the diameter or the center moves the complications with the face. Hands, numerals, ticks, and the brass ring are painted after the discs they cross.
 
-- **Brass dial.** A polished dish: tight specular, a softer reflection, turned rings, and a round bezel. Hour markers are raised gold pins. Minute ticks stay dark red. Numerals are solid black. The hour and minute hands are black; the second hand is red. The window and `--screenshot` fill the same mesh, so the metal and the pin length match.
+- **Brass dial.** A polished dish: tight specular, a softer reflection, turned rings, and a round bezel. Hour markers and the other 5-minute marks are raised gold pins. The 1-minute marks take the Cycles of Life color for the present standard-time period (below). Numerals are solid black. The hour and minute hands are black; the second hand is red. The window and `--screenshot` fill the same mesh, so the metal and the pin length match.
 - **Horizon** (upper half, sitting on the 9–3 line). One sky, not two quarters. Day, twilight, and night move the sun and the color of the sky. Weather is in the scene: cloud, rain, snow, storm, or fog. The moon is drawn in that sky when the sun is low. Northern hemisphere: waxing lights the right side. The phase is the mean age since the new moon of 2000-01-06 18:14 UTC, using a synodic month of 29.530588853 days. It is a mean-phase clock, not a full lunar ephemeris.
 - **Date** (lower left, 6 to 9). Weekday, month, and day, on a cream complication disc.
 - **Temperature** (lower right, 3 to 6). The reading and the condition name, on a matching cream disc.
@@ -18,6 +18,24 @@ Lengths below are fractions of the face radius. Angles are clockwise from 12. Ev
 - **Sky wheel** (lower right). The mirror corner, between 3 o'clock and 6. It turns once per local civil day. The middle of the window is "now": midnight is night, dawn and dusk are the color change, noon is day.
 - **Calendar, forecast, sun and moon.** Three brass-edged panels under the wheels. Their outer edges line up with the left and right edges of the face, so the row is one face-diameter wide at any diameter. Sun and moon times are computed on the machine (NOAA sunrise equation). They are shown in the system timezone, which should be the place's zone.
 - **Status bar.** Hostname, local addresses, and whether `timedatectl` reports the clock in sync. A failed weather fetch is prefixed on that line. Addresses that cannot be read are said to be missing; none are invented.
+
+## Cycles of Life colors
+
+The 1-minute marks use H. Spencer Lewis's daily cycle from *Self-Mastery and Fate with the Cycles of Life* (AMORC, 1929), Chart E. The day is seven equal parts from midnight to midnight (about 3 h 25 min 43 s: 00:00, 03:25, 06:51, 10:17, 13:42, 17:08, 20:34). Lewis says to use local standard time and to ignore daylight saving. Chart E gives each period a letter, and the letter changes with the weekday. Thursday 10:08, the `--screenshot` hour, is the third period and the letter G.
+
+Lewis prints no pigments. The color is the planet of that letter, in the order his cycle is built on (A Sun, B Venus, C Mercury, D Moon, E Saturn, F Jupiter, G Mars), using Max Heindel's planet colors from *The Message of the Stars* (1918), the table on p. 64:
+
+| Letter | Planet | Color |
+| --- | --- | --- |
+| A | Sun | orange |
+| B | Venus | yellow |
+| C | Mercury | violet |
+| D | Moon | green |
+| E | Saturn | indigo |
+| F | Jupiter | blue |
+| G | Mars | red |
+
+The screenshot frame is period G, so those marks are red. The 5-minute marks stay gold.
 
 ## Build on Raspberry Pi OS 64-bit
 

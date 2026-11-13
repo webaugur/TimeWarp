@@ -216,7 +216,13 @@ pub(crate) fn paint_markings_and_hands(
 ) {
     let r = diameter * 0.5;
     paint_inner_ring(painter, center, r, &style);
-    paint_ticks(painter, center, r, &style);
+    paint_ticks(
+        painter,
+        center,
+        r,
+        &style,
+        crate::cycles::minute_tick_color(now),
+    );
     paint_numerals(painter, center, r, &style);
     let (hour, minute, second) = hand_angles(now, &style);
     // Hour, then minute, then second, so the second hand (and its cap) is on top.
@@ -286,17 +292,25 @@ fn paint_inner_ring(painter: &Painter, center: Pos2, r: f32, style: &RomanClockS
     );
 }
 
-fn paint_ticks(painter: &Painter, center: Pos2, r: f32, style: &RomanClockStyle) {
+fn paint_ticks(
+    painter: &Painter,
+    center: Pos2,
+    r: f32,
+    style: &RomanClockStyle,
+    minute_color: Color32,
+) {
+    let mut minute = style.minute_tick;
+    minute.color = minute_color;
     for step in 0..60 {
         let degrees = step as f32 * 6.0;
-        // Quarters a little brighter than the other hour markers. Both are gold.
-        // Minute ticks stay dark red.
+        // Every fifth mark, including the quarters, stays a gold pin.
+        // The marks between them take the Cycles of Life color for this hour.
         let (tick, metal) = if step % 15 == 0 {
             (&style.quarter_tick, Some(1.06))
         } else if step % 5 == 0 {
             (&style.hour_tick, Some(1.0))
         } else {
-            (&style.minute_tick, None)
+            (&minute, None)
         };
         paint_teardrop(painter, center, r, degrees, tick, metal);
     }

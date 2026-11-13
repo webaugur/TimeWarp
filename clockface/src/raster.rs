@@ -526,6 +526,20 @@ mod tests {
             black > 40,
             "XII should be solid black, found {black} pixels"
         );
+        // 1-minute mark at 6°, the Mars red of Thursday's third period (Chart E letter G).
+        let minute_tick = at_pos(
+            &rgba,
+            width,
+            height,
+            center + direction(6.0) * (style.minute_tick.distance * r),
+        );
+        assert!(
+            minute_tick[0] > 160
+                && minute_tick[0] as i32 > minute_tick[1] as i32 + 60
+                && minute_tick[0] as i32 > minute_tick[2] as i32 + 60,
+            "1-minute tick should be Mars red, got {minute_tick:?}"
+        );
+
         // Head and tail of the same pin. The tail is the part that vanished into
         // the brass and made the screenshot look like a short nub.
         for (degrees, dist) in [
