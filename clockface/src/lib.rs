@@ -13,6 +13,7 @@ mod kiosk;
 mod layout;
 mod raster;
 mod roman;
+mod scene;
 mod settings;
 mod sky;
 mod status;
