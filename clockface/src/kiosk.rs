@@ -17,7 +17,8 @@ use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Stroke, Vec
 use crate::brass::{mix, shade_bezel};
 use crate::draw::{paint_pie, stroke_arc};
 use crate::events::{self, CalendarEvent};
-use crate::layout::{self, KioskLayout, APERTURE_R, SKY_WEDGE, YEAR_WEDGE};
+use crate::layout::{KioskLayout, APERTURE_R, SKY_WEDGE, YEAR_WEDGE};
+use crate::matrix;
 use crate::mural;
 use crate::roman::{self, direction};
 use crate::scene;
@@ -234,86 +235,60 @@ fn paint_aperture_rims(painter: &Painter, center: Pos2, radius: f32) {
 }
 
 fn paint_boxes(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
+    let pitch = matrix::frame_pitch(layout.radius);
     for (index, panel) in layout.boxes.iter().enumerate() {
-        paint_panel(painter, *panel);
-        let inner = painter.with_clip_rect(inset(*panel, 1.0));
-        let body_top = panel.top() + 2.0;
+        matrix::paint_board(painter, *panel, pitch);
+        let origin = Pos2::new(panel.left() + pitch, panel.top() + pitch);
         match index {
-            0 => paint_calendar(&inner, *panel, body_top, layout.radius, model),
-            1 => paint_forecast(&inner, *panel, body_top, layout.radius, model),
-            _ => paint_sun(&inner, *panel, body_top, layout.radius, model),
+            0 => paint_calendar(painter, *panel, origin, pitch, model),
+            1 => paint_forecast(painter, *panel, origin, pitch, model),
+            _ => paint_sun(painter, *panel, origin, pitch, model),
         }
     }
 }
 
-fn paint_calendar(painter: &Painter, panel: Rect, top: f32, radius: f32, model: &KioskModel) {
+fn paint_calendar(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, model: &KioskModel) {
     let today = model.now.date_naive();
     let rows = events::upcoming(&model.events, today, 4);
-    let size = (0.052 * radius).clamp(15.0, 19.0);
-    let width = (panel.width() - 6.0).max(40.0);
-    let left = panel.left() + 3.0;
+    let mut y = origin.y;
     if rows.is_empty() {
-        paint_wrapped(
+        matrix::paint_text(
             painter,
-            Pos2::new(left, top),
-            width,
+            panel,
+            Pos2::new(origin.x, y),
+            pitch,
             "\u{1F4C5} Nothing on the calendar",
-            size,
-            INK,
         );
         return;
     }
-    let mut y = top;
     for event in rows.iter().take(4) {
-        let title = paint_wrapped(
-            painter,
-            Pos2::new(left, y),
-            width,
-            &format!(
-                "{} {}",
-                events::event_mark(&event.title, &event.time),
-                event.title
-            ),
-            size,
-            INK,
+        let title = format!(
+            "{} {}",
+            events::event_mark(&event.title, &event.time),
+            event.title
         );
-        y += title.height();
+        y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, &title);
         let when = if event.time.is_empty() || event.time.eq_ignore_ascii_case("all day") {
             events::short_when(event)
         } else {
             format!("\u{23F3} {}", events::short_when(event))
         };
-        let drawn = paint_wrapped(
-            painter,
-            Pos2::new(left, y),
-            width,
-            &when,
-            size * 0.86,
-            INK_DIM,
-        );
-        y += drawn.height() + size * 0.16;
+        y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, &when);
+        y += pitch;
     }
 }
 
-fn paint_forecast(painter: &Painter, panel: Rect, top: f32, radius: f32, model: &KioskModel) {
-    let size = (0.050 * radius).clamp(15.0, 18.0);
-    let left = panel.left() + 3.0;
+fn paint_forecast(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, model: &KioskModel) {
     if model.weather.daily.is_empty() {
-        painter.text(
-            Pos2::new(left, top),
-            Align2::LEFT_TOP,
-            "Forecast unavailable",
-            FontId::new(size, serif()),
-            INK,
-        );
+        matrix::paint_text(painter, panel, origin, pitch, "Forecast unavailable");
         return;
     }
-    for (i, day) in model.weather.daily.iter().take(5).enumerate() {
-        let y = top + i as f32 * (size + 2.0);
+    let mut y = origin.y;
+    for day in model.weather.daily.iter().take(5) {
         let mark = weather::condition_mark(day.code);
         let line = if mark.is_empty() {
             format!(
-                "{}   {}   {:.0}°/{:.0}°",
+                "{}  {}  {:.0}°/{:.0}°",
                 weather::weekday_short(&day.date),
                 brief_condition(day.code),
                 day.high,
@@ -321,25 +296,18 @@ fn paint_forecast(painter: &Painter, panel: Rect, top: f32, radius: f32, model: 
             )
         } else {
             format!(
-                "{mark} {}   {}   {:.0}°/{:.0}°",
+                "{mark} {}  {}  {:.0}°/{:.0}°",
                 weather::weekday_short(&day.date),
                 brief_condition(day.code),
                 day.high,
                 day.low,
             )
         };
-        painter.text(
-            Pos2::new(left, y),
-            Align2::LEFT_TOP,
-            line,
-            FontId::new(size, serif()),
-            INK,
-        );
+        y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, &line);
     }
 }
 
-fn paint_sun(painter: &Painter, panel: Rect, top: f32, radius: f32, model: &KioskModel) {
-    let size = (0.052 * radius).clamp(15.0, 19.0);
+fn paint_sun(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, model: &KioskModel) {
     let date = model.now.date_naive();
     let sun = sky::sun_times(date, model.place.latitude, model.place.longitude);
     let (rise, set) = match sun {
@@ -355,50 +323,20 @@ fn paint_sun(painter: &Painter, panel: Rect, top: f32, radius: f32, model: &Kios
         format!("\u{1F31E} {}", season_name(date)),
         format!("\u{1F319} {}", moon_name(sky::moon_phase(model.now))),
     ];
-    let width = (panel.width() - 6.0).max(8.0);
-    let mut y = top;
+    let mut y = origin.y;
     for line in &lines {
-        let drawn = paint_wrapped(
-            painter,
-            Pos2::new(panel.left() + 3.0, y),
-            width,
-            line,
-            size,
-            INK,
-        );
-        y = drawn.bottom() + 2.0;
+        y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, line);
     }
 }
 
 fn paint_status(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
     let bar = layout.status;
-    painter.rect_filled(bar, 0.0, Color32::from_rgb(0x2a, 0x1c, 0x12));
-    let size = layout::status_font_size(layout.radius);
-    let width = (bar.width() - 6.0).max(8.0);
-    let galley = painter.layout(model.status.text(), FontId::new(size, serif()), INK, width);
-    let y = bar.top() + ((bar.height() - galley.size().y) * 0.5).max(1.0);
-    painter.galley(Pos2::new(bar.left() + 3.0, y), galley, INK);
-}
-
-fn paint_panel(painter: &Painter, rect: Rect) {
-    painter.rect_filled(rect, 0.0, Color32::from_rgb(0x1a, 0x12, 0x0c));
-}
-
-const INK: Color32 = Color32::from_rgb(0xff, 0xf8, 0xea);
-const INK_DIM: Color32 = Color32::from_rgb(0xf3, 0xdc, 0xa8);
-
-fn paint_wrapped(
-    painter: &Painter,
-    pos: Pos2,
-    width: f32,
-    text: &str,
-    size: f32,
-    color: Color32,
-) -> Rect {
-    let galley = painter.layout(text.to_owned(), FontId::new(size, serif()), color, width);
-    let rect = Rect::from_min_size(pos, galley.size());
-    painter.galley(pos, galley, color);
-    rect
+    let text = model.status.text();
+    let cap = ((bar.height() - 4.0) / 8.0).clamp(1.4, 2.4);
+    let pitch = matrix::pitch_to_fit(&text, bar.width() - 8.0, cap);
+    matrix::paint_board(painter, bar, pitch);
+    let y = bar.center().y - pitch * 3.5;
+    matrix::paint_text(painter, bar, Pos2::new(bar.left() + pitch, y), pitch, &text);
 }
 
 fn brief_condition(code: i32) -> &'static str {
@@ -432,13 +370,6 @@ fn moon_name(phase: f64) -> &'static str {
     } else {
         "waning crescent"
     }
-}
-
-fn inset(rect: Rect, margin: f32) -> Rect {
-    Rect::from_min_max(
-        rect.min + Vec2::splat(margin),
-        rect.max - Vec2::splat(margin),
-    )
 }
 
 fn serif() -> FontFamily {
