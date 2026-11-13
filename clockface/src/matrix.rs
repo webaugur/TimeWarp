@@ -12,8 +12,11 @@ const BOARD: Color32 = Color32::from_rgb(0x07, 0x09, 0x10);
 const UNLIT: Color32 = Color32::from_rgb(0x2a, 0x31, 0x3c);
 
 /// Lamp pitch for the info frames. A glyph is 5×7 lamps, so the cap height is `7 * pitch`.
+///
+/// About 18% under the previous pitch, so a line holds more letters and the
+/// forecast is less likely to wrap off the bottom of the board.
 pub fn frame_pitch(radius: f32) -> f32 {
-    (0.060 * radius / 7.0).clamp(2.2, 3.3)
+    (0.049 * radius / 7.0).clamp(1.8, 2.7)
 }
 
 pub fn paint_board(painter: &Painter, rect: Rect, pitch: f32) {
@@ -399,9 +402,9 @@ mod tests {
     }
 
     #[test]
-    fn frame_pitch_is_about_a_nineteen_pixel_cap_on_the_screenshot_face() {
+    fn frame_pitch_is_about_a_sixteen_pixel_cap_on_the_screenshot_face() {
         let pitch = frame_pitch(321.6);
         let cap = pitch * 7.0;
-        assert!((17.0..23.0).contains(&cap), "cap height {cap}");
+        assert!((15.0..17.0).contains(&cap), "cap height {cap}");
     }
 }
