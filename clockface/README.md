@@ -10,7 +10,7 @@ The painter is shared. The default build opens it in an eframe window (X11 or Wa
 
 Lengths below are fractions of the face radius. Angles are clockwise from 12. Everything is positioned from the clock center, so changing the diameter or the center moves the complications with the face. Hands, numerals, ticks, and the brass ring are painted after the discs they cross.
 
-- **Brass dial.** A polished dish: tight specular, a softer reflection, turned rings, and a round bezel. Hour markers and the other 5-minute marks are raised gold pins. The 1-minute marks take the Cycles of Life color for the present standard-time period (below). Numerals are solid black. The hour and minute hands are black; the second hand is red. The window and `--screenshot` fill the same mesh, so the metal and the pin length match.
+- **Brass dial.** A polished dish: tight specular, a softer reflection, turned rings, and a round bezel. Hour markers and the other 5-minute marks are raised gold pins. The 1-minute marks take the Cycles of Life color of the time that mark stands for on this half-day (below). Numerals are solid black. The hour and minute hands are black; the second hand is red. The window and `--screenshot` fill the same mesh, so the metal and the pin length match.
 - **Horizon** (upper half, sitting on the 9–3 line). One sky, not two quarters. It is a layered SVG theme (`scenes/default/`), not a painted gradient. The trunk stays up; leaves, ground, sky, sun, stars, clouds, rain, snow, storm, and fog are groups the clock shows or hides. How to draw another theme is in [scenes/CREATING_A_THEME.md](scenes/CREATING_A_THEME.md). The moon is a solid shaded disc in that sky at 45° from 12, with the phase for the current time. The unlit side is a darkened surface, day and night, so the sky does not show through it. Northern hemisphere: waxing lights the right side. The phase is the mean age since the new moon of 2000-01-06 18:14 UTC, using a synodic month of 29.530588853 days. It is a mean-phase clock, not a full lunar ephemeris.
 - **Date** (lower left, 6 to 9). Weekday, month, and day, on a cream complication disc.
 - **Temperature** (lower right, 3 to 6). The reading and the condition name, on a matching cream disc.
@@ -21,7 +21,7 @@ Lengths below are fractions of the face radius. Angles are clockwise from 12. Ev
 
 ## Cycles of Life colors
 
-The 1-minute marks use H. Spencer Lewis's daily cycle from *Self-Mastery and Fate with the Cycles of Life* (AMORC, 1929), Chart E. The day is seven equal parts from midnight to midnight (about 3 h 25 min 43 s: 00:00, 03:25, 06:51, 10:17, 13:42, 17:08, 20:34). Lewis says to use local standard time and to ignore daylight saving. Chart E gives each period a letter, and the letter changes with the weekday. Thursday 10:08, the `--screenshot` hour, is the third period and the letter G.
+The 1-minute marks use H. Spencer Lewis's daily cycle from *Self-Mastery and Fate with the Cycles of Life* (AMORC, 1929), Chart E. The day is seven equal parts from midnight to midnight (about 3 h 25 min 43 s: 00:00, 03:25, 06:51, 10:17, 13:42, 17:08, 20:34). Lewis says to use local standard time and to ignore daylight saving. Chart E gives each period a letter, and the letter changes with the weekday. The dial shows the civil half the hour hand is in, midnight to noon or noon to midnight. Each of the 60 marks is a 12-minute slice of that half, colored by the slice's midpoint. Thursday 10:08, the `--screenshot` hour, is itself the third period and the letter G, but the morning ring also carries the periods before and after it.
 
 Lewis prints no pigments. The color is the planet of that letter, in the order his cycle is built on (A Sun, B Venus, C Mercury, D Moon, E Saturn, F Jupiter, G Mars), using Max Heindel's planet colors from *The Message of the Stars* (1918), the table on p. 64:
 
@@ -35,7 +35,7 @@ Lewis prints no pigments. The color is the planet of that letter, in the order h
 | F | Jupiter | blue |
 | G | Mars | red |
 
-The screenshot frame is period G, so those marks are red. The 5-minute marks stay gold.
+On the Thursday 10:08 screenshot the morning ring runs Saturn indigo from 12 to just past 3, Jupiter blue until just past 6, Mars red until 10, and Sun orange from there back to 12. The 5-minute marks stay gold.
 
 ## Build on Raspberry Pi OS 64-bit
 

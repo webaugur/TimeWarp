@@ -526,18 +526,29 @@ mod tests {
             black > 40,
             "XII should be solid black, found {black} pixels"
         );
-        // 1-minute mark at 6°, the Mars red of Thursday's third period (Chart E letter G).
-        let minute_tick = at_pos(
+        // Thursday morning: the mark just past 12 is Saturn indigo, and the
+        // mark at 216° (36 minutes) is still Mars red.
+        let early = at_pos(
             &rgba,
             width,
             height,
             center + direction(6.0) * (style.minute_tick.distance * r),
         );
         assert!(
-            minute_tick[0] > 160
-                && minute_tick[0] as i32 > minute_tick[1] as i32 + 60
-                && minute_tick[0] as i32 > minute_tick[2] as i32 + 60,
-            "1-minute tick should be Mars red, got {minute_tick:?}"
+            early[2] > early[0] && early[2] > early[1] && early[2] > 40,
+            "1-minute tick past 12 should be Saturn indigo, got {early:?}"
+        );
+        let mars = at_pos(
+            &rgba,
+            width,
+            height,
+            center + direction(216.0) * (style.minute_tick.distance * r),
+        );
+        assert!(
+            mars[0] > 160
+                && mars[0] as i32 > mars[1] as i32 + 60
+                && mars[0] as i32 > mars[2] as i32 + 60,
+            "1-minute tick at 216° should be Mars red, got {mars:?}"
         );
 
         // Head and tail of the same pin. The tail is the part that vanished into

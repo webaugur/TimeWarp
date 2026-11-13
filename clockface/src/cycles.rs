@@ -76,6 +76,68 @@ pub fn minute_tick_color(now: DateTime<Local>) -> Color32 {
     color_for_letter(letter_at(now))
 }
 
+/// Letter for one 1-minute mark on the 12-hour dial.
+///
+/// The dial is the civil half the hour hand is in: midnight–noon before noon,
+/// noon–midnight after. Mark `step` (0 at 12, clockwise) covers the 12 minutes
+/// that begin `step * 12` minutes into that half. A slice that crosses a period
+/// boundary takes the period of its midpoint, six minutes in. Daylight saving is
+/// removed before the period is chosen, and a midpoint that falls on the previous
+/// or next standard day uses that day's Chart E row.
+pub fn tick_letter(now: DateTime<Local>, step: u32) -> char {
+    let pm = now.hour() >= 12;
+    tick_period_letter(now.weekday(), pm, step, dst_at_tick(now, pm, step))
+}
+
+/// Chart E letter for minute-mark `step` of one half-day.
+///
+/// `dst_advance_secs` is the civil clock's lead over local standard time
+/// (0 in winter and in zones with no daylight saving, 3600 during summer time).
+pub fn tick_period_letter(weekday: Weekday, pm: bool, step: u32, dst_advance_secs: i32) -> char {
+    let half = if pm { 12 * 3600 } else { 0 };
+    let midpoint = i64::from(half) + i64::from(step) * 12 * 60 + 6 * 60;
+    let shifted = midpoint - i64::from(dst_advance_secs);
+    let day_shift = if shifted < 0 {
+        -1
+    } else if shifted >= 86_400 {
+        1
+    } else {
+        0
+    };
+    let secs = shifted.rem_euclid(86_400) as u32;
+    chart_e_letter(shift_weekday(weekday, day_shift), period_index(secs))
+}
+
+/// Heindel color of minute-mark `step` for the half-day `now` is in.
+pub fn minute_tick_color_at(now: DateTime<Local>, step: u32) -> Color32 {
+    color_for_letter(tick_letter(now, step))
+}
+
+fn dst_at_tick(now: DateTime<Local>, pm: bool, step: u32) -> i32 {
+    let half_h = if pm { 12 } else { 0 };
+    let mins = step * 12 + 6;
+    let hour = half_h + mins / 60;
+    let minute = mins % 60;
+    match Local.with_ymd_and_hms(now.year(), now.month(), now.day(), hour, minute, 0) {
+        LocalResult::Single(time) => dst_advance_seconds(time),
+        LocalResult::Ambiguous(earliest, _) => dst_advance_seconds(earliest),
+        LocalResult::None => dst_advance_seconds(now),
+    }
+}
+
+fn shift_weekday(mut weekday: Weekday, days: i32) -> Weekday {
+    let mut n = days;
+    while n > 0 {
+        weekday = weekday.succ();
+        n -= 1;
+    }
+    while n < 0 {
+        weekday = weekday.pred();
+        n += 1;
+    }
+    weekday
+}
+
 pub fn color_for_letter(letter: char) -> Color32 {
     match letter {
         'A' => Color32::from_rgb(0xFF, 0x8C, 0x00), // Sun, orange
@@ -135,5 +197,52 @@ mod tests {
         assert_eq!(letter_at(now), 'G');
         let color = minute_tick_color(now);
         assert_eq!(color, Color32::from_rgb(0xD0, 0x22, 0x22));
+    }
+
+    #[test]
+    fn morning_dial_uses_each_ticks_own_period() {
+        // Thursday 10:08 is the morning half. Each mark is a 12-minute slice
+        // from midnight, colored by the slice's midpoint. The 17th mark
+        // straddles 06:51, and the midpoint is already in the next period.
+        let thu = Weekday::Thu;
+        assert_eq!(tick_period_letter(thu, false, 1, 0), 'E');
+        assert_eq!(tick_period_letter(thu, false, 16, 0), 'E');
+        assert_eq!(tick_period_letter(thu, false, 17, 0), 'F');
+        assert_eq!(tick_period_letter(thu, false, 33, 0), 'F');
+        assert_eq!(tick_period_letter(thu, false, 34, 0), 'G');
+        assert_eq!(tick_period_letter(thu, false, 50, 0), 'G');
+        assert_eq!(tick_period_letter(thu, false, 51, 0), 'A');
+        assert_eq!(tick_period_letter(thu, false, 59, 0), 'A');
+
+        let now = screenshot_time();
+        assert!(now.hour() < 12);
+        assert_eq!(tick_letter(now, 1), 'E');
+        assert_eq!(minute_tick_color_at(now, 1), color_for_letter('E'));
+        assert_eq!(minute_tick_color_at(now, 34), color_for_letter('G'));
+        assert_eq!(minute_tick_color_at(now, 51), color_for_letter('A'));
+        let letters: Vec<char> = (0..60).map(|step| tick_letter(now, step)).collect();
+        let distinct = {
+            let mut seen = letters.clone();
+            seen.sort_unstable();
+            seen.dedup();
+            seen.len()
+        };
+        assert!(
+            distinct >= 3,
+            "morning ring should cross at least three periods, got {letters:?}"
+        );
+    }
+
+    #[test]
+    fn daylight_saving_shifts_the_tick_into_standard_time() {
+        // Thursday 14:18 civil is period 4, letter B. An hour of daylight
+        // saving makes that same midpoint 13:18 standard time, still period 3,
+        // letter A. Just after civil midnight, the same hour belongs to
+        // Wednesday evening.
+        assert_eq!(tick_period_letter(Weekday::Thu, true, 11, 0), 'B');
+        assert_eq!(tick_period_letter(Weekday::Thu, true, 11, 3600), 'A');
+        // Civil 00:06 Thursday minus one hour of daylight saving is 23:06 Wednesday.
+        assert_eq!(tick_period_letter(Weekday::Thu, false, 0, 3600), 'A');
+        assert_eq!(tick_period_letter(Weekday::Wed, true, 59, 0), 'A');
     }
 }
