@@ -257,6 +257,7 @@ fn paint_calendar(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, mode
             Pos2::new(origin.x, y),
             pitch,
             "\u{1F4C5} Nothing on the calendar",
+            2,
         );
         return;
     }
@@ -266,44 +267,27 @@ fn paint_calendar(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, mode
             events::event_mark(&event.title, &event.time),
             event.title
         );
-        y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, &title);
+        y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, &title, 2);
         let when = if event.time.is_empty() || event.time.eq_ignore_ascii_case("all day") {
             events::short_when(event)
         } else {
             format!("\u{23F3} {}", events::short_when(event))
         };
-        y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, &when);
+        // The date sits under the title, inset like a wrapped continuation.
+        y = matrix::paint_text(
+            painter,
+            panel,
+            Pos2::new(origin.x + matrix::hang(pitch), y),
+            pitch,
+            &when,
+            0,
+        );
         y += pitch;
     }
 }
 
 fn paint_forecast(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, model: &KioskModel) {
     let mut y = origin.y;
-    if model.weather.daily.is_empty() {
-        y = matrix::paint_text(painter, panel, origin, pitch, "Forecast unavailable");
-    }
-    for day in model.weather.daily.iter().take(5) {
-        let mark = weather::condition_mark(day.code);
-        let line = if mark.is_empty() {
-            format!(
-                "{} {} {:.0}°/{:.0}°",
-                weather::weekday_short(&day.date),
-                brief_condition(day.code),
-                day.high,
-                day.low,
-            )
-        } else {
-            format!(
-                "{mark} {} {} {:.0}°/{:.0}°",
-                weather::weekday_short(&day.date),
-                brief_condition(day.code),
-                day.high,
-                day.low,
-            )
-        };
-        y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, &line);
-    }
-    y += pitch;
     let date = model.now.date_naive();
     let mut sky_lines = Vec::new();
     if let Some(times) = sky::sun_times(date, model.place.latitude, model.place.longitude) {
@@ -322,21 +306,53 @@ fn paint_forecast(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, mode
         moon_name(sky::moon_phase(model.now))
     ));
     let (moonrise, moonset) = sky::moon_events(date, model.place.latitude, model.place.longitude);
-    let mut moon_lines = Vec::new();
     if let Some(when) = moonrise {
-        moon_lines.push(format!("\u{2B06} Moonrise  {}", sky::format_local_hm(when)));
+        sky_lines.push(format!("\u{2B06} Moonrise  {}", sky::format_local_hm(when)));
     }
     if let Some(when) = moonset {
-        moon_lines.push(format!("\u{2B07} Moonset   {}", sky::format_local_hm(when)));
+        sky_lines.push(format!("\u{2B07} Moonset   {}", sky::format_local_hm(when)));
     }
     for line in &sky_lines {
-        y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, line);
-    }
-    for line in &moon_lines {
         if y + pitch * 7.0 > panel.bottom() {
             break;
         }
-        y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, line);
+        y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, line, 2);
+    }
+    y += pitch;
+    if model.weather.daily.is_empty() {
+        matrix::paint_text(
+            painter,
+            panel,
+            Pos2::new(origin.x, y),
+            pitch,
+            "Forecast unavailable",
+            2,
+        );
+        return;
+    }
+    for day in model.weather.daily.iter().take(5) {
+        if y + pitch * 7.0 > panel.bottom() {
+            break;
+        }
+        let mark = weather::condition_mark(day.code);
+        let line = if mark.is_empty() {
+            format!(
+                "{} {} {:.0}°/{:.0}°",
+                weather::weekday_short(&day.date),
+                brief_condition(day.code),
+                day.high,
+                day.low,
+            )
+        } else {
+            format!(
+                "{mark} {} {} {:.0}°/{:.0}°",
+                weather::weekday_short(&day.date),
+                brief_condition(day.code),
+                day.high,
+                day.low,
+            )
+        };
+        y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, &line, 2);
     }
 }
 
@@ -347,7 +363,14 @@ fn paint_status(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
     let pitch = matrix::pitch_to_fit(&text, bar.width() - 8.0, cap);
     matrix::paint_board(painter, bar, pitch);
     let y = bar.center().y - pitch * 3.5;
-    matrix::paint_text(painter, bar, Pos2::new(bar.left() + pitch, y), pitch, &text);
+    matrix::paint_text(
+        painter,
+        bar,
+        Pos2::new(bar.left() + pitch, y),
+        pitch,
+        &text,
+        0,
+    );
 }
 
 fn brief_condition(code: i32) -> &'static str {

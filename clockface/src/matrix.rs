@@ -35,8 +35,16 @@ pub fn paint_board(painter: &Painter, rect: Rect, pitch: f32) {
     }
 }
 
-/// Draw `text` on the lamp grid. ASCII letters and numbers are lamps. Any other
-/// glyph is an amber exception, the same hue as a lit lamp. Returns the y of the next row.
+/// Width of one 5×7 character cell, including the gap before the next glyph.
+pub fn cell(pitch: f32) -> f32 {
+    pitch * 6.0
+}
+
+/// Two character cells. Wrapped lines, and a calendar date under its title, start here.
+pub fn hang(pitch: f32) -> f32 {
+    cell(pitch) * 2.0
+}
+
 /// Largest pitch at which `text` fits on one row inside `width`.
 pub fn pitch_to_fit(text: &str, width: f32, max_pitch: f32) -> f32 {
     let mut pitch = max_pitch.max(1.2);
@@ -46,12 +54,28 @@ pub fn pitch_to_fit(text: &str, width: f32, max_pitch: f32) -> f32 {
     pitch
 }
 
-pub fn paint_text(painter: &Painter, bounds: Rect, origin: Pos2, pitch: f32, text: &str) -> f32 {
+/// Draw `text` on the lamp grid. ASCII letters and numbers are lamps. Any other
+/// glyph is an amber exception, the same hue as a lit lamp.
+///
+/// `hang_cells` is how far a wrapped continuation moves in from `origin`. The
+/// first line stays at `origin`. A calendar date passes an origin that is already
+/// indented and `hang_cells` of 0, so a wrap of that date stays under the date.
+/// Returns the y of the next row.
+pub fn paint_text(
+    painter: &Painter,
+    bounds: Rect,
+    origin: Pos2,
+    pitch: f32,
+    text: &str,
+    hang_cells: u32,
+) -> f32 {
     let painter = painter.with_clip_rect(bounds);
     let line = pitch * 9.0;
     let max_x = bounds.right() - pitch * 0.4;
+    let hang_x = (origin.x + hang_cells as f32 * cell(pitch)).min(max_x - cell(pitch));
     let mut x = origin.x;
     let mut y = origin.y;
+    let mut line_left = origin.x;
     let mut glow = Mesh::default();
     let mut lit = Mesh::default();
     let serif = egui::FontFamily::Name("serif".into());
@@ -59,19 +83,27 @@ pub fn paint_text(painter: &Painter, bounds: Rect, origin: Pos2, pitch: f32, tex
 
     for word in words(text) {
         let width: f32 = word.chars().map(|ch| char_width(&painter, ch, pitch)).sum();
-        if x > origin.x + 0.5 && x + width > max_x {
-            x = origin.x;
+        if x > line_left + 0.5 && x + width > max_x {
+            if word == " " {
+                y += line;
+                line_left = hang_x;
+                x = hang_x;
+                continue;
+            }
             y += line;
+            line_left = hang_x;
+            x = hang_x;
         }
         if y > bounds.bottom() {
             break;
         }
-        // A word longer than the row still breaks between lamps.
+        // A word longer than the remaining row still breaks between lamps.
         for ch in word.chars() {
             let width = char_width(&painter, ch, pitch);
-            if x > origin.x + 0.5 && x + width > max_x {
-                x = origin.x;
+            if x > line_left + 0.5 && x + width > max_x {
                 y += line;
+                line_left = hang_x;
+                x = hang_x;
             }
             if let Some(rows) = glyph(ch) {
                 stamp(&mut glow, &mut lit, Pos2::new(x, y), pitch, rows);
@@ -353,6 +385,17 @@ mod tests {
         assert_eq!(glyph(' '), Some([0; 7]));
         assert!(glyph('°').unwrap().iter().any(|row| *row != 0));
         assert!(glyph('❄').is_none());
+    }
+
+    #[test]
+    fn hanging_indent_is_two_character_cells() {
+        let pitch = frame_pitch(321.6);
+        assert!((cell(pitch) - pitch * 6.0).abs() < 1e-4);
+        assert!(
+            (hang(pitch) - cell(pitch) * 2.0).abs() < 1e-4,
+            "hang {} should be two cells",
+            hang(pitch)
+        );
     }
 
     #[test]
