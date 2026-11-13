@@ -69,6 +69,7 @@ impl KioskLayout {
         }
     }
 
+    #[allow(dead_code)]
     pub fn point(&self, degrees: f32, radius_of_face: f32) -> Pos2 {
         self.center + direction(degrees) * (radius_of_face * self.radius)
     }
@@ -126,6 +127,7 @@ pub fn fit_diameter(viewport: egui::Vec2) -> f32 {
 /// tangent, and the arc between them. The right window is the mirror. The ray length is 1 on
 /// the tangency points and `sqrt(2)` at the outer corner, so the opening squares off instead of
 /// bulging into a lobe.
+#[allow(dead_code)]
 pub fn window_outer(wedge: (f32, f32), degrees: f32) -> f32 {
     let dir = direction(degrees);
     let left = wedge.0 >= 180.0;
@@ -150,6 +152,7 @@ pub fn window_outer(wedge: (f32, f32), degrees: f32) -> f32 {
 /// `content` is the current year fraction or civil-day fraction. The center of the wedge
 /// shows that value; other angles offset by their distance from the center, one full turn
 /// of the wheel per year or per day.
+#[allow(dead_code)]
 pub fn wheel_sample(content: f32, degrees: f32, wedge: (f32, f32)) -> f32 {
     let center = wedge.0 + (wedge.1 - wedge.0) * 0.5;
     let delta = (degrees - center) / 360.0;
@@ -241,5 +244,11 @@ mod tests {
         assert!((window_outer(YEAR_WEDGE, 270.0) - 1.0).abs() < 0.03);
         let right = window_outer(SKY_WEDGE, 135.0);
         assert!((right - std::f32::consts::SQRT_2).abs() < 0.02, "{right}");
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(200.0, 200.0));
+        let layout = KioskLayout::new(screen, Pos2::new(100.0, 80.0), 60.0);
+        let corner = layout.point(225.0, 1.2);
+        assert!(corner.x < layout.center.x && corner.y > layout.center.y);
+        let shown = wheel_sample(0.04, 225.0, YEAR_WEDGE);
+        assert!((shown - 0.04).abs() < 0.001, "{shown}");
     }
 }

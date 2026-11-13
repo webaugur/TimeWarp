@@ -103,6 +103,15 @@ Seasons follow the same dates as the sun box: winter from 21 December, spring fr
 
 Draw later groups further down the file. resvg paints in document order, so snow, rain, and fog should come after the tree if they are meant to sit in front of it. In the default file the order is sky, stars, sun, clouds, storm, hills, seasonal ground, snow on the ground, trunk, leaves, rain, falling snow, fog.
 
+## The mural wheels
+
+The two windows beside the dial are separate from the horizon theme. They are discs on the same shaft, clipped to the square corners outside the brass. The art is:
+
+- `clockface/scenes/wheels/year.svg` — one turn per year. The lower-left window's center is clock angle `225 + year_fraction × 360` (clockwise from 12). Winter is drawn around 239°, then spring, summer, and autumn a quarter turn apart.
+- `clockface/scenes/wheels/day.svg` — one turn per civil day. The lower-right window's center is `135 + day_fraction × 360`. Night is around 135°, dawn around 225°, the daytime scene around 287° (that is 10:08 in the window), dusk around 45°.
+
+Face radius 1 is 353.6 px from the center of the 1000×1000 view. The dial covers the inside of that circle. Draw motifs between about 1.02 and 1.41 face radii, and make them large enough to read in the corner (a tree or a sun should be a sizable fraction of the window, not a speck on a gradient). Replacing either SVG replaces the mural. No Rust change is required if the view box and the angle layout stay the same.
+
 ## The moon
 
 Do not paint the moon in the SVG. The app draws it after the theme, at a fixed place in the aperture, so a theme cannot move it by editing the file. The phase is the mean age since the new moon of 2000-01-06 18:14 UTC (synodic month 29.530588853 days): 0 is new, 0.25 is first quarter with the right side lit, 0.5 is full, 0.75 is last quarter with the left side lit. The disc is shaded (maria, crater rims, limb darkening, and a soft terminator), not a flat two-color circle. By day the unlit side is left clear, so a crescent sits in the sky instead of a black disc. At night that side is earthshine and the whole disc stays visible.

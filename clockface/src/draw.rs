@@ -15,6 +15,7 @@ pub fn add_mesh(painter: &Painter, mesh: Mesh) {
 }
 
 /// Disc centered on `center`. `color_at` is sampled at each rim vertex and at the center.
+#[allow(dead_code)]
 pub fn paint_disc(
     painter: &Painter,
     center: Pos2,

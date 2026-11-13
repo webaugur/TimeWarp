@@ -11,6 +11,7 @@ mod events;
 mod fonts;
 mod kiosk;
 mod layout;
+mod mural;
 mod raster;
 mod roman;
 mod scene;

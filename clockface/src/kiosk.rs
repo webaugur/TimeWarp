@@ -15,9 +15,10 @@ use chrono::{DateTime, Datelike, Local};
 use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Stroke, Vec2};
 
 use crate::brass::{mix, shade_bezel};
-use crate::draw::{paint_disc, paint_pie, stroke_arc};
+use crate::draw::{paint_pie, stroke_arc};
 use crate::events::{self, CalendarEvent};
 use crate::layout::{self, KioskLayout, APERTURE_R, SKY_WEDGE, YEAR_WEDGE};
+use crate::mural;
 use crate::roman::{self, direction};
 use crate::scene;
 use crate::settings::Place;
@@ -54,22 +55,16 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
     let layout = KioskLayout::new(screen, center, diameter);
     let radius = layout.radius;
 
-    paint_wedge(painter, &layout, YEAR_WEDGE, |deg, frac| {
-        season_color(
-            layout::wheel_sample(sky::year_fraction(model.now), deg, YEAR_WEDGE),
-            frac,
-        )
-    });
-    paint_wedge(painter, &layout, SKY_WEDGE, |deg, frac| {
-        sky_color(
-            layout::wheel_sample(sky::day_fraction(model.now), deg, SKY_WEDGE),
-            frac,
-        )
-    });
+    mural::paint(
+        painter,
+        painter.ctx(),
+        center,
+        radius,
+        sky::year_fraction(model.now),
+        sky::day_fraction(model.now),
+    );
     paint_wedge_rim(painter, center, radius, YEAR_WEDGE);
     paint_wedge_rim(painter, center, radius, SKY_WEDGE);
-    paint_year_marks(painter, center, radius, sky::year_fraction(model.now));
-    paint_sky_marks(painter, center, radius, sky::day_fraction(model.now));
 
     let aperture = APERTURE_R * radius;
     // Upper half, horizon on the 9–3 line. The SVG theme fills that semicircle.
@@ -106,32 +101,6 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
     paint_status(painter, &layout, model);
 }
 
-fn paint_wedge(
-    painter: &Painter,
-    layout: &KioskLayout,
-    wedge: (f32, f32),
-    mut color_at: impl FnMut(f32, f32) -> Color32,
-) {
-    let steps = 28u32;
-    let span = (wedge.1 - wedge.0).rem_euclid(360.0);
-    let mut mesh = egui::Mesh::default();
-    for i in 0..=steps {
-        let deg = wedge.0 + span * (i as f32 / steps as f32);
-        let outer = layout::window_outer(wedge, deg);
-        let inner_p = layout.point(deg, 1.0);
-        let outer_p = layout.point(deg, outer);
-        let outward = ((outer - 1.0) / (std::f32::consts::SQRT_2 - 1.0)).clamp(0.0, 1.0);
-        crate::draw::vertex_color(&mut mesh, inner_p, color_at(deg, 0.0));
-        crate::draw::vertex_color(&mut mesh, outer_p, color_at(deg, outward));
-    }
-    for i in 0..steps {
-        let base = i * 2;
-        mesh.add_triangle(base, base + 1, base + 2);
-        mesh.add_triangle(base + 1, base + 3, base + 2);
-    }
-    crate::draw::add_mesh(painter, mesh);
-}
-
 fn paint_wedge_rim(painter: &Painter, center: Pos2, radius: f32, wedge: (f32, f32)) {
     // Straight outer edges: the side tangent and the bottom tangent. The dial is the inner edge.
     let side = if wedge.0 >= 180.0 { -1.0 } else { 1.0 };
@@ -155,85 +124,6 @@ fn paint_aperture(
     paint_pie(painter, center, radius, start, end, 36, color_at);
 }
 
-fn season_color(shown: f32, outward: f32) -> Color32 {
-    // Solstices and equinoxes as fractions of a non-leap year, blended on a circle.
-    let keys = [
-        (
-            0.0,
-            Color32::from_rgb(0x1c, 0x2a, 0x38),
-            Color32::from_rgb(0xe8, 0xf2, 0xf6),
-            Color32::from_rgb(0x9a, 0xb8, 0xc4),
-        ),
-        (
-            0.216,
-            Color32::from_rgb(0x6a, 0x9a, 0x4a),
-            Color32::from_rgb(0xc5, 0xe4, 0xf2),
-            Color32::from_rgb(0xf2, 0x8a, 0xb0),
-        ),
-        (
-            0.471,
-            Color32::from_rgb(0x1f, 0x6b, 0x32),
-            Color32::from_rgb(0x7e, 0xc8, 0xef),
-            Color32::from_rgb(0xe6, 0xc4, 0x4a),
-        ),
-        (
-            0.726,
-            Color32::from_rgb(0x8a, 0x3e, 0x18),
-            Color32::from_rgb(0xf0, 0xb0, 0x6a),
-            Color32::from_rgb(0xd4, 0x52, 0x2a),
-        ),
-        (
-            1.0,
-            Color32::from_rgb(0x1c, 0x2a, 0x38),
-            Color32::from_rgb(0xe8, 0xf2, 0xf6),
-            Color32::from_rgb(0x9a, 0xb8, 0xc4),
-        ),
-    ];
-    let (land, sky, accent) = blend_season(shown.rem_euclid(1.0), &keys);
-    let _ = accent;
-    mix(land, sky, (outward * 0.85).clamp(0.0, 1.0))
-}
-
-fn blend_season(t: f32, keys: &[(f32, Color32, Color32, Color32)]) -> (Color32, Color32, Color32) {
-    let mut lo = keys[0];
-    let mut hi = keys[keys.len() - 1];
-    for window in keys.windows(2) {
-        if t >= window[0].0 && t <= window[1].0 {
-            lo = window[0];
-            hi = window[1];
-            break;
-        }
-    }
-    let span = (hi.0 - lo.0).max(0.001);
-    let u = ((t - lo.0) / span).clamp(0.0, 1.0);
-    (mix(lo.1, hi.1, u), mix(lo.2, hi.2, u), mix(lo.3, hi.3, u))
-}
-
-fn sky_color(shown: f32, _outward: f32) -> Color32 {
-    let t = shown.rem_euclid(1.0);
-    // midnight, dawn, morning, noon, afternoon, dusk, night
-    let keys = [
-        (0.00, Color32::from_rgb(0x07, 0x0b, 0x1c)),
-        (0.22, Color32::from_rgb(0x1a, 0x24, 0x48)),
-        (0.30, Color32::from_rgb(0xe0, 0x86, 0x4a)),
-        (0.42, Color32::from_rgb(0x4a, 0x90, 0xc8)),
-        (0.50, Color32::from_rgb(0x3d, 0x8e, 0xd0)),
-        (0.70, Color32::from_rgb(0x3a, 0x78, 0xb0)),
-        (0.80, Color32::from_rgb(0xc4, 0x58, 0x32)),
-        (0.90, Color32::from_rgb(0x14, 0x18, 0x36)),
-        (1.00, Color32::from_rgb(0x07, 0x0b, 0x1c)),
-    ];
-    let mut color = keys[0].1;
-    for window in keys.windows(2) {
-        if t >= window[0].0 && t <= window[1].0 {
-            let u = (t - window[0].0) / (window[1].0 - window[0].0).max(0.001);
-            color = mix(window[0].1, window[1].1, u);
-            break;
-        }
-    }
-    color
-}
-
 fn date_disc_color(center: Pos2, radius: f32, point: Pos2) -> Color32 {
     let rel = (point - center) / radius.max(1.0);
     let dist = rel.length();
@@ -242,72 +132,6 @@ fn date_disc_color(center: Pos2, radius: f32, point: Pos2) -> Color32 {
         Color32::from_rgb(0xd9, 0xc2, 0x98),
         (dist * 0.75).clamp(0.0, 1.0),
     )
-}
-
-fn paint_year_marks(painter: &Painter, center: Pos2, radius: f32, content: f32) {
-    // A few blossoms, leaves, and snow dots that travel with the year wheel.
-    let marks = [
-        (0.00, 1.18, Color32::from_rgb(0xf4, 0xf7, 0xfa)),
-        (0.04, 1.38, Color32::from_rgb(0xd5, 0xe4, 0xea)),
-        (0.22, 1.22, Color32::from_rgb(0xf2, 0x8a, 0xb0)),
-        (0.28, 1.40, Color32::from_rgb(0xc5, 0xe8, 0x9a)),
-        (0.48, 1.25, Color32::from_rgb(0xe6, 0xc4, 0x4a)),
-        (0.55, 1.42, Color32::from_rgb(0x7d, 0xc8, 0x6a)),
-        (0.74, 1.20, Color32::from_rgb(0xd4, 0x52, 0x2a)),
-        (0.80, 1.40, Color32::from_rgb(0xc4, 0x78, 0x28)),
-    ];
-    for (shown, dist, color) in marks {
-        let deg = content_angle(content, shown, YEAR_WEDGE);
-        if !in_opening(deg, dist, YEAR_WEDGE) {
-            continue;
-        }
-        paint_disc(
-            painter,
-            center + direction(deg) * (dist * radius),
-            0.035 * radius,
-            8,
-            |_| color,
-        );
-    }
-}
-
-fn paint_sky_marks(painter: &Painter, center: Pos2, radius: f32, content: f32) {
-    let sun = content_angle(content, 0.5, SKY_WEDGE);
-    if in_opening(sun, 1.32, SKY_WEDGE) {
-        paint_disc(
-            painter,
-            center + direction(sun) * (1.32 * radius),
-            0.06 * radius,
-            10,
-            |_| Color32::from_rgb(0xff, 0xf2, 0xb0),
-        );
-    }
-    for shown in [0.02, 0.08, 0.14, 0.88, 0.93, 0.97] {
-        let deg = content_angle(content, shown, SKY_WEDGE);
-        if in_opening(deg, 1.28, SKY_WEDGE) {
-            paint_disc(
-                painter,
-                center + direction(deg) * (1.28 * radius),
-                0.012 * radius,
-                5,
-                |_| Color32::from_rgb(0xf4, 0xf0, 0xd8),
-            );
-        }
-    }
-}
-
-fn content_angle(content: f32, shown: f32, wedge: (f32, f32)) -> f32 {
-    let middle = wedge.0 + (wedge.1 - wedge.0) * 0.5;
-    middle + (shown - content) * 360.0
-}
-
-fn angle_in(deg: f32, wedge: (f32, f32)) -> bool {
-    let span = (wedge.1 - wedge.0).rem_euclid(360.0);
-    (deg - wedge.0).rem_euclid(360.0) <= span
-}
-
-fn in_opening(deg: f32, dist: f32, wedge: (f32, f32)) -> bool {
-    angle_in(deg, wedge) && dist > 1.03 && dist < layout::window_outer(wedge, deg) - 0.03
 }
 
 fn quarter_clip(center: Pos2, radius: f32, left: bool) -> Rect {
