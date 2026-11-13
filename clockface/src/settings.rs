@@ -100,7 +100,7 @@ impl Settings {
     /// Face center and diameter for this viewport.
     ///
     /// With no explicit diameter, the face is the largest one whose column
-    /// (face, mural windows, three frames, status bar) fits. `--diameter` and
+    /// (face, mural windows, two frames, status bar) fits. `--diameter` and
     /// a config file keep the requested size.
     pub fn placement(&self, viewport: Vec2) -> (Pos2, f32) {
         let diameter = if self.diameter_explicit {

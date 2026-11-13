@@ -406,21 +406,19 @@ pub fn paint_horizon(
             eprintln!("clockface: scenery render: {err}");
         }
     }
-    let night = sky_band(now) == SkyBand::Night;
     paint_moon(
         &painter,
         center,
         aperture / crate::layout::APERTURE_R,
         sky::moon_phase(now),
-        night,
     );
 }
 
 /// Shaded moon at the historical spot: 45° from 12, 0.36 of the face radius out.
 ///
-/// By day the unlit side is clear, the way a crescent sits in a blue sky. At night
-/// that side stays up as earthshine so the disc is still there.
-pub fn paint_moon(painter: &Painter, center: Pos2, face_radius: f32, phase: f64, night: bool) {
+/// The lit limb is the bright surface. The rest of the disc is a darkened moon,
+/// opaque day and night, so the sky does not show through the unlit side.
+pub fn paint_moon(painter: &Painter, center: Pos2, face_radius: f32, phase: f64) {
     let origin = center + direction(45.0) * (0.36 * face_radius);
     let moon_r = 0.11 * face_radius;
     if moon_r < 1.0 {
@@ -436,7 +434,7 @@ pub fn paint_moon(painter: &Painter, center: Pos2, face_radius: f32, phase: f64,
             let nx = ang.cos() * t;
             let ny = ang.sin() * t;
             let p = origin + Vec2::new(nx, ny) * moon_r;
-            let color = moon_color(nx, ny, t, phase, night);
+            let color = moon_color(nx, ny, t, phase);
             mesh.colored_vertex(p, color);
         }
     }
@@ -456,7 +454,7 @@ pub fn paint_moon(painter: &Painter, center: Pos2, face_radius: f32, phase: f64,
     }
 }
 
-fn moon_color(nx: f32, ny: f32, radius: f32, phase: f64, night: bool) -> Color32 {
+fn moon_color(nx: f32, ny: f32, radius: f32, phase: f64) -> Color32 {
     if radius > 1.0 {
         return Color32::TRANSPARENT;
     }
@@ -472,17 +470,16 @@ fn moon_color(nx: f32, ny: f32, radius: f32, phase: f64, night: bool) -> Color32
     let lit_r = 236.0 * shade;
     let lit_g = 226.0 * shade;
     let lit_b = 204.0 * shade;
-    // Earthshine is bright enough to show maria at night, and absent by day.
-    let earth = if night { 0.42 } else { 0.0 };
-    let r = lit_r * lit + 90.0 * shade * earth * (1.0 - lit);
-    let g = lit_g * lit + 98.0 * shade * earth * (1.0 - lit);
-    let b = lit_b * lit + 112.0 * shade * earth * (1.0 - lit);
-    let alpha = if night { 1.0 } else { lit };
-    Color32::from_rgba_premultiplied(
-        (r * alpha).clamp(0.0, 255.0) as u8,
-        (g * alpha).clamp(0.0, 255.0) as u8,
-        (b * alpha).clamp(0.0, 255.0) as u8,
-        (alpha * 255.0).clamp(0.0, 255.0) as u8,
+    // Darkened surface on the unlit side, day and night. Opaque, so scenery
+    // does not show through the disc.
+    let earth = 0.48;
+    let r = lit_r * lit + 78.0 * shade * earth * (1.0 - lit);
+    let g = lit_g * lit + 74.0 * shade * earth * (1.0 - lit);
+    let b = lit_b * lit + 68.0 * shade * earth * (1.0 - lit);
+    Color32::from_rgb(
+        r.clamp(0.0, 255.0) as u8,
+        g.clamp(0.0, 255.0) as u8,
+        b.clamp(0.0, 255.0) as u8,
     )
 }
 
@@ -586,18 +583,16 @@ mod tests {
             (0.78..0.97).contains(&phase),
             "expected a waning crescent, phase {phase}"
         );
-        let lit = moon_color(-0.95, 0.0, 0.95, phase, false);
-        let dark = moon_color(0.4, 0.0, 0.4, phase, false);
-        assert!(lit.a() > 200, "western limb should be lit, got {lit:?}");
-        assert_eq!(
-            dark.a(),
-            0,
-            "daytime unlit side should be clear, got {dark:?}"
-        );
-        let earth = moon_color(0.2, 0.1, 0.22, phase, true);
+        let lit = moon_color(-0.95, 0.0, 0.95, phase);
+        let dark = moon_color(0.4, 0.0, 0.4, phase);
         assert!(
-            earth.a() == 255 && earth.r() > 20,
-            "night earthshine, got {earth:?}"
+            lit.a() == 255 && lit.r() > dark.r() + 40,
+            "western limb should be lit, got {lit:?} against {dark:?}"
+        );
+        assert_eq!(dark.a(), 255, "unlit side must be opaque, got {dark:?}");
+        assert!(
+            dark.r() + 50 < lit.r() && dark.r() > 12,
+            "unlit side should be a darkened surface, got {dark:?} against {lit:?}"
         );
     }
 

@@ -11,7 +11,7 @@ const AMBER: Color32 = Color32::from_rgb(0xff, 0xb0, 0x28);
 const BOARD: Color32 = Color32::from_rgb(0x07, 0x09, 0x10);
 const UNLIT: Color32 = Color32::from_rgb(0x2a, 0x31, 0x3c);
 
-/// Lamp pitch for the three frames. A glyph is 5×7 lamps, so the cap height is `7 * pitch`.
+/// Lamp pitch for the info frames. A glyph is 5×7 lamps, so the cap height is `7 * pitch`.
 pub fn frame_pitch(radius: f32) -> f32 {
     (0.060 * radius / 7.0).clamp(2.2, 3.3)
 }

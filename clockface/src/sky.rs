@@ -113,6 +113,214 @@ fn julian_day(year: i32, month: u32, day: u32) -> f64 {
         - 1524.5
 }
 
+/// First moonrise and moonset of a local civil day, as Unix seconds.
+///
+/// Same Schlyter lunar position and horizon scan TimeWarp uses (`ephem._moon_raw`,
+/// `rise.events_for_day`): sample the local day, bisect each crossing of the
+/// refracted upper limb. A day with no rise, or no set, leaves that side empty.
+/// Open-Meteo does not publish moonrise or moonset.
+pub fn moon_events(date: NaiveDate, lat_deg: f64, lon_deg: f64) -> (Option<f64>, Option<f64>) {
+    let Some(start) = local_midnight(date) else {
+        return (None, None);
+    };
+    let Some(next) = date.succ_opt().and_then(local_midnight) else {
+        return (None, None);
+    };
+    let start_unix = start.timestamp() as f64;
+    let end_unix = next.timestamp() as f64;
+    if end_unix <= start_unix {
+        return (None, None);
+    }
+    let step = 240.0;
+    let mut t = start_unix;
+    let mut prev = moon_above(t, lat_deg, lon_deg);
+    let mut rise = None;
+    let mut set = None;
+    while t < end_unix && (rise.is_none() || set.is_none()) {
+        let next_t = (t + step).min(end_unix);
+        let sample = moon_above(next_t, lat_deg, lon_deg);
+        if prev != 0.0 && sample != 0.0 && prev.signum() != sample.signum() {
+            let cross = bisect_horizon(t, next_t, prev, lat_deg, lon_deg);
+            if (start_unix..end_unix).contains(&cross) {
+                if sample > prev && rise.is_none() {
+                    rise = Some(cross);
+                } else if sample < prev && set.is_none() {
+                    set = Some(cross);
+                }
+            }
+        }
+        t = next_t;
+        prev = sample;
+    }
+    (rise, set)
+}
+
+fn local_midnight(date: NaiveDate) -> Option<DateTime<Local>> {
+    date.and_hms_opt(0, 0, 0)?
+        .and_local_timezone(Local)
+        .earliest()
+}
+
+/// Altitude of the Moon's upper limb above the refracted horizon, degrees.
+fn moon_above(unix: f64, lat_deg: f64, lon_deg: f64) -> f64 {
+    let d = unix / 86_400.0 + UNIX_EPOCH_JD - 2_451_543.5;
+    let sun = schlyter_sun(d);
+    let (lon, lat, r) = schlyter_moon(d, &sun);
+    let (ra, dec) = ecliptic_to_equatorial(lon, lat, r, sun.ecl);
+    let ut_hours = (unix.rem_euclid(86_400.0)) / 3600.0;
+    let gmst = rev(sun.l + 180.0 + ut_hours * 15.0);
+    let mut ha = rev(rev(gmst + lon_deg) - ra);
+    if ha > 180.0 {
+        ha -= 360.0;
+    }
+    let x = cosd(ha) * cosd(dec);
+    let z = sind(dec);
+    let zhor = x * cosd(lat_deg) + z * sind(lat_deg);
+    let mut alt = zhor.clamp(-1.0, 1.0).asin().to_degrees();
+    let parallax = (1.0 / r.max(1e-6)).clamp(-1.0, 1.0).asin().to_degrees();
+    alt -= parallax * cosd(alt);
+    let semidiameter = (1873.7 * 60.0 / 2.0) / 3600.0 / r;
+    alt - (-0.583 - semidiameter)
+}
+
+fn bisect_horizon(t0: f64, t1: f64, a0: f64, lat: f64, lon: f64) -> f64 {
+    let mut lo = t0;
+    let mut hi = t1;
+    let mut alo = a0;
+    for _ in 0..40 {
+        if hi - lo < 0.5 {
+            break;
+        }
+        let mid = (lo + hi) * 0.5;
+        let amid = moon_above(mid, lat, lon);
+        if (alo > 0.0) == (amid > 0.0) {
+            lo = mid;
+            alo = amid;
+        } else {
+            hi = mid;
+        }
+    }
+    (lo + hi) * 0.5
+}
+
+struct SchlyterSun {
+    m: f64,
+    l: f64,
+    ecl: f64,
+}
+
+fn schlyter_sun(d: f64) -> SchlyterSun {
+    let w = 282.9404 + 4.70935e-5 * d;
+    let m = rev(356.0470 + 0.985_600_258_5 * d);
+    let ecl = 23.4393 - 3.563e-7 * d;
+    SchlyterSun {
+        m,
+        l: rev(w + m),
+        ecl,
+    }
+}
+
+fn schlyter_moon(d: f64, sun: &SchlyterSun) -> (f64, f64, f64) {
+    let n = rev(125.1228 - 0.052_953_808_3 * d);
+    let i = 5.1454;
+    let w = rev(318.0634 + 0.164_357_322_3 * d);
+    let a = 60.2666;
+    let e = 0.054900;
+    let m = rev(115.3654 + 13.064_992_950_9 * d);
+    let ecc = eccentric_anomaly(m, e);
+    let (v, mut r) = true_anomaly(a, e, ecc);
+    let (xh, yh, zh) = ecliptic_xyz(r, n, i, w, v);
+    let (mut lon, mut lat, dist) = lon_lat_r(xh, yh, zh);
+    r = dist;
+    let lm = rev(n + w + m);
+    let dm = rev(lm - sun.l);
+    let f = rev(lm - n);
+    lon += -1.274 * sind(m - 2.0 * dm) + 0.658 * sind(2.0 * dm)
+        - 0.186 * sind(sun.m)
+        - 0.059 * sind(2.0 * m - 2.0 * dm)
+        - 0.057 * sind(m - 2.0 * dm + sun.m)
+        + 0.053 * sind(m + 2.0 * dm)
+        + 0.046 * sind(2.0 * dm - sun.m)
+        + 0.041 * sind(m - sun.m)
+        - 0.035 * sind(dm)
+        - 0.031 * sind(m + sun.m)
+        - 0.015 * sind(2.0 * f - 2.0 * dm)
+        + 0.011 * sind(m - 4.0 * dm);
+    lat += -0.173 * sind(f - 2.0 * dm)
+        - 0.055 * sind(m - f - 2.0 * dm)
+        - 0.046 * sind(m + f - 2.0 * dm)
+        + 0.033 * sind(f + 2.0 * dm)
+        + 0.017 * sind(2.0 * m + f);
+    r += -0.58 * cosd(m - 2.0 * dm) - 0.46 * cosd(2.0 * dm);
+    (rev(lon), lat, r)
+}
+
+fn eccentric_anomaly(m_deg: f64, e: f64) -> f64 {
+    let m = rev(m_deg).to_radians();
+    let mut ecc = m + e * m.sin() * (1.0 + e * m.cos());
+    if e > 0.05 {
+        for _ in 0..30 {
+            let denom = 1.0 - e * ecc.cos();
+            if denom.abs() < 1e-12 {
+                break;
+            }
+            let next = ecc - (ecc - e * ecc.sin() - m) / denom;
+            if (next - ecc).abs() < 1e-10 {
+                ecc = next;
+                break;
+            }
+            ecc = next;
+        }
+    }
+    ecc.to_degrees()
+}
+
+fn true_anomaly(a: f64, e: f64, ecc_deg: f64) -> (f64, f64) {
+    let ecc = ecc_deg.to_radians();
+    let xv = a * (ecc.cos() - e);
+    let yv = a * (1.0 - e * e).max(0.0).sqrt() * ecc.sin();
+    (yv.atan2(xv).to_degrees(), xv.hypot(yv))
+}
+
+fn ecliptic_xyz(r: f64, n: f64, i: f64, w: f64, v: f64) -> (f64, f64, f64) {
+    let vw = v + w;
+    let xh = r * (cosd(n) * cosd(vw) - sind(n) * sind(vw) * cosd(i));
+    let yh = r * (sind(n) * cosd(vw) + cosd(n) * sind(vw) * cosd(i));
+    let zh = r * (sind(vw) * sind(i));
+    (xh, yh, zh)
+}
+
+fn lon_lat_r(x: f64, y: f64, z: f64) -> (f64, f64, f64) {
+    let r = (x * x + y * y + z * z).sqrt();
+    let lon = rev(y.atan2(x).to_degrees());
+    let lat = z.atan2(x.hypot(y)).to_degrees();
+    (lon, lat, r)
+}
+
+fn ecliptic_to_equatorial(lon: f64, lat: f64, r: f64, ecl: f64) -> (f64, f64) {
+    let xg = r * cosd(lon) * cosd(lat);
+    let yg = r * sind(lon) * cosd(lat);
+    let zg = r * sind(lat);
+    let ye = yg * cosd(ecl) - zg * sind(ecl);
+    let ze = yg * sind(ecl) + zg * cosd(ecl);
+    (
+        rev(ye.atan2(xg).to_degrees()),
+        ze.atan2(xg.hypot(ye)).to_degrees(),
+    )
+}
+
+fn sind(deg: f64) -> f64 {
+    deg.to_radians().sin()
+}
+
+fn cosd(deg: f64) -> f64 {
+    deg.to_radians().cos()
+}
+
+fn rev(deg: f64) -> f64 {
+    deg.rem_euclid(360.0)
+}
+
 pub fn format_local_hm(unix_secs: f64) -> String {
     let secs = unix_secs.floor() as i64;
     let nanos = ((unix_secs - secs as f64) * 1e9).clamp(0.0, 999_999_999.0) as u32;
@@ -162,5 +370,17 @@ mod tests {
         let hours = (times.sunset_unix - times.sunrise_unix) / 3600.0;
         assert!(times.sunrise_unix < times.sunset_unix);
         assert!(hours > 8.5 && hours < 11.0, "day length {hours} h");
+    }
+
+    #[test]
+    fn january_screenshot_day_has_a_moonrise_and_a_moonset() {
+        let date = NaiveDate::from_ymd_opt(2026, 1, 15).unwrap();
+        let (rise, set) = moon_events(date, 39.7684, -86.1581);
+        let rise = rise.expect("moonrise");
+        let set = set.expect("moonset");
+        assert!((rise - set).abs() > 3600.0);
+        let clock = format_local_hm(rise);
+        assert_eq!(clock.len(), 5, "{clock}");
+        assert!(clock.as_bytes()[2] == b':');
     }
 }

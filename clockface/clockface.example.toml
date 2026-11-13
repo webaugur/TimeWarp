@@ -1,6 +1,6 @@
 # Optional clockface settings. CLI flags override whatever is set here.
 # Lengths are pixels. Omit diameter and the face is sized to the window so the
-# face, the mural windows, the three frames, and the status bar all fit.
+# face, the mural windows, the two frames, and the status bar all fit.
 # Omit center_x / center_y to center horizontally. With an explicit diameter
 # the face sits against the top edge (center_y = diameter / 2).
 # Every complication is placed from that center, in units of the face radius.

@@ -12,7 +12,7 @@ pub const APERTURE_R: f32 = 0.64;
 pub const YEAR_WEDGE: (f32, f32) = (180.0, 270.0);
 /// Sky window: the mirror, from 3 o'clock to 6, cut off by the right and bottom tangents.
 pub const SKY_WEDGE: (f32, f32) = (90.0, 180.0);
-/// Half-width of the three info frames, in face radii. 1.0 makes their outer edges
+/// Half-width of the info frames, in face radii. 1.0 makes their outer edges
 /// the same width as the face diameter (left tangent to right tangent).
 const ROW_HALF: f32 = 1.0;
 const GUTTER: f32 = 0.03;
@@ -25,7 +25,7 @@ pub const SIDE_MARGIN: f32 = 28.0;
 pub struct KioskLayout {
     pub center: Pos2,
     pub radius: f32,
-    pub boxes: [Rect; 3],
+    pub boxes: [Rect; 2],
     pub status: Rect,
 }
 
@@ -36,7 +36,7 @@ impl KioskLayout {
         let col_left = center.x - ROW_HALF * radius;
         let col_right = center.x + ROW_HALF * radius;
         let col_width = col_right - col_left;
-        let box_w = ((col_width - 2.0 * gutter) / 3.0).max(8.0);
+        let box_w = ((col_width - gutter) / 2.0).max(8.0);
         let status_h = status_height(radius);
         let status_bottom = screen.bottom() - BOTTOM_MARGIN;
         let status_top = status_bottom - status_h;
@@ -50,17 +50,24 @@ impl KioskLayout {
         let gap_above_bar = (0.05 * radius).max(10.0);
         let limit = status.top() - gap_above_bar;
         let mut top = preferred_top.max(screen.top());
-        let mut height = (1.70 * box_w)
-            .min(1.55 * radius)
-            .min((limit - top).max(0.0));
-        if height < 0.55 * box_w {
-            top = (limit - 0.72 * box_w).max(min_top.min(limit - 8.0));
+        // Height stays on the old three-across budget. Wider boards must not
+        // grow the column and shrink the face.
+        let mut height = info_frame_height(radius).min((limit - top).max(0.0));
+        let narrow = ((col_width - 2.0 * gutter) / 3.0).max(8.0);
+        if height < 0.55 * narrow {
+            top = (limit - 0.72 * narrow).max(min_top.min(limit - 8.0));
             height = (limit - top).max(8.0);
         }
-        let boxes = [0, 1, 2].map(|i| {
-            let x = col_left + i as f32 * (box_w + gutter);
-            Rect::from_min_max(Pos2::new(x, top), Pos2::new(x + box_w, top + height))
-        });
+        let boxes = [
+            Rect::from_min_max(
+                Pos2::new(col_left, top),
+                Pos2::new(col_left + box_w, top + height),
+            ),
+            Rect::from_min_max(
+                Pos2::new(col_right - box_w, top),
+                Pos2::new(col_right, top + height),
+            ),
+        ];
         Self {
             center,
             radius,
@@ -86,21 +93,27 @@ pub fn status_height(radius: f32) -> f32 {
     font + 10.0
 }
 
+/// Preferred height of one info board. This is the old three-across size, so
+/// two wider boards do not ask the auto-fit for a smaller face.
+fn info_frame_height(radius: f32) -> f32 {
+    let gutter = GUTTER * radius;
+    let narrow = ((radius * 2.0 - 2.0 * gutter) / 3.0).max(8.0);
+    (1.70 * narrow).min(1.55 * radius)
+}
+
 /// Height from the top of the face through the status bar, when the info frames
 /// are at their preferred size. This is what [`fit_diameter`] reserves.
 pub fn preferred_column_height(diameter: f32) -> f32 {
     let radius = (diameter * 0.5).max(1.0);
     let gutter = GUTTER * radius;
-    let box_w = ((diameter - 2.0 * gutter) / 3.0).max(8.0);
-    let box_h = (1.70 * box_w).min(1.55 * radius);
     let gap = (0.05 * radius).max(10.0);
-    diameter + gutter + box_h + gap + status_height(radius)
+    diameter + gutter + info_frame_height(radius) + gap + status_height(radius)
 }
 
 /// Largest face diameter whose column fits in `viewport`.
 ///
-/// The column is the face, the squared windows under it, the three frames (one
-/// face-diameter wide), and a single-line status bar. Width and height
+/// The column is the face, the squared windows under it, the two frames (one
+/// face-diameter wide together), and a single-line status bar. Width and height
 /// both constrain it, with a small inset from the edges.
 pub fn fit_diameter(viewport: egui::Vec2) -> f32 {
     let available_w = (viewport.x - 2.0 * SIDE_MARGIN).max(120.0);
@@ -189,7 +202,7 @@ mod tests {
     }
 
     #[test]
-    fn three_frames_are_exactly_one_face_diameter_wide() {
+    fn two_frames_are_exactly_one_face_diameter_wide() {
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(1920.0, 1080.0));
         for (diameter, center) in [
             (600.0, Pos2::new(960.0, 300.0)),
@@ -197,13 +210,20 @@ mod tests {
             (880.0, Pos2::new(960.0, 440.0)),
         ] {
             let layout = KioskLayout::new(screen, center, diameter);
-            let span = layout.boxes[2].right() - layout.boxes[0].left();
+            let span = layout.boxes[1].right() - layout.boxes[0].left();
             assert!(
                 (span - diameter).abs() < 0.5,
                 "span {span} should equal diameter {diameter}"
             );
             assert!((layout.boxes[0].left() - (center.x - diameter * 0.5)).abs() < 0.5);
-            assert!((layout.boxes[2].right() - (center.x + diameter * 0.5)).abs() < 0.5);
+            assert!((layout.boxes[1].right() - (center.x + diameter * 0.5)).abs() < 0.5);
+            let gutter = 0.03 * diameter * 0.5;
+            let expected = (diameter - gutter) / 2.0;
+            assert!(
+                (layout.boxes[0].width() - expected).abs() < 1.0,
+                "each board should be half the face minus the gap"
+            );
+            assert!(layout.boxes[1].left() > layout.boxes[0].right() - 0.5);
         }
     }
 
@@ -216,7 +236,7 @@ mod tests {
             let center = Pos2::new(w * 0.5, TOP_MARGIN + diameter * 0.5);
             let screen = Rect::from_min_size(Pos2::ZERO, viewport);
             let layout = KioskLayout::new(screen, center, diameter);
-            let span = layout.boxes[2].right() - layout.boxes[0].left();
+            let span = layout.boxes[1].right() - layout.boxes[0].left();
             assert!(
                 (span - diameter).abs() < 1.0,
                 "{w}x{h} span {span} diameter {diameter}"

@@ -114,7 +114,7 @@ Face radius 1 is 353.6 px from the center of the 1000×1000 view. The dial cover
 
 ## The moon
 
-Do not paint the moon in the SVG. The app draws it after the theme, at a fixed place in the aperture, so a theme cannot move it by editing the file. The phase is the mean age since the new moon of 2000-01-06 18:14 UTC (synodic month 29.530588853 days): 0 is new, 0.25 is first quarter with the right side lit, 0.5 is full, 0.75 is last quarter with the left side lit. The disc is shaded (maria, crater rims, limb darkening, and a soft terminator), not a flat two-color circle. By day the unlit side is left clear, so a crescent sits in the sky instead of a black disc. At night that side is earthshine and the whole disc stays visible.
+Do not paint the moon in the SVG. The app draws it after the theme, at a fixed place in the aperture, so a theme cannot move it by editing the file. The phase is the mean age since the new moon of 2000-01-06 18:14 UTC (synodic month 29.530588853 days): 0 is new, 0.25 is first quarter with the right side lit, 0.5 is full, 0.75 is last quarter with the left side lit. The disc is shaded (maria, crater rims, limb darkening, and a soft terminator), not a flat two-color circle. The unlit side is a darkened moon surface, day and night, so the whole round stays solid against the sky.
 
 A group whose id is `moon` is forced to `display="none"` so a copied illustration does not sit under the real disc.
 
