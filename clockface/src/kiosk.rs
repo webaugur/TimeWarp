@@ -358,19 +358,35 @@ fn paint_forecast(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, mode
 
 fn paint_status(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
     let bar = layout.status;
-    let text = model.status.text();
-    let cap = ((bar.height() - 4.0) / 8.0).clamp(1.4, 2.4);
-    let pitch = matrix::pitch_to_fit(&text, bar.width() - 8.0, cap);
+    // The old ceiling was ((height - 4) / 8), at most 2.4. About 12% smaller,
+    // still in the same range as the board lamps.
+    let previous = ((bar.height() - 4.0) / 8.0).clamp(1.4, 2.4);
+    let pitch = (previous * 0.88).clamp(1.3, 2.2);
     matrix::paint_board(painter, bar, pitch);
     let y = bar.center().y - pitch * 3.5;
+    let version = StatusLine::version_text();
+    let mark = |ch: char| {
+        let font = FontId::new(pitch * 7.0, serif());
+        painter
+            .layout_no_wrap(ch.to_string(), font, Color32::WHITE)
+            .size()
+            .x
+            + pitch * 0.5
+    };
+    let version_w = matrix::text_width(&version, pitch, &mark);
+    // Last lamp of the version sits one pitch in from the right edge.
+    let version_x = bar.right() - version_w + pitch;
+    let left_max = (version_x - matrix::cell(pitch) * 2.0) - (bar.left() + pitch);
+    let left = matrix::ellipsize(&model.status.left_text(), pitch, left_max.max(0.0), mark);
     matrix::paint_text(
         painter,
         bar,
         Pos2::new(bar.left() + pitch, y),
         pitch,
-        &text,
+        &left,
         0,
     );
+    matrix::paint_text_nowrap(painter, bar, Pos2::new(version_x, y), pitch, &version);
 }
 
 fn brief_condition(code: i32) -> &'static str {

@@ -72,9 +72,39 @@ pub fn paint_text(
     text: &str,
     hang_cells: u32,
 ) -> f32 {
+    paint_text_limited(
+        painter,
+        bounds,
+        origin,
+        pitch,
+        text,
+        hang_cells,
+        bounds.right() - pitch * 0.4,
+    )
+}
+
+/// One row, clipped to `bounds`, with no wrap. Used for the status version.
+pub fn paint_text_nowrap(
+    painter: &Painter,
+    bounds: Rect,
+    origin: Pos2,
+    pitch: f32,
+    text: &str,
+) -> f32 {
+    paint_text_limited(painter, bounds, origin, pitch, text, 0, f32::MAX)
+}
+
+fn paint_text_limited(
+    painter: &Painter,
+    bounds: Rect,
+    origin: Pos2,
+    pitch: f32,
+    text: &str,
+    hang_cells: u32,
+    max_x: f32,
+) -> f32 {
     let painter = painter.with_clip_rect(bounds);
     let line = pitch * 9.0;
-    let max_x = bounds.right() - pitch * 0.4;
     let hang_x = (origin.x + hang_cells as f32 * cell(pitch)).min(max_x - cell(pitch));
     let mut x = origin.x;
     let mut y = origin.y;
@@ -143,6 +173,50 @@ fn words(text: &str) -> Vec<String> {
     if !word.is_empty() {
         out.push(word);
     }
+    out
+}
+
+/// Width of `text` in lamp cells. A character the matrix does not include uses `mark`.
+pub fn text_width(text: &str, pitch: f32, mark: impl Fn(char) -> f32) -> f32 {
+    text.chars()
+        .map(|ch| {
+            if glyph(ch).is_some() {
+                cell(pitch)
+            } else {
+                mark(ch)
+            }
+        })
+        .sum()
+}
+
+/// Shorten `text` with `...` so it fits in `max_width`. A string that already fits is unchanged.
+pub fn ellipsize(text: &str, pitch: f32, max_width: f32, mark: impl Fn(char) -> f32) -> String {
+    if text_width(text, pitch, &mark) <= max_width {
+        return text.to_string();
+    }
+    let dots = "...";
+    let dots_w = text_width(dots, pitch, &mark);
+    if dots_w > max_width {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut used = 0.0;
+    for ch in text.chars() {
+        let width = if glyph(ch).is_some() {
+            cell(pitch)
+        } else {
+            mark(ch)
+        };
+        if used + width + dots_w > max_width {
+            break;
+        }
+        out.push(ch);
+        used += width;
+    }
+    while out.ends_with(' ') {
+        out.pop();
+    }
+    out.push_str(dots);
     out
 }
 
@@ -399,6 +473,21 @@ mod tests {
             "hang {} should be two cells",
             hang(pitch)
         );
+    }
+
+    #[test]
+    fn a_long_status_fault_is_cut_before_it_passes_the_budget() {
+        let pitch = 2.0;
+        let mark = |ch: char| {
+            let _ = ch;
+            pitch * 7.5
+        };
+        let text = "cursor \u{1F5A7} 172.30.0.2  time sync unknown and a very long weather note";
+        let fitted = ellipsize(text, pitch, 80.0, mark);
+        assert!(fitted.ends_with("..."), "{fitted}");
+        assert!(text_width(&fitted, pitch, mark) <= 80.0, "{fitted}");
+        let short = ellipsize("cursor", pitch, 80.0, mark);
+        assert_eq!(short, "cursor");
     }
 
     #[test]

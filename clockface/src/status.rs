@@ -22,12 +22,30 @@ pub struct StatusLine {
 }
 
 impl StatusLine {
+    /// Host, address, and any real fault. The version is painted on the right.
+    pub fn left_text(&self) -> String {
+        let address = self.address.as_deref().unwrap_or("—");
+        let mut line = format!("{host} {NETWORK} {address}", host = self.hostname);
+        for extra in [&self.warning, &self.alert] {
+            let extra = extra.trim();
+            if !extra.is_empty() {
+                line.push_str("  ");
+                line.push_str(extra);
+            }
+        }
+        line
+    }
+
+    pub fn version_text() -> String {
+        format!("v{}", env!("CARGO_PKG_VERSION"))
+    }
+
     pub fn text(&self) -> String {
         let address = self.address.as_deref().unwrap_or("—");
         let mut line = format!(
-            "{host} {NETWORK} {address}  v{version}",
+            "{host} {NETWORK} {address}  {}",
+            Self::version_text(),
             host = self.hostname,
-            version = env!("CARGO_PKG_VERSION"),
         );
         for extra in [&self.warning, &self.alert] {
             let extra = extra.trim();
