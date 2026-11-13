@@ -1,0 +1,50 @@
+# Optional clockface settings. CLI flags override whatever is set here.
+# Lengths are pixels. Omit diameter and the face is sized to the window so the
+# face, the mural windows, the two frames, and the status bar all fit.
+# Omit center_x / center_y to center horizontally. With an explicit diameter
+# the face sits against the top edge (center_y = diameter / 2).
+# Every complication is placed from that center, in units of the face radius.
+
+# diameter = 600.0
+# center_x = 960.0
+# center_y = 300.0
+windowed = false
+
+# How often to ask Open-Meteo again. The last good forecast is cached under
+# $XDG_CACHE_HOME/clockface/weather.toml (or ~/.cache/clockface/weather.toml).
+refresh_minutes = 20
+
+# imperial: °F and mph. metric: °C and km/h.
+units = "imperial"
+
+[place]
+name = "Indianapolis"
+latitude = 39.7684
+longitude = -86.1581
+
+# Omit this whole list to use the built-in examples. An empty list
+# (`events = []`) shows "Nothing on the calendar".
+[[events]]
+date = "2026-01-18"
+title = "Family dinner"
+time = "18:00"
+
+[[events]]
+date = "2026-01-19"
+title = "Martin Luther King Jr. Day"
+time = "all day"
+
+[[events]]
+date = "2026-11-14"
+title = "Workshop open house"
+time = "10:00"
+
+[[events]]
+date = "2026-12-21"
+title = "Winter solstice"
+time = "all day"
+
+[[events]]
+date = "2027-01-06"
+title = "Epiphany"
+time = "all day"

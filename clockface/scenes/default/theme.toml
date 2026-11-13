@@ -1,0 +1,46 @@
+# Default scenery theme. Clockface reads this file and shows or hides the
+# matching groups in scene.svg. A new folder with the same keys and its own
+# SVG needs no Rust change. See ../CREATING_A_THEME.md.
+
+name = "default"
+
+# Upper half of a circle. The circle's center is the bottom-middle of this box
+# (500, 500) and the radius is 500. The horizon is the bottom edge.
+view_box = [0.0, 0.0, 1000.0, 500.0]
+
+# Drawn in every season, at every hour, in every weather.
+always = ["land", "tree-trunk"]
+
+[sky]
+day = "sky-day"
+twilight = "sky-twilight"
+night = "sky-night"
+
+[season.leaves]
+spring = "leaves-spring"
+summer = "leaves-summer"
+autumn = "leaves-autumn"
+winter = "leaves-winter"
+
+[season.ground]
+spring = "ground-spring"
+summer = "ground-summer"
+autumn = "ground-autumn"
+winter = "ground-winter"
+
+# Added for the current condition. Clear adds nothing here; the sun comes from [time].
+[weather]
+clouds = ["clouds"]
+rain = ["clouds", "rain"]
+snow = ["clouds", "snow", "snow-cover"]
+storm = ["clouds", "storm"]
+fog = ["clouds", "fog"]
+unknown = ["clouds"]
+
+[time]
+day = ["sun"]
+twilight = ["sun"]
+night = ["stars"]
+
+# Scene names that suppress the sun even when [time] would show it.
+hide_sun = ["storm", "fog"]
