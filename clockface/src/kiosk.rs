@@ -609,7 +609,7 @@ fn paint_date_words(painter: &Painter, center: Pos2, radius: f32, now: DateTime<
     painter.text(
         origin + Vec2::new(0.0, 0.06 * radius),
         Align2::CENTER_CENTER,
-        now.day().to_string(),
+        format!("\u{1F4C5} {}", now.day()),
         FontId::new(0.07 * radius, serif()),
         color,
     );
@@ -635,7 +635,14 @@ fn paint_condition_words(
     painter.text(
         origin + Vec2::new(0.0, 0.045 * radius),
         Align2::CENTER_CENTER,
-        weather.condition.clone(),
+        {
+            let mark = weather::condition_mark(weather.code.unwrap_or(-1));
+            if mark.is_empty() {
+                weather.condition.clone()
+            } else {
+                format!("{}  {mark}", weather.condition)
+            }
+        },
         FontId::new(0.034 * radius, serif()),
         color,
     );
@@ -669,21 +676,13 @@ fn paint_aperture_rims(painter: &Painter, center: Pos2, radius: f32) {
 }
 
 fn paint_boxes(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
-    let titles = ["Calendar", "Forecast", "Sun & moon"];
-    for (panel, title) in layout.boxes.iter().zip(titles) {
+    for (index, panel) in layout.boxes.iter().enumerate() {
         paint_panel(painter, *panel);
-        let inner = painter.with_clip_rect(inset(*panel, 5.0));
-        inner.text(
-            panel.left_top() + Vec2::new(10.0, 8.0),
-            Align2::LEFT_TOP,
-            title,
-            FontId::new((0.08 * layout.radius).clamp(22.0, 32.0), serif()),
-            TITLE,
-        );
-        let body_top = panel.top() + (0.12 * layout.radius).clamp(36.0, 48.0);
-        match title {
-            "Calendar" => paint_calendar(&inner, *panel, body_top, layout.radius, model),
-            "Forecast" => paint_forecast(&inner, *panel, body_top, layout.radius, model),
+        let inner = painter.with_clip_rect(inset(*panel, 1.0));
+        let body_top = panel.top() + 2.0;
+        match index {
+            0 => paint_calendar(&inner, *panel, body_top, layout.radius, model),
+            1 => paint_forecast(&inner, *panel, body_top, layout.radius, model),
             _ => paint_sun(&inner, *panel, body_top, layout.radius, model),
         }
     }
@@ -692,14 +691,15 @@ fn paint_boxes(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
 fn paint_calendar(painter: &Painter, panel: Rect, top: f32, radius: f32, model: &KioskModel) {
     let today = model.now.date_naive();
     let rows = events::upcoming(&model.events, today, 4);
-    let size = (0.07 * radius).clamp(20.0, 28.0);
-    let width = (panel.width() - 24.0).max(40.0);
+    let size = (0.046 * radius).clamp(13.0, 17.0);
+    let width = (panel.width() - 6.0).max(40.0);
+    let left = panel.left() + 3.0;
     if rows.is_empty() {
         paint_wrapped(
             painter,
-            Pos2::new(panel.left() + 12.0, top),
+            Pos2::new(left, top),
             width,
-            "Nothing on the calendar",
+            "Nothing on the calendar  \u{1F4C5}",
             size,
             INK,
         );
@@ -709,30 +709,39 @@ fn paint_calendar(painter: &Painter, panel: Rect, top: f32, radius: f32, model: 
     for event in rows.iter().take(4) {
         let title = paint_wrapped(
             painter,
-            Pos2::new(panel.left() + 12.0, y),
+            Pos2::new(left, y),
             width,
-            &event.title,
+            &format!(
+                "{}  {}",
+                event.title,
+                events::event_mark(&event.title, &event.time)
+            ),
             size,
             INK,
         );
-        y += title.height() + 2.0;
-        let when = paint_wrapped(
+        y += title.height();
+        let mut when = events::short_when(event);
+        if !event.time.is_empty() && !event.time.eq_ignore_ascii_case("all day") {
+            when.push_str("  \u{23F3}");
+        }
+        let drawn = paint_wrapped(
             painter,
-            Pos2::new(panel.left() + 12.0, y),
+            Pos2::new(left, y),
             width,
-            &events::short_when(event),
-            size * 0.82,
+            &when,
+            size * 0.86,
             INK_DIM,
         );
-        y += when.height() + size * 0.45;
+        y += drawn.height() + size * 0.16;
     }
 }
 
 fn paint_forecast(painter: &Painter, panel: Rect, top: f32, radius: f32, model: &KioskModel) {
-    let size = (0.064 * radius).clamp(20.0, 26.0);
+    let size = (0.044 * radius).clamp(13.0, 16.0);
+    let left = panel.left() + 3.0;
     if model.weather.daily.is_empty() {
         painter.text(
-            Pos2::new(panel.left() + 12.0, top),
+            Pos2::new(left, top),
             Align2::LEFT_TOP,
             "Forecast unavailable",
             FontId::new(size, serif()),
@@ -740,21 +749,18 @@ fn paint_forecast(painter: &Painter, panel: Rect, top: f32, radius: f32, model: 
         );
         return;
     }
-    let unit = match model.weather.units {
-        crate::settings::Units::Imperial => "°",
-        crate::settings::Units::Metric => "°",
-    };
     for (i, day) in model.weather.daily.iter().take(5).enumerate() {
-        let y = top + i as f32 * (size + 8.0);
+        let y = top + i as f32 * (size + 2.0);
+        let mark = weather::condition_mark(day.code);
         let line = format!(
-            "{}   {}   {:.0}{unit}/{:.0}{unit}",
+            "{}   {}   {:.0}°/{:.0}°  {mark}",
             weather::weekday_short(&day.date),
             brief_condition(day.code),
             day.high,
             day.low,
         );
         painter.text(
-            Pos2::new(panel.left() + 12.0, y),
+            Pos2::new(left, y),
             Align2::LEFT_TOP,
             line,
             FontId::new(size, serif()),
@@ -764,8 +770,7 @@ fn paint_forecast(painter: &Painter, panel: Rect, top: f32, radius: f32, model: 
 }
 
 fn paint_sun(painter: &Painter, panel: Rect, top: f32, radius: f32, model: &KioskModel) {
-    let size = (0.07 * radius).clamp(20.0, 28.0);
-    let color = INK;
+    let size = (0.046 * radius).clamp(13.0, 17.0);
     let date = model.now.date_naive();
     let sun = sky::sun_times(date, model.place.latitude, model.place.longitude);
     let (rise, set) = match sun {
@@ -776,55 +781,42 @@ fn paint_sun(painter: &Painter, panel: Rect, top: f32, radius: f32, model: &Kios
         None => ("—".into(), "—".into()),
     };
     let lines = [
-        format!("Sunrise  {rise}"),
-        format!("Sunset   {set}"),
-        format!("{}", season_name(date)),
-        format!("Moon  {}", moon_name(sky::moon_phase(model.now))),
+        format!("Sunrise  {rise}  \u{2B06}"),
+        format!("Sunset   {set}  \u{2B07}"),
+        format!("{}  \u{1F31E}", season_name(date)),
+        format!("{}  \u{1F319}", moon_name(sky::moon_phase(model.now))),
     ];
-    let width = (panel.width() - 24.0).max(8.0);
+    let width = (panel.width() - 6.0).max(8.0);
     let mut y = top;
     for line in &lines {
         let drawn = paint_wrapped(
             painter,
-            Pos2::new(panel.left() + 12.0, y),
+            Pos2::new(panel.left() + 3.0, y),
             width,
             line,
             size,
-            color,
+            INK,
         );
-        y = drawn.bottom() + 8.0;
+        y = drawn.bottom() + 2.0;
     }
 }
 
 fn paint_status(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
     let bar = layout.status;
     painter.rect_filled(bar, 0.0, Color32::from_rgb(0x2a, 0x1c, 0x12));
-    painter.rect_stroke(
-        bar,
-        0.0,
-        Stroke::new(1.0, shade_bezel(Vec2::new(0.0, -1.0), 0.5)),
-        egui::StrokeKind::Inside,
-    );
     let size = layout::status_font_size(layout.radius);
-    let width = (bar.width() - 24.0).max(8.0);
+    let width = (bar.width() - 6.0).max(8.0);
     let galley = painter.layout(model.status.text(), FontId::new(size, serif()), INK, width);
-    let y = bar.top() + ((bar.height() - galley.size().y) * 0.5).max(4.0);
-    painter.galley(Pos2::new(bar.left() + 12.0, y), galley, INK);
+    let y = bar.top() + ((bar.height() - galley.size().y) * 0.5).max(1.0);
+    painter.galley(Pos2::new(bar.left() + 3.0, y), galley, INK);
 }
 
 fn paint_panel(painter: &Painter, rect: Rect) {
     painter.rect_filled(rect, 0.0, Color32::from_rgb(0x1a, 0x12, 0x0c));
-    painter.rect_stroke(
-        rect,
-        0.0,
-        Stroke::new(2.0, shade_bezel(Vec2::new(-0.2, -0.8), 0.35)),
-        egui::StrokeKind::Inside,
-    );
 }
 
 const INK: Color32 = Color32::from_rgb(0xff, 0xf8, 0xea);
 const INK_DIM: Color32 = Color32::from_rgb(0xf3, 0xdc, 0xa8);
-const TITLE: Color32 = Color32::from_rgb(0xff, 0xe0, 0x7a);
 
 fn paint_wrapped(
     painter: &Painter,

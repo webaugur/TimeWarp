@@ -61,6 +61,45 @@ pub fn upcoming(events: &[CalendarEvent], today: NaiveDate, limit: usize) -> Vec
         .collect()
 }
 
+/// Trailing mark, using the same glyphs as `timewarp.ui.holiday_emoji` and `ICON`.
+///
+/// Solstices and equinoxes use the solar mark (🌞), the one TimeWarp puts on a
+/// season heading. A named holiday uses that table. An all-day row with no closer
+/// match uses the default holiday mark (🎉). A timed event uses the calendar mark (📅).
+pub fn event_mark(title: &str, time: &str) -> &'static str {
+    let low = title.to_lowercase();
+    if low.contains("solstice") || low.contains("equinox") {
+        return "\u{1F31E}";
+    }
+    const KEYS: &[(&str, &str)] = &[
+        ("christmas eve", "\u{1F385}"),
+        ("christmas", "\u{1F384}"),
+        ("new year", "\u{1F386}"),
+        ("good friday", "\u{1F423}"),
+        ("ascension", "\u{1F423}"),
+        ("pentecost", "\u{1F423}"),
+        ("whit", "\u{1F423}"),
+        ("easter", "\u{1F423}"),
+        ("halloween", "\u{1F383}"),
+        ("ramadan", "\u{1F319}"),
+        ("eid", "\u{1F319}"),
+        ("juneteenth", "\u{1F386}"),
+        ("independence", "\u{1F386}"),
+        ("bastille", "\u{1F386}"),
+        ("canada day", "\u{1F386}"),
+        ("national day", "\u{1F386}"),
+    ];
+    for (key, glyph) in KEYS {
+        if low.contains(key) {
+            return glyph;
+        }
+    }
+    if time.eq_ignore_ascii_case("all day") {
+        return "\u{1F389}";
+    }
+    "\u{1F4C5}"
+}
+
 pub fn short_when(event: &CalendarEvent) -> String {
     match parse_date(&event.date) {
         Some(date) => {
@@ -96,5 +135,17 @@ mod tests {
         assert!(upcoming(&events, january, 4).len() >= 2);
         assert!(upcoming(&events, november, 4).len() >= 2);
         assert!(upcoming(&[], january, 4).is_empty());
+    }
+
+    #[test]
+    fn marks_follow_the_timewarp_holiday_table() {
+        assert_eq!(event_mark("Christmas Eve", "all day"), "\u{1F385}");
+        assert_eq!(event_mark("Christmas Day", "all day"), "\u{1F384}");
+        assert_eq!(event_mark("Winter solstice", "all day"), "\u{1F31E}");
+        assert_eq!(
+            event_mark("Martin Luther King Jr. Day", "all day"),
+            "\u{1F389}"
+        );
+        assert_eq!(event_mark("Family dinner", "18:00"), "\u{1F4C5}");
     }
 }

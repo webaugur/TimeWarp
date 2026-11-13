@@ -16,8 +16,8 @@ Lengths below are fractions of the face radius. Angles are clockwise from 12. Ev
 - **Temperature** (lower right, 3 to 6). The reading and the condition name, on a matching cream disc.
 - **Year wheel** (lower left). The window is the square corner outside the dial, between the 9 o'clock tangent and the 6 o'clock tangent. The mural is still a disc on the shaft and turns once per tropical year. The middle of the window shows the current day of the year, blended between the solstices and equinoxes, so the season eases instead of jumping.
 - **Sky wheel** (lower right). The mirror corner, between 3 o'clock and 6. It turns once per local civil day. The middle of the window is "now": midnight is night, dawn and dusk are the color change, noon is day.
-- **Calendar, forecast, sun and moon.** Three brass-edged panels under the wheels. Their outer edges line up with the left and right edges of the face, so the row is one face-diameter wide at any diameter. Sun and moon times are computed on the machine (NOAA sunrise equation). They are shown in the system timezone, which should be the place's zone.
-- **Status bar.** Hostname, local addresses, and whether `timedatectl` reports the clock in sync. A failed weather fetch is prefixed on that line. Addresses that cannot be read are said to be missing; none are invented.
+- **Calendar, forecast, sun and moon.** Three borderless panels under the wheels, with no titles. Their outer edges line up with the left and right edges of the face, so the row is one face-diameter wide at any diameter. The type is small and sits close to the panel edges. Marks follow TimeWarp's own set: a calendar or holiday glyph after each event, 🌞 ☁ ☔ ❄ ⚡ after a forecast, and ⬆️ ⬇️ 🌞 🌙 on the sun and moon lines. Sun and moon times are computed on the machine (NOAA sunrise equation). They are shown in the system timezone, which should be the place's zone.
+- **Status bar.** One line: the hostname, the networked-computers mark, the IPv4 address of the interface that holds the default route, and the crate version (`v` plus the package version). Loopback, docker, bridges, and tunnels are not listed, and neither is IPv6. A synced clock adds nothing. A real fault is appended, for example `time sync unknown` when `timedatectl` cannot be read, or `clock not synced` when it says the clock is not. A missing address is an em dash. Nothing is invented.
 
 ## Cycles of Life colors
 
@@ -94,7 +94,7 @@ Force a backend with `EBOARD_BACKEND=kms` or `EBOARD_BACKEND=linuxfb`.
 
 ## Run
 
-With no `--diameter`, the face is the largest one that keeps the whole column on screen: the dial, the squared windows, the three frames, and a status bar tall enough for three wrapped lines. Width and height both limit it. On a 1920×1080 frame that is a 611 pixel face. A window defaults to 1200×800 so it fits a 1080p desktop with a panel, a title bar, and a dock; there the face is 435 pixels.
+With no `--diameter`, the face is the largest one that keeps the whole column on screen: the dial, the squared windows, the three frames, and a single-line status bar. Width and height both limit it. On a 1920×1080 frame that is a 643 pixel face. A window defaults to 1200×800 so it fits a 1080p desktop with a panel, a title bar, and a dock; there the face is 468 pixels.
 
 ```bash
 ./target/release/clockface
@@ -115,7 +115,7 @@ The same values can live in a TOML file. See `clockface.example.toml`. Flags win
 
 Weather defaults to Indianapolis (39.7684, −86.1581), imperial units, refreshed about every 20 minutes from Open-Meteo. No API key. Override the place with `--city` (`indianapolis`, `chicago`, `new york`, `london`, `denver`), or with `--lat` and `--lon`. `--units imperial` or `--units metric`. `--lat` and `--lon` win over `--city`.
 
-If the network is down, the last cached forecast is kept and the status line says the fetch failed. With no cache, the weather aperture says unavailable instead of going blank.
+If the network is down, the last cached forecast is kept and the status line appends the fetch error. With no cache, the weather scene says unavailable instead of going blank.
 
 ## Screenshot
 

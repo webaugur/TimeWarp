@@ -15,7 +15,7 @@ pub const SKY_WEDGE: (f32, f32) = (90.0, 180.0);
 /// Half-width of the three info frames, in face radii. 1.0 makes their outer edges
 /// the same width as the face diameter (left tangent to right tangent).
 const ROW_HALF: f32 = 1.0;
-const GUTTER: f32 = 0.08;
+const GUTTER: f32 = 0.03;
 /// Inset so the column is not flush with a window border or a panel.
 pub const TOP_MARGIN: f32 = 16.0;
 pub const BOTTOM_MARGIN: f32 = 12.0;
@@ -79,10 +79,10 @@ pub fn status_font_size(radius: f32) -> f32 {
     (0.06 * radius).clamp(18.0, 24.0)
 }
 
-/// Room for three wrapped status lines (hostname, several addresses, sync).
+/// Room for one status line: host, address, version, and a warning when there is one.
 pub fn status_height(radius: f32) -> f32 {
     let font = status_font_size(radius);
-    (font + 4.0) * 3.0 + 16.0
+    font + 10.0
 }
 
 /// Height from the top of the face through the status bar, when the info frames
@@ -99,7 +99,7 @@ pub fn preferred_column_height(diameter: f32) -> f32 {
 /// Largest face diameter whose column fits in `viewport`.
 ///
 /// The column is the face, the squared windows under it, the three frames (one
-/// face-diameter wide), and a status bar tall enough to wrap. Width and height
+/// face-diameter wide), and a single-line status bar. Width and height
 /// both constrain it, with a small inset from the edges.
 pub fn fit_diameter(viewport: egui::Vec2) -> f32 {
     let available_w = (viewport.x - 2.0 * SIDE_MARGIN).max(120.0);

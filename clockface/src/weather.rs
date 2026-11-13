@@ -1,8 +1,8 @@
 //! Open-Meteo forecast, cached on disk. No API key.
 //!
 //! The live clock refreshes about every 20 minutes on a background thread (`curl`, so this
-//! crate does not grow an HTTP stack). Offline, the last cache is shown and the status bar
-//! says the fetch failed. A missing cache paints an "unavailable" scene rather than a blank
+//! crate does not grow an HTTP stack). Offline, the last cache is shown and a failed fetch
+//! is appended to the status line. A missing cache paints an "unavailable" scene rather than a blank
 //! aperture. `--screenshot` never touches the network or the cache: it uses [`fixture_january`].
 
 use std::fs;
@@ -158,6 +158,20 @@ pub fn condition_name(code: i32) -> &'static str {
         95 => "thunderstorm",
         96 | 99 => "hailstorm",
         _ => "weather",
+    }
+}
+
+/// Trailing forecast mark. Clear uses TimeWarp's sun (🌞). Cloud, rain, snow,
+/// and storm use ☁ ☔ ❄ ⚡, parked after the words the same way TimeWarp parks a glyph.
+pub fn condition_mark(code: i32) -> &'static str {
+    match code {
+        0 | 1 => "\u{1F31E}",
+        2 => "\u{26C5}",
+        3 | 45 | 48 => "\u{2601}",
+        51..=67 | 80..=82 => "\u{2614}",
+        71..=77 | 85 | 86 => "\u{2744}",
+        95..=99 => "\u{26A1}",
+        _ => "",
     }
 }
 
@@ -319,5 +333,13 @@ mod tests {
         assert_eq!(report.condition, "mainly clear");
         assert!((report.temperature - 72.4).abs() < 0.01);
         assert_eq!(report.daily[0].date, "2026-07-04");
+    }
+
+    #[test]
+    fn forecast_marks_reuse_the_timewarp_sun_and_weather_glyphs() {
+        assert_eq!(condition_mark(0), "\u{1F31E}");
+        assert_eq!(condition_mark(61), "\u{2614}");
+        assert_eq!(condition_mark(71), "\u{2744}");
+        assert_eq!(condition_mark(95), "\u{26A1}");
     }
 }
