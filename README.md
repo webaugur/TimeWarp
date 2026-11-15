@@ -373,4 +373,69 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 # holidays + satellite + color:  python3 -m venv .venv && .venv/bin/pip install -e .
 ```
 
+## Rebuilding the clock SD card
+
+The scripts in `sdcard/` build a Raspberry Pi OS Lite 64-bit card (Debian 13 Trixie, image `2026-10-06-raspios-trixie-arm64-lite`) that boots into `clockface` and replaces the MagicMirror install on `clock.local`. Do this from Tower5810, or any other x86_64 Debian/Ubuntu machine. Do not compile Rust on the Pi 3. It has 1 GB of RAM and the release build will be killed.
+
+The pinned image URL and SHA256 live in `sdcard/config.example.env`. `build-image.sh` downloads the official `.sha256` beside the image and stops if it does not match the pin. Copy the example config, then:
+
+```bash
+cp sdcard/config.example.env sdcard/config.env
+# hostname, user, timezone, rotation, kiosk (kms or labwc), Wi-Fi SSID.
+# Leave the password out of the file.
+export CLOCK_PASSWORD='…'
+export CLOCK_WIFI_PSK='…'          # only if CLOCK_WIFI_SSID is set
+sudo --preserve-env=CLOCK_PASSWORD,CLOCK_WIFI_PSK \
+  sdcard/build-image.sh --config sdcard/config.env
+```
+
+The build host needs `mtools` (the FAT boot partition; the kernel vfat module is not required), `python3`, `curl`, `xz`, `openssl`, and podman or docker. `sudo` is required to mount the ext4 root. A dry run needs neither root nor a password:
+
+```bash
+sdcard/build-image.sh --dry-run
+sdcard/cross-build.sh --dry-run
+```
+
+What the build does:
+
+1. `cross-build.sh` builds `clockface` for `aarch64-unknown-linux-gnu` inside a Debian trixie amd64 container with arm64 multiarch `-dev` packages (`sdcard/cross/Dockerfile`). rustc runs natively and links the Trixie sonames the Pi boots. `libasound2-dev` is always installed, so a checkout with the chime work from PR #43 links, and a checkout without it still builds. The default feature set is `kms` (`--no-default-features --features kms`). `--labwc`, or `CLOCK_KIOSK=labwc` in the image build, produces the desktop binary instead. Set `CLOCKFACE_REF` to a branch, tag, or SHA to build that revision in a temporary worktree; leave it empty to build the tree you have checked out.
+2. `make-boot-theme.py` writes a two-step Plymouth theme: the IndianaDell wizard and sparkling Cherokee ᏃᏫᏍ on black, with no Dell logo. The PNGs are fetched at build time from the public `webaugur/IndianaDell` repo (`Themes/boot/overlay/wizard.png`, then `wizard-watermark.png`). That repo has no LICENSE, so the art is not committed here. If the download fails, pass `--wizard-src` (a PNG, an overlay directory, or a checkout). Rotation defaults to 90. On the `kms` path the frames are upright 1024×1280 because the kernel rotates the framebuffer. On the `labwc` path they are pre-rotated 90° clockwise onto 1280×1024, and `wlr-randr` does the same turn later.
+3. The FAT boot partition is edited with `mtools` and the ext4 root is mounted by sector offset (loop partition nodes are not required), then customized offline the way Raspberry Pi Imager does for `init_format: cloudinit-rpi`: `user-data`, `meta-data`, optional `network-config`, `config.txt` (`disable_splash=1`, `dtparam=spi=on`), and `cmdline.txt` (`quiet splash`, Plymouth, `consoleblank=0`, `ds=nocloud`, and `video=HDMI-A-1:1280x1024@60` with `rotate=` only for `kms`). The account is created by cloud-init with `sudo: null`, so sudo asks for the password. Avahi is installed so the hostname `clock` answers as `clock.local`.
+4. `/opt/clock/provision.sh` runs once on first boot (`/var/log/clock-provision.log`), installs the runtime packages, a timewarp venv on `~/.local/bin` and `/usr/local/bin/timewarp`, the kiosk unit, the analog-jack default, timesyncd, and the Plymouth theme. It sets `MODULES=most` before rebuilding the initramfs (a Trixie bug: otherwise the new splash never replaces `pix`).
+
+Write the card only when you mean it. The script refuses a mounted disk and the disk that holds `/` or `/boot`, and it asks you to type the device path. `CLOCK_WRITE_CONFIRM=/dev/sdX` is the non-interactive form of that same check, not a way around it.
+
+```bash
+sudo --preserve-env=CLOCK_PASSWORD,CLOCK_WIFI_PSK \
+  sdcard/build-image.sh --config sdcard/config.env --device /dev/sdX
+```
+
+`kms` (the default) starts the `kms` binary on tty1 from `clockface.service` (`Restart=always`) with the console user in `video`, `render`, `audio`, `gpio`, and `spi`. Nothing else owns the display, so the kernel rotation is the only rotation. `labwc` is the fallback: autologin on tty1 runs plain `labwc` (not `rpd-labwc`), a black `swaybg`, no panel, and `wlr-randr --transform` instead of the kernel rotate. Audio is the analog headphone jack (`bcm2835` / card name `Headphones`), not HDMI. The Dell monitor is DVI, so HDMI audio is not connected. `/tmp/mute` is the mute file when the clockface revision has the audio table (PR #43). The GPIO5 switch stays unwired: sysfs GPIO is deprecated on Trixie, and a switch needs libgpiod.
+
+Preview the splash on the build machine with `sdcard/out/plymouth/preview.gif` (upright, portrait at rotation 90). Regenerate it alone with:
+
+```bash
+python3 sdcard/make-boot-theme.py --out /tmp/clock-theme --rotation 90 --kiosk kms
+```
+
+### What to check on the Pi
+
+QEMU will not show the VideoCore display, so this is a hardware checklist:
+
+- Plymouth is portrait, black, wizard only, and the console does not flash between the splash and the clock. A brief landscape rainbow from the firmware is expected; `disable_splash=1` only shortens it.
+- The face is upright on the Dell panel (1280×1024 turned clockwise, so 1024×1280). `kms` must not also be transformed by a compositor.
+- The status line is not `TIME SYNC UNKNOWN` after a minute on the network (`timedatectl`).
+- `timewarp` is on `PATH` (`~/.local/bin` and `/usr/local/bin`) and the calendar row is Indianapolis.
+- Ticking, if this binary includes it, comes out of the 3.5 mm jack. HDMI is silent. `echo 1 > /tmp/mute` stops the tick.
+- Pulling the power and plugging it back brings the clock up again without a login prompt. Killing `clockface` restarts it.
+- SPI is on (`ls /dev/spidev0.0`) for the future 20-LED strip. The GPIO5 mute switch is not enabled.
+
+### Known risks
+
+- Pi 3 is VideoCore IV, GLES 2.0. `egui_glow` has misrendered on GLES 2 (emilk/egui#4302). The `kms` build has to be confirmed on this board; a desktop GL machine will not show the bug.
+- 1 GB of RAM. The image does not install a Rust toolchain or `-dev` packages. A second compositor on top of `kms` is the thing the default path avoids.
+- The firmware rainbow can still appear landscape for a moment before the rotated framebuffer exists.
+- `rpd-plym-splash` stays installed because it provides the `pix` theme raspi-config looks for. The default theme is the wizard theme, not `pix`.
+- IndianaDell was public on 2026-11-15 and has no license. Keep using `--wizard-src` if that changes. Do not commit the PNGs.
+
 MIT License — see `LICENSE`. Inspired by timeanddate.com.

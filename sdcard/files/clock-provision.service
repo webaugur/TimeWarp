@@ -1,0 +1,18 @@
+[Unit]
+Description=Provision the grandfather-clock kiosk
+After=cloud-init.service network-online.target
+Wants=network-online.target
+ConditionPathExists=!/var/lib/clock-provision/done
+
+[Service]
+Type=oneshot
+ExecStart=/opt/clock/provision.sh
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=30
+TimeoutStartSec=infinity
+StandardOutput=append:/var/log/clock-provision.log
+StandardError=append:/var/log/clock-provision.log
+
+[Install]
+WantedBy=multi-user.target
