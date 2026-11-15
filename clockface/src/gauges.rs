@@ -31,15 +31,13 @@ const GLASS: &[Color32] = &[
     Color32::from_rgb(0xe8, 0xe8, 0xe8),
     Color32::from_rgb(0x7f, 0x7f, 0x7f),
 ];
+/// Alcohol-thermometer red, dark at the glass edges and a narrow shine down the bore.
 const FLUID: &[Color32] = &[
-    Color32::from_rgb(0xa7, 0xa7, 0x00),
-    Color32::from_rgb(0xff, 0xff, 0xc1),
-    Color32::from_rgb(0x84, 0x84, 0x00),
-];
-const SILVER: &[Color32] = &[
-    Color32::from_rgb(0x8a, 0x8a, 0x8a),
-    Color32::from_rgb(0xf2, 0xf2, 0xf2),
-    Color32::from_rgb(0x6e, 0x6e, 0x6e),
+    Color32::from_rgb(0x8a, 0x06, 0x06),
+    Color32::from_rgb(0xc4, 0x10, 0x10),
+    Color32::from_rgb(0xff, 0x86, 0x86),
+    Color32::from_rgb(0xd0, 0x14, 0x14),
+    Color32::from_rgb(0x74, 0x05, 0x05),
 ];
 
 /// Scale plate, in face radii. Outside the cream dial (1.0) and inside the square.
@@ -467,7 +465,14 @@ fn paint_arc(
         fluid_px(radius),
         FLUID,
     );
-    silver_bulb(painter, center, radius, plate_start);
+    let sign = if spec.end >= spec.start { 1.0 } else { -1.0 };
+    fluid_bulb(
+        painter,
+        center,
+        radius,
+        plate_start + sign * 1.5,
+        (TUBE_IN + TUBE_OUT) * 0.5 - 0.008,
+    );
 }
 
 /// A little plate past the first and last tick, so the end numerals and the bulb
@@ -511,33 +516,48 @@ fn marker(
     painter.circle_filled(tip, 2.3, color);
 }
 
-fn silver_bulb(painter: &Painter, center: Pos2, radius: f32, angle: f32) {
-    let at = (TUBE_IN + TUBE_OUT) * 0.5;
+/// Reservoir at the low end. Diameter is about 2.5 tube-widths, so the radius
+/// is 1.25 tube-widths (`tube_px` is the tube's half-width).
+fn fluid_bulb(painter: &Painter, center: Pos2, radius: f32, angle: f32, at: f32) {
     let origin = polar(center, radius, angle, at);
-    let px = tube_px(radius) * 1.35;
-    let segs = 20u32;
+    let px = tube_px(radius) * 2.5;
+    let segs = 28u32;
     let mut mesh = Mesh::default();
     mesh.vertices.push(Vertex {
         pos: origin,
         uv: WHITE_UV,
-        color: SILVER[1],
+        color: Color32::from_rgb(0xd8, 0x18, 0x18),
     });
     for i in 0..=segs {
         let t = i as f32 / segs as f32;
         let ang = t * std::f32::consts::TAU;
         let offset = Vec2::new(ang.cos(), ang.sin()) * px;
-        let highlight = ((offset.x + offset.y) / (2.0 * px)).clamp(-1.0, 1.0);
-        let u = (highlight + 1.0) * 0.5;
+        let nx = offset.x / px;
+        let ny = offset.y / px;
         mesh.vertices.push(Vertex {
             pos: origin + offset,
             uv: WHITE_UV,
-            color: sample_stops(SILVER, u),
+            color: bulb_color(nx, ny),
         });
     }
     for i in 0..segs {
         mesh.add_triangle(0, i + 1, i + 2);
     }
     painter.add(Shape::mesh(mesh));
+}
+
+fn bulb_color(nx: f32, ny: f32) -> Color32 {
+    let light = ((-nx - ny) * 0.5 + 0.55).clamp(0.25, 1.0);
+    let body = Color32::from_rgb(
+        (0xb4 as f32 * light) as u8,
+        (0x0c as f32 * light) as u8,
+        (0x0c as f32 * light) as u8,
+    );
+    let dx = nx + 0.36;
+    let dy = ny + 0.42;
+    let spec = (1.0 - (dx * dx + dy * dy).sqrt() / 0.42).clamp(0.0, 1.0);
+    let spec = spec * spec;
+    lerp_color(body, Color32::from_rgb(0xff, 0xe4, 0xe4), spec * 0.9)
 }
 
 fn band(
