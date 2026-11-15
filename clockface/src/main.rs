@@ -13,10 +13,11 @@ use chrono::Local;
 use clap::Parser;
 
 use clockface::{
-    example_events, fetch_weather, gather_status, install_fonts, load_cache, load_cached_sun,
-    load_settings, load_sun, now_unix, paint_kiosk, render_rgba_with, repaint_delay, start_audio,
-    store_cache, write_png, KioskModel, Place, Settings, SettingsOverride, SoundFault, StatusLine,
-    Units, WeatherReport, SUN_REFRESH_SECS,
+    example_events, fetch_almanac, fetch_weather, gather_status, install_fonts, load_cache,
+    load_cached_sun, load_settings, load_sun, now_unix, paint_kiosk, render_rgba_with,
+    repaint_delay, screenshot_time, start_audio, store_cache, write_png, Almanac, AlmanacSlot,
+    KioskModel, Place, Settings, SettingsOverride, SoundFault, StatusLine, Units, WeatherReport,
+    SUN_REFRESH_SECS,
 };
 
 #[derive(Parser, Debug)]
@@ -131,15 +132,18 @@ fn run() -> Result<(), String> {
         let height = cli.height.unwrap_or(1080);
         let viewport = egui::vec2(width as f32, height as f32);
         let (center, diameter) = settings.placement(viewport);
+        let now = screenshot_time();
+        let almanac = fetch_almanac(&settings, now);
         let sun = load_sun();
         let rgba = render_rgba_with(
             width,
             height,
             center,
             diameter,
-            clockface::screenshot_time(),
+            now,
             &settings.place,
             sun,
+            Some(&almanac),
         )?;
         write_png(path, width, height, &rgba)?;
         println!(
@@ -181,10 +185,12 @@ struct ClockApp {
     weather: Arc<Mutex<WeatherReport>>,
     sun: Arc<Mutex<Option<std::sync::Arc<clockface::SunImage>>>>,
     sun_at: Instant,
+    almanac: Arc<Mutex<AlmanacSlot>>,
     status: StatusLine,
     status_at: Instant,
     fetching: Arc<AtomicBool>,
     fetching_sun: Arc<AtomicBool>,
+    fetching_almanac: Arc<AtomicBool>,
     sound_fault: SoundFault,
 }
 
@@ -193,6 +199,7 @@ impl ClockApp {
         let weather = load_cache(&settings.place)
             .unwrap_or_else(|| WeatherReport::unavailable(&settings.place));
         let sound_fault = start_audio(&settings.audio);
+        let initial = Almanac::builtin(Local::now(), &settings.place, settings.events.as_deref());
         Self {
             settings,
             sound_fault,
@@ -201,10 +208,15 @@ impl ClockApp {
             sun_at: Instant::now()
                 .checked_sub(Duration::from_secs(SUN_REFRESH_SECS))
                 .unwrap_or_else(Instant::now),
+            almanac: Arc::new(Mutex::new(AlmanacSlot {
+                almanac: initial,
+                attempted: None,
+            })),
             status: gather_status(),
             status_at: Instant::now(),
             fetching: Arc::new(AtomicBool::new(false)),
             fetching_sun: Arc::new(AtomicBool::new(false)),
+            fetching_almanac: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -218,23 +230,28 @@ fn show_clock(ui: &mut egui::Ui, app: &mut ClockApp) {
     }
     refresh_weather_if_stale(app);
     refresh_sun_if_stale(app);
+    refresh_almanac_if_stale(app);
     let weather = app.weather.lock().expect("weather lock").clone();
     let sun = app.sun.lock().expect("sun lock").clone();
+    let held = app.almanac.lock().expect("almanac lock").almanac.clone();
     let mut status = app.status.clone();
-    if !weather.note.is_empty() {
-        status.alert = weather.note.clone();
-    }
+    status.alert = join_faults(&weather.note, &held.fault);
     if let Ok(sound) = app.sound_fault.lock() {
         let sound = sound.trim();
         if !sound.is_empty() {
-            if status.alert.is_empty() {
-                status.alert = sound.to_string();
-            } else {
-                status.alert = format!("{}  {sound}", status.alert);
-            }
+            status.alert = join_faults(&status.alert, sound);
         }
     }
-    let events = app.settings.events.clone().unwrap_or_else(example_events);
+    let events = if held.from_timewarp {
+        held.events.clone()
+    } else {
+        app.settings.events.clone().unwrap_or_else(example_events)
+    };
+    let sky = if held.from_timewarp {
+        held.sky.clone()
+    } else {
+        clockface::DaySky::builtin(now, &app.settings.place)
+    };
     let screen = ui.ctx().viewport_rect();
     let (center, diameter) = app.settings.placement(screen.size());
     let model = KioskModel {
@@ -242,10 +259,44 @@ fn show_clock(ui: &mut egui::Ui, app: &mut ClockApp) {
         place: app.settings.place.clone(),
         weather,
         events,
+        sky,
         status,
         sun,
     };
     paint_kiosk(ui.painter(), screen, center, diameter, &model);
+}
+
+fn join_faults(weather: &str, timewarp: &str) -> String {
+    match (weather.trim().is_empty(), timewarp.trim().is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => weather.trim().to_owned(),
+        (true, false) => timewarp.trim().to_owned(),
+        (false, false) => format!("{}  {}", weather.trim(), timewarp.trim()),
+    }
+}
+
+fn refresh_almanac_if_stale(app: &ClockApp) {
+    let today = Local::now().date_naive();
+    let due = {
+        let slot = app.almanac.lock().expect("almanac lock");
+        !slot.fresh_for(today)
+    };
+    if !due {
+        return;
+    }
+    if app.fetching_almanac.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let settings = app.settings.clone();
+    let slot = Arc::clone(&app.almanac);
+    let flag = Arc::clone(&app.fetching_almanac);
+    std::thread::spawn(move || {
+        let almanac = fetch_almanac(&settings, Local::now());
+        let mut held = slot.lock().expect("almanac lock");
+        held.almanac = almanac;
+        held.attempted = Some(Instant::now());
+        flag.store(false, Ordering::SeqCst);
+    });
 }
 
 fn refresh_sun_if_stale(app: &mut ClockApp) {

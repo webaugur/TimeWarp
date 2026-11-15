@@ -1,7 +1,8 @@
 //! Upcoming calendar lines for the left-hand box.
 //!
-//! TimeWarp holidays can replace this list later. An absent `[events]` key uses the built-in
-//! examples so a fresh kiosk is not blank. An empty list is respected and the box says so.
+//! The live list is TimeWarp's holidays and seasons, with any `[events]` rows merged in.
+//! These examples are only the fallback when `timewarp` cannot be read, so a fresh kiosk
+//! is not blank. An empty `[events]` list adds no personal rows.
 
 use chrono::{Datelike, NaiveDate};
 

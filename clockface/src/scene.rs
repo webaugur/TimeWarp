@@ -180,6 +180,7 @@ pub fn visible_layers(
     theme: &Theme,
     now: DateTime<Local>,
     weather: &WeatherReport,
+    season: Option<&str>,
 ) -> BTreeSet<String> {
     let manifest = &theme.manifest;
     let mut on = BTreeSet::new();
@@ -210,7 +211,8 @@ pub fn visible_layers(
         on.insert(sky.clone());
     }
 
-    let (leaves, ground) = match season_name(now.date_naive()) {
+    let named = season.unwrap_or_else(|| season_name(now.date_naive()));
+    let (leaves, ground) = match named {
         "Spring" => (
             &manifest.season.leaves.spring,
             &manifest.season.ground.spring,
@@ -524,9 +526,10 @@ pub fn paint_horizon(
     aperture: f32,
     now: DateTime<Local>,
     weather: &WeatherReport,
+    season: Option<&str>,
 ) {
     let theme = theme();
-    let visible = visible_layers(&theme, now, weather);
+    let visible = visible_layers(&theme, now, weather, season);
     // Twice the aperture's physical pixels. The mesh then scales down, so the
     // sky and clouds are not a small bitmap stretched to the dial.
     let ppp = ctx.pixels_per_point().clamp(1.0, 3.0);
@@ -674,9 +677,8 @@ mod tests {
     #[test]
     fn january_screenshot_turns_on_winter_snow_and_day() {
         let theme = Theme::from_parts(DEFAULT_SVG, DEFAULT_TOML).unwrap();
-        let on = visible_layers(&theme, screenshot_time(), &fixture_january());
+        let on = visible_layers(&theme, screenshot_time(), &fixture_january(), None);
         for id in [
-            "land",
             "tree-trunk",
             "leaves-winter",
             "ground-winter",
@@ -749,7 +751,7 @@ mod tests {
     #[test]
     fn default_scene_raster_is_a_blue_day_sky() {
         let theme = Theme::from_parts(DEFAULT_SVG, DEFAULT_TOML).unwrap();
-        let on = visible_layers(&theme, screenshot_time(), &fixture_january());
+        let on = visible_layers(&theme, screenshot_time(), &fixture_january(), None);
         let rgba = cached_rgba(&theme, &on, 200, 100).unwrap();
         // Mid-sky of the January fixture, which is an overcast snow day.
         let x = 100usize;

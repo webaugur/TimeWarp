@@ -3,7 +3,7 @@
 //! (`diameter / 2`), except the outline, which is a fraction of the diameter.
 
 use chrono::{DateTime, Local, TimeZone, Timelike};
-use egui::{Color32, FontFamily, FontId, Mesh, Painter, Pos2, Shape, Stroke, Vec2};
+use egui::{Color32, FontFamily, Mesh, Painter, Pos2, Shape, Stroke, Vec2};
 
 /// Teardrop tick. Distances and `width` are fractions of the radius.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -43,7 +43,9 @@ pub struct SecondBounce {
     pub exp_divisor_ms: f64,
 }
 
-/// Soft shadow under each hand. No offset; the blur is a fraction of `r`.
+/// Soft shadow under every hand. No offset; the blur is a fraction of `r`.
+///
+/// The four layers stack to about 0.6 opacity, which is this color's alpha.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ShadowStyle {
     pub color: Color32,
@@ -203,7 +205,7 @@ pub fn paint_with(
     }
     let r = diameter * 0.5;
     paint_brass(painter, center, r, 0.0);
-    paint_markings_and_hands(painter, center, diameter, now, style);
+    paint_markings_and_hands(painter, center, diameter, now, style, None);
 }
 
 /// Inner ring, ticks, numerals, and hands. The kiosk paints these after the aperture discs.
@@ -213,13 +215,15 @@ pub(crate) fn paint_markings_and_hands(
     diameter: f32,
     now: DateTime<Local>,
     style: &RomanClockStyle,
+    wind: Option<crate::weather::WindHand>,
 ) {
     let r = diameter * 0.5;
     paint_inner_ring(painter, center, r, &style);
     paint_ticks(painter, center, r, &style, now);
     paint_numerals(painter, center, r, &style);
     let (hour, minute, second) = hand_angles(now, &style);
-    // Hour, then minute, then second, so the second hand (and its cap) is on top.
+    // Gold hands, then the wind hand, then the red second hand. The hub is
+    // painted again last so it stays above all of them.
     paint_hand(painter, center, r, hour, &style.hour_hand, &style.shadow);
     paint_hand(
         painter,
@@ -229,6 +233,9 @@ pub(crate) fn paint_markings_and_hands(
         &style.minute_hand,
         &style.shadow,
     );
+    if let Some(wind) = wind {
+        paint_wind_hand(painter, center, r, wind, &style.shadow);
+    }
     paint_hand(
         painter,
         center,
@@ -237,6 +244,9 @@ pub(crate) fn paint_markings_and_hands(
         &style.second_hand,
         &style.shadow,
     );
+    paint_hub(painter, center, r, &style.hour_hand);
+    paint_hub(painter, center, r, &style.minute_hand);
+    paint_hub(painter, center, r, &style.second_hand);
 }
 
 pub(crate) fn direction(degrees_clockwise_from_12: f32) -> Vec2 {
@@ -244,14 +254,13 @@ pub(crate) fn direction(degrees_clockwise_from_12: f32) -> Vec2 {
     Vec2::new(rad.sin(), -rad.cos())
 }
 
-/// Brass dish and bezel. `inner` is a hole radius in pixels (0 for a solid face).
+/// Dial ring. `inner` is a hole radius in pixels (0 for a solid face).
 ///
-/// The mesh is fine on purpose. Both the window and `--screenshot` fill these
-/// triangles, so a coarse fan would smear the specular into a different-looking
-/// gradient on each path.
+/// Cream at the center, amber at the rim. The disc ends on the circle. The
+/// mesh stays fine so the wash does not band.
 pub(crate) fn paint_brass(painter: &Painter, center: Pos2, radius: f32, inner: f32) {
     let angular = 192u32;
-    let radial = 40u32;
+    let radial = 48u32;
     let cols = radial + 1;
     let mut mesh = Mesh::default();
     for i in 0..=angular {
@@ -261,7 +270,7 @@ pub(crate) fn paint_brass(painter: &Painter, center: Pos2, radius: f32, inner: f
             let u = j as f32 / radial as f32;
             let dist = inner + (radius - inner) * u;
             let p = center + dir * dist;
-            mesh.colored_vertex(p, crate::brass::shade_dial(center, p, radius, 1.0));
+            mesh.colored_vertex(p, dial_color(dist, radius));
         }
     }
     for i in 0..angular {
@@ -272,6 +281,19 @@ pub(crate) fn paint_brass(painter: &Painter, center: Pos2, radius: f32, inner: f
         }
     }
     painter.add(Shape::mesh(mesh));
+}
+
+/// `#ffffb2` at the center, `#ffcc7f` at the dial edge. Opaque all the way out.
+fn dial_color(dist: f32, radius: f32) -> Color32 {
+    let t = if radius > 0.0 {
+        (dist / radius).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let red: f32 = 255.0;
+    let green = 255.0 + (204.0 - 255.0) * t;
+    let blue = 178.0 + (127.0 - 178.0) * t;
+    Color32::from_rgb(red.round() as u8, green.round() as u8, blue.round() as u8)
 }
 
 fn paint_inner_ring(painter: &Painter, center: Pos2, r: f32, style: &RomanClockStyle) {
@@ -327,7 +349,8 @@ fn paint_teardrop(
     let right = hub - perp * radius;
     let tip = center + dir * (d - tick.inward * r);
     if let Some(gain) = metal {
-        paint_gold_pin(painter, hub, tip, perp, radius, gain);
+        paint_gold_pin(painter, hub, tip, perp, radius + 1.4, gain, true);
+        paint_gold_pin(painter, hub, tip, perp, radius, gain, false);
     } else {
         painter.circle_filled(hub, radius.max(0.0), tick.color);
         if tick.inward > 0.0 && width > 0.0 {
@@ -344,7 +367,15 @@ fn paint_teardrop(
 ///
 /// The point sits at `tip` and the dome at `hub`. Length comes only from those
 /// two points, so the window and the screenshot cannot grow a different spike.
-fn paint_gold_pin(painter: &Painter, hub: Pos2, tip: Pos2, perp: Vec2, radius: f32, gain: f32) {
+fn paint_gold_pin(
+    painter: &Painter,
+    hub: Pos2,
+    tip: Pos2,
+    perp: Vec2,
+    radius: f32,
+    gain: f32,
+    outline: bool,
+) {
     let light_bias = perp.dot(crate::brass::light_vec2());
     let stations = 12u32;
     let across = 4u32;
@@ -372,10 +403,12 @@ fn paint_gold_pin(painter: &Painter, hub: Pos2, tip: Pos2, perp: Vec2, radius: f
         for j in 0..=across {
             let cross = -1.0 + 2.0 * (j as f32 / across as f32);
             let p = axis + perp * (half * cross);
-            mesh.colored_vertex(
-                p,
-                crate::brass::shade_gold_pin(cross, along, light_bias, gain),
-            );
+            let color = if outline {
+                PIN_EDGE
+            } else {
+                crate::brass::shade_gold_pin(cross, along, light_bias, gain)
+            };
+            mesh.colored_vertex(p, color);
         }
     }
     for i in 0..stations {
@@ -388,23 +421,8 @@ fn paint_gold_pin(painter: &Painter, hub: Pos2, tip: Pos2, perp: Vec2, radius: f
     painter.add(Shape::mesh(mesh));
 }
 
-fn paint_numerals(painter: &Painter, center: Pos2, r: f32, style: &RomanClockStyle) {
-    const LABELS: [&str; 4] = ["XII", "III", "VI", "IX"];
-    let px = style.numeral_size * r;
-    if px <= 0.0 {
-        return;
-    }
-    let font = FontId::new(px, style.numeral_font.clone());
-    for (index, label) in LABELS.iter().enumerate() {
-        let anchor = center + direction(index as f32 * 90.0) * (style.numeral_radius * r);
-        painter.text(
-            anchor,
-            egui::Align2::CENTER_CENTER,
-            *label,
-            font.clone(),
-            style.numeral_color,
-        );
-    }
+fn paint_numerals(painter: &Painter, center: Pos2, r: f32, _style: &RomanClockStyle) {
+    crate::ornament::paint_numerals(painter, center, r);
 }
 
 fn paint_hand(
@@ -421,12 +439,137 @@ fn paint_hand(
     let width = hand.width * r;
     let cap = hand.cap_radius * r;
     let blur = shadow.blur * r;
-    paint_shadow(painter, tail, tip, center, width, cap, blur, shadow.color);
-    if width > 0.0 {
-        painter.line_segment([tail, tip], Stroke::new(width, hand.color));
+    if hand.color == Color32::BLACK {
+        if hand.length < 0.65 {
+            crate::ornament::paint_hour_hand(painter, center, r, degrees, shadow);
+        } else {
+            crate::ornament::paint_minute_hand(painter, center, r, degrees, shadow);
+        }
+    } else {
+        paint_shadow(painter, tail, tip, center, width, cap, blur, shadow.color);
+        if width > 0.0 {
+            painter.line_segment([tail, tip], Stroke::new(width, hand.color));
+        }
     }
-    if cap > 0.0 {
+    paint_hub(painter, center, r, hand);
+}
+
+fn paint_hub(painter: &Painter, center: Pos2, r: f32, hand: &HandStyle) {
+    let cap = hand.cap_radius * r;
+    if cap <= 0.0 {
+        return;
+    }
+    if hand.color == Color32::BLACK {
+        painter.circle_filled(center, cap + 1.15, GOLD_EDGE);
+        paint_gold_hub(painter, center, cap);
+    } else {
         painter.circle_filled(center, cap, hand.color);
+    }
+}
+
+const GOLD_EDGE: Color32 = Color32::from_rgb(0x3a, 0x24, 0x08);
+/// Darker gold so the pins still read on the cream dial.
+const PIN_EDGE: Color32 = Color32::from_rgb(0x5c, 0x3a, 0x0c);
+
+/// (extra stroke width, in multiples of `blur`, and straight alpha).
+/// Composed opacity of the four alphas is ~0.596, i.e. the shadow's 0.6.
+pub(crate) const SHADOW_LAYERS: [(f32, f32); 4] =
+    [(2.0, 0.12), (1.2, 0.16), (0.55, 0.22), (0.18, 0.30)];
+
+fn paint_gold_hub(painter: &Painter, center: Pos2, radius: f32) {
+    let light = crate::brass::light_vec2();
+    let segs = 24u32;
+    let mut mesh = Mesh::default();
+    mesh.colored_vertex(center, crate::brass::shade_gold_pin(0.0, 0.9, 1.0, 1.0));
+    for i in 0..=segs {
+        let ang = i as f32 / segs as f32 * std::f32::consts::TAU;
+        let n = Vec2::new(ang.cos(), ang.sin());
+        let cross = n.dot(light);
+        mesh.colored_vertex(
+            center + n * radius,
+            crate::brass::shade_gold_pin(cross, 0.45, 1.0, 1.0),
+        );
+    }
+    for i in 0..segs {
+        mesh.add_triangle(0, i + 1, i + 2);
+    }
+    painter.add(Shape::mesh(mesh));
+}
+
+const WIND_GREEN: Color32 = Color32::from_rgb(0x39, 0xff, 0x14);
+const WIND_EDGE: Color32 = Color32::from_rgb(0x0e, 0x5c, 0x0a);
+
+/// Bright green staff pointing where the wind comes from, with station-model barbs.
+fn paint_wind_hand(
+    painter: &Painter,
+    center: Pos2,
+    r: f32,
+    wind: crate::weather::WindHand,
+    shadow: &ShadowStyle,
+) {
+    let blur = shadow.blur * r;
+    let Some((pennants, full, half)) = crate::weather::wind_barbs(wind.knots) else {
+        let hub = (0.028 * r).max(3.0);
+        paint_shadow(
+            painter,
+            center,
+            center,
+            center,
+            hub * 2.0,
+            hub,
+            blur,
+            shadow.color,
+        );
+        painter.circle_filled(center, hub + 1.1, WIND_EDGE);
+        painter.circle_filled(center, hub, WIND_GREEN);
+        return;
+    };
+    let dir = direction(wind.from_degrees);
+    let perp = Vec2::new(-dir.y, dir.x);
+    let reach = 0.58 * r;
+    let tip = center + dir * reach;
+    // Just under the minute hand (0.01 of the radius). The barb strokes match.
+    let width = 0.009 * r;
+    let outline = width * 0.42;
+    shadow_segment(painter, center, tip, width, blur, shadow.color);
+    painter.line_segment([center, tip], Stroke::new(width + outline * 2.0, WIND_EDGE));
+    painter.line_segment([center, tip], Stroke::new(width, WIND_GREEN));
+
+    let full_len = 0.11 * r;
+    let step = 0.040 * r;
+    let mut along = reach - 0.02 * r;
+    let barb = |attach: Pos2, len: f32| {
+        let lean = (-dir * 0.50 + perp * 0.866).normalized();
+        attach + lean * len
+    };
+    for _ in 0..pennants {
+        if along < 0.16 * r {
+            break;
+        }
+        let outer = center + dir * along;
+        let inner = center + dir * (along - 0.048 * r);
+        let point = barb(outer, full_len * 0.92);
+        let pennant = vec![outer, inner, point];
+        shadow_polygon(painter, &pennant, blur, shadow.color);
+        painter.add(Shape::convex_polygon(
+            pennant,
+            WIND_GREEN,
+            Stroke::new(outline.max(1.2), WIND_EDGE),
+        ));
+        along -= 0.062 * r;
+    }
+    for (count, len) in [(full, full_len), (u32::from(half), full_len * 0.5)] {
+        for _ in 0..count {
+            if along < 0.16 * r {
+                break;
+            }
+            let attach = center + dir * along;
+            let end = barb(attach, len);
+            shadow_segment(painter, attach, end, width, blur, shadow.color);
+            painter.line_segment([attach, end], Stroke::new(width + outline * 2.0, WIND_EDGE));
+            painter.line_segment([attach, end], Stroke::new(width, WIND_GREEN));
+            along -= step;
+        }
     }
 }
 
@@ -442,20 +585,49 @@ fn paint_shadow(
     blur: f32,
     color: Color32,
 ) {
-    // (extra stroke width, in multiples of `blur`, and straight alpha).
-    // Composed opacity of the four alphas is ~0.596, i.e. the spec's 0.6.
-    const LAYERS: [(f32, f32); 4] = [(2.0, 0.12), (1.2, 0.16), (0.55, 0.22), (0.18, 0.30)];
+    shadow_segment(painter, tail, tip, width, blur, color);
     let scale = (color.a() as f32 / 255.0) / 0.6;
     let [red, green, blue, _] = color.to_array();
-    for (spread, alpha) in LAYERS {
+    for (spread, alpha) in SHADOW_LAYERS {
         let a = ((alpha * scale) * 255.0).round().clamp(0.0, 255.0) as u8;
         if a == 0 {
             continue;
         }
         let layer = Color32::from_rgba_unmultiplied(red, green, blue, a);
-        let extra = blur * spread;
-        painter.line_segment([tail, tip], Stroke::new((width + extra).max(0.0), layer));
-        painter.circle_filled(center, (cap + extra * 0.5).max(0.0), layer);
+        painter.circle_filled(center, (cap + blur * spread * 0.5).max(0.0), layer);
+    }
+}
+
+fn shadow_segment(painter: &Painter, tail: Pos2, tip: Pos2, width: f32, blur: f32, color: Color32) {
+    let scale = (color.a() as f32 / 255.0) / 0.6;
+    let [red, green, blue, _] = color.to_array();
+    for (spread, alpha) in SHADOW_LAYERS {
+        let a = ((alpha * scale) * 255.0).round().clamp(0.0, 255.0) as u8;
+        if a == 0 {
+            continue;
+        }
+        let layer = Color32::from_rgba_unmultiplied(red, green, blue, a);
+        painter.line_segment(
+            [tail, tip],
+            Stroke::new((width + blur * spread).max(0.0), layer),
+        );
+    }
+}
+
+fn shadow_polygon(painter: &Painter, pts: &[Pos2], blur: f32, color: Color32) {
+    let scale = (color.a() as f32 / 255.0) / 0.6;
+    let [red, green, blue, _] = color.to_array();
+    for (spread, alpha) in SHADOW_LAYERS {
+        let a = ((alpha * scale) * 255.0).round().clamp(0.0, 255.0) as u8;
+        if a == 0 {
+            continue;
+        }
+        let layer = Color32::from_rgba_unmultiplied(red, green, blue, a);
+        painter.add(Shape::convex_polygon(
+            pts.to_vec(),
+            Color32::TRANSPARENT,
+            Stroke::new((blur * spread).max(0.5), layer),
+        ));
     }
 }
 
@@ -484,6 +656,15 @@ mod tests {
         // 10:08 is just past the 10, not on a fixed UTC-4 conversion.
         assert!((f64::from(hour) - 304.308333).abs() < 1e-3);
         assert!((f64::from(minute) - 51.7).abs() < 1e-3);
+    }
+
+    #[test]
+    fn dial_edge_is_opaque_amber() {
+        let center = dial_color(0.0, 100.0);
+        assert_eq!(center, Color32::from_rgb(255, 255, 178));
+        let edge = dial_color(100.0, 100.0);
+        assert_eq!(edge, Color32::from_rgb(255, 204, 127));
+        assert_eq!(edge.a(), 255);
     }
 
     #[test]
