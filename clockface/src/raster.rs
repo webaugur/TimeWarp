@@ -509,22 +509,28 @@ mod tests {
             "upper quarter should be black, got {space:?}"
         );
 
-        let wedge = at_pos(&rgba, width, height, center + direction(225.0) * (1.15 * r));
+        let wedge = at_pos(&rgba, width, height, center + direction(225.0) * (1.40 * r));
         assert!(
             lum(wedge) > 40,
-            "year wedge should show the season mural, got {wedge:?}"
+            "year wedge should show the season mural beyond the trough, got {wedge:?}"
         );
-        // Just outside the dial, over the blue sky, before the chrome trough.
-        // A black pixel here is the ground showing through a gap in the wheel art.
+        // The dial's amber meets the trough. Sky or a black ring in between is a gap.
+        let rim = at_pos(&rgba, width, height, center + direction(225.0) * (0.97 * r));
+        assert!(
+            rim[0] > 230 && rim[1] > 170 && rim[0] as i32 > rim[2] as i32 + 40,
+            "inside the dial should stay warm amber, got {rim:?}"
+        );
         let seam = at_pos(
             &rgba,
             width,
             height,
-            center + direction(225.0) * (1.006 * r),
+            center + direction(225.0) * (1.008 * r),
         );
+        let sky = seam[2] as i32 > seam[0] as i32 + 20 && seam[2] > 100;
+        let black = seam[0] < 20 && seam[1] < 20 && seam[2] < 20;
         assert!(
-            seam[2] > 100 && seam[2] as i32 > seam[0] as i32 + 20,
-            "the dial should meet the sky with no black ring, got {seam:?}"
+            !sky && !black,
+            "the dial should meet the trough with no gap, got {seam:?}"
         );
 
         let style = RomanClockStyle::default();

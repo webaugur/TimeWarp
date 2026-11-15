@@ -1,12 +1,11 @@
 //! Curved thermometer and barometer in one chrome trough under the dial.
 //!
-//! The trough is a single recessed arc from the left wedge, through 6 o'clock,
-//! to the right wedge. Its floor glows like a lamp behind frosted glass. Each
-//! vial floats in that channel: temperature in °F on the left, sea-level
-//! pressure in inches of mercury on the right. Numerals, unit labels, and the
-//! tick icons sit on the outer side of the tube, away from the dial. The
-//! square corner and the boards under the face pinch the arc, so it is wide
-//! in the wedges and only a slim channel at 6.
+//! The trough is a half circle from 9 o'clock through 6 to 3, concentric with
+//! the dial. Its inner lip tucks under the cream and its outer lip is a
+//! constant radius, so the dial and the boards clip it. The floor glows like
+//! a lamp behind frosted glass. Each vial floats in that channel: temperature
+//! in °F on the left, sea-level pressure in inches of mercury on the right.
+//! Numerals and tick icons stay inside the rim, on the outer side of the tube.
 
 use chrono::{DateTime, Duration, Local, NaiveDateTime};
 use egui::epaint::{Vertex, WHITE_UV};
@@ -41,18 +40,23 @@ const FLUID: &[Color32] = &[
     Color32::from_rgb(0x74, 0x05, 0x05),
 ];
 
-/// Trough and tube, in face radii. The dial ends at 1.0. Boards begin near 1.03.
-const TROUGH_IN: f32 = 1.014;
-const CHROME: f32 = 0.009;
+/// Trough, in face radii. The inner lip starts under the dial (the disc ends at 1.0)
+/// so the chrome meets the cream with no sky between them. The outer lip is a
+/// constant radius: a half circle from 9 o'clock through 6 to 3, clipped by the
+/// dial and the boards rather than shrunk to the wedges.
+const TROUGH_IN: f32 = 0.990;
+const TROUGH_OUT: f32 = 1.248;
+const INNER_LIP: f32 = 0.024;
+const OUTER_LIP: f32 = 0.012;
 const TUBE_IN: f32 = 1.042;
 const TUBE_OUT: f32 = 1.074;
 const FLUID_IN: f32 = 1.050;
 const FLUID_OUT: f32 = 1.066;
-/// Numerals sit outside the tube.
-const LABEL_R: f32 = 1.122;
-/// Left high end, sweeping through 6 o'clock to the right high end.
-const TROUGH_A0: f32 = 246.0;
-const TROUGH_A1: f32 = 114.0;
+/// Numerals sit outside the tube and inside the outer chrome.
+const LABEL_R: f32 = 1.186;
+/// 9 o'clock, sweeping through 6 to 3 o'clock.
+const TROUGH_A0: f32 = 270.0;
+const TROUGH_A1: f32 = 90.0;
 
 /// Left wedge, bulb toward 6, values increasing toward 9.
 const LEFT_START: f32 = 212.0;
@@ -220,7 +224,6 @@ pub fn paint(
     if !show_thermo && !show_baro {
         return;
     }
-    paint_trough(painter, center, radius);
     if show_thermo {
         paint_thermometer(painter, center, radius, now, weather);
     }
@@ -396,9 +399,9 @@ fn paint_arc(
     for value in tick_values(lo, hi, spec.minor) {
         let major = on_step(value, spec.major);
         let outer = if major {
-            LABEL_R - 0.014
+            TUBE_OUT + 0.020
         } else {
-            LABEL_R - 0.026
+            TUBE_OUT + 0.012
         };
         let width = if major { 1.25 } else { 0.8 };
         radial_line(
@@ -423,7 +426,7 @@ fn paint_arc(
         }
     }
     let mid = (spec.start + spec.end) * 0.5;
-    let unit_at = polar(center, radius, mid, LABEL_R + 0.028);
+    let unit_at = polar(center, radius, mid, LABEL_R);
     painter.text(
         unit_at,
         Align2::CENTER_CENTER,
@@ -533,7 +536,7 @@ fn marker(
     mark_icon(painter, center, radius, ang, color, kind, spec);
 }
 
-/// A small vector glyph just outside the marker dot, in the tick's color.
+/// A glyph in the tick's color, centered on the ray just past the marker dot.
 fn mark_icon(
     painter: &Painter,
     center: Pos2,
@@ -543,9 +546,9 @@ fn mark_icon(
     kind: Mark,
     spec: &ArcSpec,
 ) {
-    let s = (0.028 * radius).clamp(7.0, 11.0);
-    let tip = polar(center, radius, angle, TUBE_OUT + 0.016);
-    let origin = tip + ahead_tangent(angle, spec) * (s * 0.95 + 3.2);
+    let s = (0.028 * 1.4 * radius).clamp(9.5, 16.0);
+    let tip_r = TUBE_OUT + 0.016;
+    let origin = polar(center, radius, angle, tip_r + (3.6 + s * 0.55) / radius);
     match kind {
         Mark::High => triangle(painter, origin, s, color, true),
         Mark::Dew => droplet(painter, origin, s, color),
@@ -822,43 +825,45 @@ fn angle_of(spec: &ArcSpec, lo: f64, hi: f64, value: f64) -> f32 {
 }
 
 fn wedge_rect(center: Pos2, radius: f32, left: bool) -> Rect {
-    let bottom = center.y + radius * 1.026;
+    let pad = radius * 0.10;
+    let bottom = center.y + radius * 1.28;
     if left {
         Rect::from_min_max(
-            Pos2::new(center.x - radius, center.y),
+            Pos2::new(center.x - radius - pad, center.y),
             Pos2::new(center.x, bottom),
         )
     } else {
         Rect::from_min_max(
             Pos2::new(center.x, center.y),
-            Pos2::new(center.x + radius, bottom),
+            Pos2::new(center.x + radius + pad, bottom),
         )
     }
 }
 
-/// One recessed channel from the left vial, under the dial, to the right vial.
-fn paint_trough(painter: &Painter, center: Pos2, radius: f32) {
-    let clip = Rect::from_min_max(
-        Pos2::new(center.x - radius - 1.0, center.y - 2.0),
-        Pos2::new(center.x + radius + 1.0, center.y + radius * 1.026),
-    );
-    let painter = painter.with_clip_rect(clip);
-    let steps = 78u32;
-    let bands = 8u32;
+/// The glowing half-circle, drawn before the dial so the cream covers the overlap.
+pub fn paint_trough(painter: &Painter, center: Pos2, radius: f32, weather: &WeatherReport) {
+    if radius < 8.0 {
+        return;
+    }
+    let show =
+        weather.temperature.is_finite() || weather.pressure_hpa.is_some_and(|p| p.is_finite());
+    if !show {
+        return;
+    }
+    let steps = 96u32;
+    let bands = 10u32;
     let cols = bands + 1;
     let mut mesh = Mesh::default();
     for i in 0..=steps {
         let t = i as f32 / steps as f32;
         let deg = TROUGH_A0 + (TROUGH_A1 - TROUGH_A0) * t;
-        let inner = TROUGH_IN;
-        let outer = trough_outer(deg);
         for b in 0..=bands {
             let u = b as f32 / bands as f32;
-            let r = inner + (outer - inner) * u;
+            let r = TROUGH_IN + (TROUGH_OUT - TROUGH_IN) * u;
             mesh.vertices.push(Vertex {
                 pos: polar(center, radius, deg, r),
                 uv: WHITE_UV,
-                color: trough_color(deg, r, inner, outer),
+                color: trough_color(deg, r),
             });
         }
     }
@@ -875,32 +880,17 @@ fn paint_trough(painter: &Painter, center: Pos2, radius: f32) {
     painter.add(Shape::mesh(mesh));
 }
 
-/// Widest radius that stays inside the face width and above the info boards.
-fn trough_outer(deg: f32) -> f32 {
-    let rad = deg.to_radians();
-    let x = rad.sin().abs().max(0.16);
-    let y_down = (-rad.cos()).max(0.0);
-    let mut lim = 0.992 / x;
-    if y_down > 0.12 {
-        lim = lim.min(1.028 / y_down);
-    }
-    let want: f32 = 1.156;
-    want.min(lim).max(TROUGH_IN + 0.008)
-}
-
-fn trough_color(deg: f32, r: f32, inner: f32, outer: f32) -> Color32 {
-    let span = (outer - inner).max(0.001);
-    let lip = CHROME.min(span * 0.46);
-    if r <= inner + lip {
-        let u = ((r - inner) / lip.max(0.001)).clamp(0.0, 1.0);
+fn trough_color(deg: f32, r: f32) -> Color32 {
+    if r <= TROUGH_IN + INNER_LIP {
+        let u = ((r - TROUGH_IN) / INNER_LIP).clamp(0.0, 1.0);
         return chrome(u);
     }
-    if r >= outer - lip {
-        let u = ((outer - r) / lip.max(0.001)).clamp(0.0, 1.0);
+    if r >= TROUGH_OUT - OUTER_LIP {
+        let u = ((TROUGH_OUT - r) / OUTER_LIP).clamp(0.0, 1.0);
         return chrome(u);
     }
-    let floor_in = inner + lip;
-    let floor_out = (outer - lip).max(floor_in + 0.001);
+    let floor_in = TROUGH_IN + INNER_LIP;
+    let floor_out = TROUGH_OUT - OUTER_LIP;
     let u = ((r - floor_in) / (floor_out - floor_in)).clamp(0.0, 1.0);
     let edge = u.min(1.0 - u);
     let shade = ((0.07 - edge) / 0.07).clamp(0.0, 1.0);

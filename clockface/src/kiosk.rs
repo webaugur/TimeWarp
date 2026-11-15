@@ -96,6 +96,8 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
     );
     paint_weather_caption(painter, center, radius, &model.weather);
 
+    // Under the dial, so the chrome meets the cream and the boards cover the rest.
+    crate::gauges::paint_trough(painter, center, radius, &model.weather);
     // Same dial mesh the window and the screenshot both fill.
     roman::paint_brass(painter, center, radius, aperture);
     roman::paint_markings_and_hands(
