@@ -27,6 +27,7 @@ toml = "0.8"
 resvg = "0.45"
 tiny-skia = "0.11"
 usvg = "0.45"
+rodio = { version = "0.23.0", default-features = false, features = ["playback", "symphonia-flac", "wav"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # auto tries KMS then linuxfb. viv-fb is i.MX6, not the Pi, so it stays off.

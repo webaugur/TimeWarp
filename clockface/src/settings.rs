@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use egui::{Pos2, Vec2};
 use serde::Deserialize;
@@ -74,6 +74,7 @@ pub struct Settings {
     /// `None` means the file omitted events. Holidays from TimeWarp still show,
     /// and the built-in examples are used only when that list cannot be read.
     pub events: Option<Vec<CalendarEvent>>,
+    pub audio: crate::chime::AudioSettings,
     /// Overrides the `timewarp` found on `PATH`.
     pub timewarp_bin: Option<String>,
     /// Hours ahead for the barometer forecast tick. The default is 3.
@@ -91,6 +92,7 @@ impl Default for Settings {
             place: Place::default(),
             refresh_minutes: DEFAULT_REFRESH_MINUTES,
             events: None,
+            audio: crate::chime::AudioSettings::default(),
             timewarp_bin: None,
             barometer_hours: 3,
         }
@@ -143,6 +145,7 @@ pub struct SettingsOverride {
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
     pub units: Option<Units>,
+    pub audio_enabled: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -167,9 +170,26 @@ struct FileConfig {
     #[serde(default)]
     events: Option<Vec<CalendarEvent>>,
     #[serde(default)]
+    audio: Option<AudioFile>,
+    #[serde(default)]
     timewarp_bin: Option<String>,
     #[serde(default)]
     barometer_hours: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct AudioFile {
+    enabled: Option<bool>,
+    tick: Option<String>,
+    mute_path: Option<String>,
+    gpio_path: Option<String>,
+    mute_chimes: Option<bool>,
+    sounds_dir: Option<String>,
+    hour: Option<String>,
+    quarter: Option<String>,
+    half: Option<String>,
+    bell: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -234,6 +254,7 @@ pub fn load_settings_with(
     if settings.diameter <= 0.0 {
         return Err("diameter must be greater than zero".into());
     }
+    settings.audio.validate()?;
     Ok(settings)
 }
 
@@ -276,7 +297,49 @@ fn apply_file(
     if let Some(hours) = file.barometer_hours {
         settings.barometer_hours = hours.clamp(1, 48);
     }
+    if let Some(audio) = file.audio {
+        apply_audio(&mut settings.audio, audio)?;
+    }
     Ok(layer)
+}
+
+fn apply_audio(audio: &mut crate::chime::AudioSettings, file: AudioFile) -> Result<(), String> {
+    if let Some(enabled) = file.enabled {
+        audio.enabled = enabled;
+    }
+    if let Some(tick) = file.tick {
+        audio.tick = tick;
+    }
+    if let Some(path) = file.mute_path {
+        audio.mute_path = PathBuf::from(path);
+    }
+    if let Some(path) = file.gpio_path {
+        let path = path.trim();
+        audio.gpio_path = if path.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(path))
+        };
+    }
+    if let Some(mute_chimes) = file.mute_chimes {
+        audio.mute_chimes = mute_chimes;
+    }
+    if let Some(dir) = file.sounds_dir {
+        audio.sounds_dir = PathBuf::from(dir);
+    }
+    if let Some(hour) = file.hour {
+        audio.hour = hour;
+    }
+    if let Some(quarter) = file.quarter {
+        audio.quarter = quarter;
+    }
+    if let Some(half) = file.half {
+        audio.half = half;
+    }
+    if let Some(bell) = file.bell {
+        audio.bell = bell;
+    }
+    Ok(())
 }
 
 fn apply_override(settings: &mut Settings, over: &SettingsOverride) -> Result<(), String> {
@@ -301,6 +364,9 @@ fn apply_override(settings: &mut Settings, over: &SettingsOverride) -> Result<()
     }
     if let Some(units) = over.units {
         settings.place.units = units;
+    }
+    if let Some(enabled) = over.audio_enabled {
+        settings.audio.enabled = enabled;
     }
     Ok(())
 }
@@ -346,6 +412,7 @@ mod tests {
             units: None,
             refresh_minutes: None,
             events: None,
+            audio: None,
             timewarp_bin: None,
             barometer_hours: None,
         };

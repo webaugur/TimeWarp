@@ -71,7 +71,7 @@ This is `cargo build --release` with no extra features. The window is fullscreen
 
 ```bash
 sudo apt update
-sudo apt install build-essential pkg-config \
+sudo apt install build-essential pkg-config libasound2-dev \
   libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
   libxkbcommon-dev libgl1-mesa-dev libegl1-mesa-dev libwayland-dev
 cd clockface
@@ -91,7 +91,7 @@ eboard's default `auto` backend tries DRM/KMS + GBM + EGL first, then the softwa
 The KMS path needs Mesa's GBM and GLES headers and libraries:
 
 ```bash
-sudo apt install build-essential pkg-config libgbm-dev libegl1-mesa-dev libgles2-mesa-dev
+sudo apt install build-essential pkg-config libasound2-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev
 ```
 
 Runtime packages are `libgbm1`, `libegl1`, and `libgles2`. To leave eframe and the X11 libraries out of the binary entirely, build with `--no-default-features --features kms`. `--features kms` on top of the default features still *starts* eboard; it just also links the desktop backend.
@@ -135,6 +135,16 @@ The same values can live in a TOML file. See `clockface.example.toml`. Flags win
 Weather defaults to Indianapolis (39.7684, −86.1581), imperial units, refreshed about every 20 minutes from Open-Meteo. No API key. The same request also asks for the current feels-like temperature, dew point, and sea-level pressure, and for hourly sea-level pressure. `forecast_days=5` already covers today, and `timezone=auto` makes those hourly stamps the place's local clock. The gauges treat that clock as the machine's local clock. Override the place with `--city` (`indianapolis`, `chicago`, `new york`, `london`, `denver`), or with `--lat` and `--lon`. `--units imperial` or `--units metric`. `--lat` and `--lon` win over `--city`. `barometer_hours` in the TOML sets how far ahead the yellow barometer tick looks.
 
 If the network is down, the last cached forecast is kept and the status line appends the fetch error. With no cache, the weather scene says unavailable instead of going blank.
+
+## Ticking and chimes
+
+The recordings in `sounds/` come from David's original Raspberry Pi grandfather clock (owner-supplied). They are lossless FLAC conversions of the WAVs that clock used. On that Pi, pm2 ran MagicMirror (`mm`) and `ticktock.sh` (`ticking`). clockface replaces both: the face is the window, and ticking is a background thread. The cron chimes moved into the same thread.
+
+Ticking waits for each wall-clock `:00` and plays `ticktock-15db.flac` (about 59 seconds), then waits for the next minute, so it does not drift. `10db`, `20db`, and `25db` are the other attenuations. A file `/tmp/mute` that contains `1` skips ticking for that minute; an optional GPIO value file does the same when it contains `1` (the old script read `/sys/class/gpio/gpio5/value`). Chimes do not check mute unless `mute_chimes` is set.
+
+Chimes follow the old crontab: hour at `:00`, quarter at `:15` and `:45`, half at `:30`. The quarter and half scripts on the Pi both played `clock-hour.wav`, not `clock-quarter.wav` or `clock-half.wav`. Those two files are included and unused until you point `audio.quarter` or `audio.half` at them. The hour plays the melody, waits 20.5 seconds (four rainbow passes on the old 20-LED strip), strikes `clock-bell` once per hour on a 12-hour clock (midnight and noon strike 12; 13:00 strikes once) about 1.7 seconds apart, waits 2 seconds, and clears. Quarter and half play the melody, wait the same 20.5 seconds plus 2, and do not strike. A `ChimeLights` trait marks those moments. The build ships a no-op; the waits stay the same without a NeoPixel driver (20 pixels, SPI pin 10, 400 kHz, brightness 192, GBR).
+
+The sounds are compiled into the binary, so `~/.local/bin/clockface` does not need the files beside it. A file of the same stem in `~/.local/share/clockface/sounds/` (`.flac` or `.wav`) replaces that sound. A missing sound logs one status-line fault, such as `sound missing: clock-bell.wav`, and the clock keeps running. `--no-audio` or `audio.enabled = false` turns the thread off. Playback uses rodio and needs `libasound2-dev` at build time.
 
 ## Screenshot
 
