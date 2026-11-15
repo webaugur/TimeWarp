@@ -538,10 +538,15 @@ mod tests {
                 width,
                 height,
                 center + direction(minute) * (0.50 * r),
-                [0, 0, 0],
-                40
+                [220, 150, 30],
+                80
             ),
-            "minute hand should be black"
+            "minute hand should be gold"
+        );
+        let wind = at_pos(&rgba, width, height, center + direction(300.0) * (0.40 * r));
+        assert!(
+            wind[0] > 200 && wind[1] > 150 && wind[0] as i32 > wind[2] as i32 + 80,
+            "wind hand from 300° should be yellow, got {wind:?}"
         );
 
         let numeral = center + direction(0.0) * (style.numeral_radius * r);

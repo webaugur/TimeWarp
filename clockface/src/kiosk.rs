@@ -101,6 +101,7 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
         diameter,
         model.now,
         &roman::RomanClockStyle::default(),
+        model.weather.wind_hand(),
     );
 
     paint_boxes(painter, &layout, model);

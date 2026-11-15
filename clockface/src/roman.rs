@@ -203,7 +203,7 @@ pub fn paint_with(
     }
     let r = diameter * 0.5;
     paint_brass(painter, center, r, 0.0);
-    paint_markings_and_hands(painter, center, diameter, now, style);
+    paint_markings_and_hands(painter, center, diameter, now, style, None);
 }
 
 /// Inner ring, ticks, numerals, and hands. The kiosk paints these after the aperture discs.
@@ -213,6 +213,7 @@ pub(crate) fn paint_markings_and_hands(
     diameter: f32,
     now: DateTime<Local>,
     style: &RomanClockStyle,
+    wind: Option<crate::weather::WindHand>,
 ) {
     let r = diameter * 0.5;
     paint_inner_ring(painter, center, r, &style);
@@ -220,6 +221,9 @@ pub(crate) fn paint_markings_and_hands(
     paint_numerals(painter, center, r, &style);
     let (hour, minute, second) = hand_angles(now, &style);
     // Hour, then minute, then second, so the second hand (and its cap) is on top.
+    if let Some(wind) = wind {
+        paint_wind_hand(painter, center, r, wind);
+    }
     paint_hand(painter, center, r, hour, &style.hour_hand, &style.shadow);
     paint_hand(
         painter,
@@ -422,11 +426,165 @@ fn paint_hand(
     let cap = hand.cap_radius * r;
     let blur = shadow.blur * r;
     paint_shadow(painter, tail, tip, center, width, cap, blur, shadow.color);
-    if width > 0.0 {
-        painter.line_segment([tail, tip], Stroke::new(width, hand.color));
+    if hand.color == Color32::BLACK {
+        paint_gold_hand(painter, tail, tip, center, width, cap);
+    } else {
+        if width > 0.0 {
+            painter.line_segment([tail, tip], Stroke::new(width, hand.color));
+        }
+        if cap > 0.0 {
+            painter.circle_filled(center, cap, hand.color);
+        }
+    }
+}
+
+const GOLD_EDGE: Color32 = Color32::from_rgb(0x3a, 0x24, 0x08);
+
+fn paint_gold_hand(painter: &Painter, tail: Pos2, tip: Pos2, center: Pos2, width: f32, cap: f32) {
+    let delta = tip - tail;
+    let len = delta.length();
+    if len > 1.0 && width > 0.0 {
+        let dir = delta / len;
+        let perp = Vec2::new(-dir.y, dir.x);
+        let light_bias = perp.dot(crate::brass::light_vec2());
+        let outline = 1.15;
+        paint_capsule(painter, tail, tip, dir, perp, width * 0.5 + outline, |_| {
+            GOLD_EDGE
+        });
+        paint_capsule(painter, tail, tip, dir, perp, width * 0.5, |cross| {
+            crate::brass::shade_gold_pin(cross, 0.72, light_bias, 1.0)
+        });
     }
     if cap > 0.0 {
-        painter.circle_filled(center, cap, hand.color);
+        painter.circle_filled(center, cap + 1.15, GOLD_EDGE);
+        paint_gold_hub(painter, center, cap);
+    }
+}
+
+fn paint_capsule(
+    painter: &Painter,
+    tail: Pos2,
+    tip: Pos2,
+    dir: Vec2,
+    perp: Vec2,
+    radius: f32,
+    color_at: impl Fn(f32) -> Color32,
+) {
+    let steps = 8u32;
+    let mut mesh = Mesh::default();
+    for i in 0..=steps {
+        let cross = -1.0 + 2.0 * (i as f32 / steps as f32);
+        let off = perp * (radius * cross);
+        let color = color_at(cross);
+        mesh.colored_vertex(tail + off, color);
+        mesh.colored_vertex(tip + off, color);
+    }
+    for i in 0..steps {
+        let a = i * 2;
+        mesh.add_triangle(a, a + 1, a + 2);
+        mesh.add_triangle(a + 1, a + 3, a + 2);
+    }
+    painter.add(Shape::mesh(mesh));
+    paint_round_end(painter, tail, -dir, perp, radius, &color_at);
+    paint_round_end(painter, tip, dir, perp, radius, &color_at);
+}
+
+fn paint_round_end(
+    painter: &Painter,
+    origin: Pos2,
+    outward: Vec2,
+    perp: Vec2,
+    radius: f32,
+    color_at: &impl Fn(f32) -> Color32,
+) {
+    let segs = 8u32;
+    let mut mesh = Mesh::default();
+    mesh.colored_vertex(origin, color_at(0.0));
+    for i in 0..=segs {
+        let cross = -1.0 + 2.0 * (i as f32 / segs as f32);
+        let along = (1.0 - cross * cross).max(0.0).sqrt();
+        mesh.colored_vertex(
+            origin + perp * (radius * cross) + outward * (radius * along),
+            color_at(cross),
+        );
+    }
+    for i in 0..segs {
+        mesh.add_triangle(0, i + 1, i + 2);
+    }
+    painter.add(Shape::mesh(mesh));
+}
+
+fn paint_gold_hub(painter: &Painter, center: Pos2, radius: f32) {
+    let light = crate::brass::light_vec2();
+    let segs = 24u32;
+    let mut mesh = Mesh::default();
+    mesh.colored_vertex(center, crate::brass::shade_gold_pin(0.0, 0.9, 1.0, 1.0));
+    for i in 0..=segs {
+        let ang = i as f32 / segs as f32 * std::f32::consts::TAU;
+        let n = Vec2::new(ang.cos(), ang.sin());
+        let cross = n.dot(light);
+        mesh.colored_vertex(
+            center + n * radius,
+            crate::brass::shade_gold_pin(cross, 0.45, 1.0, 1.0),
+        );
+    }
+    for i in 0..segs {
+        mesh.add_triangle(0, i + 1, i + 2);
+    }
+    painter.add(Shape::mesh(mesh));
+}
+
+const WIND_YELLOW: Color32 = Color32::from_rgb(0xff, 0xd2, 0x1f);
+const WIND_EDGE: Color32 = Color32::from_rgb(0x1c, 0x14, 0x06);
+
+/// Yellow staff pointing where the wind comes from, with station-model barbs.
+fn paint_wind_hand(painter: &Painter, center: Pos2, r: f32, wind: crate::weather::WindHand) {
+    let Some((pennants, full, half)) = crate::weather::wind_barbs(wind.knots) else {
+        let hub = (0.028 * r).max(3.0);
+        painter.circle_filled(center, hub + 1.1, WIND_EDGE);
+        painter.circle_filled(center, hub, WIND_YELLOW);
+        return;
+    };
+    let dir = direction(wind.from_degrees);
+    let perp = Vec2::new(-dir.y, dir.x);
+    let reach = 0.58 * r;
+    let tip = center + dir * reach;
+    let width = 0.005 * r;
+    painter.line_segment([center, tip], Stroke::new(width + 2.2, WIND_EDGE));
+    painter.line_segment([center, tip], Stroke::new(width.max(1.2), WIND_YELLOW));
+
+    let full_len = 0.11 * r;
+    let step = 0.040 * r;
+    let mut along = reach - 0.02 * r;
+    let barb = |attach: Pos2, len: f32| {
+        let lean = (-dir * 0.50 + perp * 0.866).normalized();
+        attach + lean * len
+    };
+    for _ in 0..pennants {
+        if along < 0.16 * r {
+            break;
+        }
+        let outer = center + dir * along;
+        let inner = center + dir * (along - 0.048 * r);
+        let point = barb(outer, full_len * 0.92);
+        painter.add(Shape::convex_polygon(
+            vec![outer, inner, point],
+            WIND_YELLOW,
+            Stroke::new(1.3, WIND_EDGE),
+        ));
+        along -= 0.062 * r;
+    }
+    for (count, len) in [(full, full_len), (u32::from(half), full_len * 0.5)] {
+        for _ in 0..count {
+            if along < 0.16 * r {
+                break;
+            }
+            let attach = center + dir * along;
+            let end = barb(attach, len);
+            painter.line_segment([attach, end], Stroke::new(width + 2.2, WIND_EDGE));
+            painter.line_segment([attach, end], Stroke::new(width.max(1.2), WIND_YELLOW));
+            along -= step;
+        }
     }
 }
 

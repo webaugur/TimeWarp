@@ -50,6 +50,13 @@ pub struct WeatherReport {
     /// Open-Meteo cloud cover, 0–100. Missing on an old cache; [`Self::cloud_cover`] derives one.
     #[serde(default)]
     pub cloud_cover: Option<u8>,
+    /// Meteorological direction the wind blows from, degrees clockwise from north.
+    /// Missing on an old cache.
+    #[serde(default)]
+    pub wind_direction_10m: Option<f32>,
+    /// Gust in the same unit as [`Self::wind`]. Missing on an old cache.
+    #[serde(default)]
+    pub wind_gusts_10m: Option<f32>,
     #[serde(skip)]
     pub night: bool,
 }
@@ -68,6 +75,8 @@ impl WeatherReport {
             daily: Vec::new(),
             note: "weather unavailable".into(),
             cloud_cover: None,
+            wind_direction_10m: None,
+            wind_gusts_10m: None,
             night: false,
         }
     }
@@ -139,7 +148,10 @@ pub fn fixture_january() -> WeatherReport {
         units: Units::Imperial,
         temperature: 28.0,
         code: Some(71),
-        wind: Some(9.0),
+        // 25 kt from 300°, so the screenshot shows two full barbs and a half barb.
+        wind: Some(25.0 / KT_PER_MPH),
+        wind_direction_10m: Some(300.0),
+        wind_gusts_10m: Some(34.0),
         condition: "light snow".into(),
         daily: vec![
             day("2026-01-15", 71, 31.0, 22.0),
@@ -265,7 +277,7 @@ pub fn fetch(place: &Place) -> Result<WeatherReport, String> {
     };
     let url = format!(
         "https://api.open-meteo.com/v1/forecast?latitude={lat:.4}&longitude={lon:.4}\
-         &current=temperature_2m,weather_code,wind_speed_10m,cloud_cover\
+         &current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,cloud_cover\
          &daily=weather_code,temperature_2m_max,temperature_2m_min\
          &temperature_unit={unit_temp}&wind_speed_unit={unit_wind}&timezone=auto&forecast_days=5",
         lat = place.latitude,
@@ -293,6 +305,8 @@ pub fn parse_open_meteo(body: &str, place: &Place) -> Result<WeatherReport, Stri
         .as_i64()
         .ok_or("missing weather code")? as i32;
     let wind = current["wind_speed_10m"].as_f64().map(|v| v as f32);
+    let wind_direction_10m = current["wind_direction_10m"].as_f64().map(|v| v as f32);
+    let wind_gusts_10m = current["wind_gusts_10m"].as_f64().map(|v| v as f32);
     let times = value["daily"]["time"]
         .as_array()
         .ok_or("missing daily times")?;
@@ -328,8 +342,57 @@ pub fn parse_open_meteo(body: &str, place: &Place) -> Result<WeatherReport, Stri
         cloud_cover: current["cloud_cover"]
             .as_f64()
             .map(|v| v.clamp(0.0, 100.0) as u8),
+        wind_direction_10m,
+        wind_gusts_10m,
         night: false,
     })
+}
+
+/// Statute miles per hour to knots, and kilometres per hour to knots.
+const KT_PER_MPH: f32 = 0.868_976_24;
+const KT_PER_KMH: f32 = 0.539_956_8;
+
+pub fn speed_to_knots(speed: f32, units: Units) -> f32 {
+    match units {
+        Units::Imperial => speed * KT_PER_MPH,
+        Units::Metric => speed * KT_PER_KMH,
+    }
+}
+
+/// Where the wind comes from, and how hard, for the yellow hand.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WindHand {
+    pub from_degrees: f32,
+    pub knots: f32,
+}
+
+impl WeatherReport {
+    pub fn wind_hand(&self) -> Option<WindHand> {
+        let from = self.wind_direction_10m?;
+        let speed = self.wind?;
+        if !from.is_finite() || !speed.is_finite() {
+            return None;
+        }
+        Some(WindHand {
+            from_degrees: from.rem_euclid(360.0),
+            knots: speed_to_knots(speed, self.units),
+        })
+    }
+}
+
+/// Station-model marks for a speed already in knots.
+///
+/// `None` is calm (under 3 kt): no barbs. Otherwise pennants of 50, full barbs
+/// of 10, and one half barb of 5, after rounding to the nearest 5 kt.
+pub fn wind_barbs(knots: f32) -> Option<(u32, u32, bool)> {
+    if !knots.is_finite() || knots < 3.0 {
+        return None;
+    }
+    let rounded = ((knots / 5.0).round() as i32).max(1) * 5;
+    let rounded = rounded as u32;
+    let pennants = rounded / 50;
+    let rest = rounded % 50;
+    Some((pennants, rest / 10, rest % 10 != 0))
 }
 
 #[cfg(test)]
@@ -361,6 +424,53 @@ mod tests {
         assert_eq!(report.cloud_cover(), 28);
         assert!((report.temperature - 72.4).abs() < 0.01);
         assert_eq!(report.daily[0].date, "2026-07-04");
+        assert!(report.wind_direction_10m.is_none());
+        assert!(report.wind_gusts_10m.is_none());
+    }
+
+    #[test]
+    fn wind_direction_and_gusts_are_optional_and_round_to_barbs() {
+        let body = r#"{
+            "current": {
+                "temperature_2m": 28.0,
+                "weather_code": 71,
+                "wind_speed_10m": 28.77,
+                "wind_direction_10m": 300,
+                "wind_gusts_10m": 34.0
+            },
+            "daily": {
+                "time": ["2026-01-15"],
+                "weather_code": [71],
+                "temperature_2m_max": [31.0],
+                "temperature_2m_min": [22.0]
+            }
+        }"#;
+        let report = parse_open_meteo(body, &Place::indianapolis()).unwrap();
+        assert_eq!(report.wind_direction_10m, Some(300.0));
+        assert_eq!(report.wind_gusts_10m, Some(34.0));
+        let hand = report.wind_hand().unwrap();
+        assert!((hand.from_degrees - 300.0).abs() < 0.01);
+        assert!((hand.knots - 25.0).abs() < 0.05);
+        assert_eq!(wind_barbs(hand.knots), Some((0, 2, true)));
+        assert_eq!(wind_barbs(2.9), None);
+        assert_eq!(wind_barbs(50.0), Some((1, 0, false)));
+        assert_eq!(wind_barbs(65.0), Some((1, 1, true)));
+        let old = r#"
+            fetched_unix = 1
+            latitude = 39.7
+            longitude = -86.1
+            units = "imperial"
+            temperature = 28.0
+            code = 71
+            wind = 9.0
+            condition = "light snow"
+            daily = []
+            note = ""
+        "#;
+        let cached: WeatherReport = toml::from_str(old).unwrap();
+        assert!(cached.wind_direction_10m.is_none());
+        assert!(cached.wind_gusts_10m.is_none());
+        assert!(cached.wind_hand().is_none());
     }
 
     #[test]
