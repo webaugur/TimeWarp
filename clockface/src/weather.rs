@@ -47,6 +47,9 @@ pub struct WeatherReport {
     pub condition: String,
     pub daily: Vec<DailyForecast>,
     pub note: String,
+    /// Open-Meteo cloud cover, 0–100. Missing on an old cache; [`Self::cloud_cover`] derives one.
+    #[serde(default)]
+    pub cloud_cover: Option<u8>,
     #[serde(skip)]
     pub night: bool,
 }
@@ -64,7 +67,27 @@ impl WeatherReport {
             condition: "unavailable".into(),
             daily: Vec::new(),
             note: "weather unavailable".into(),
+            cloud_cover: None,
             night: false,
+        }
+    }
+
+    /// Percent of the sky covered. A missing reading is inferred from the weather code.
+    pub fn cloud_cover(&self) -> u8 {
+        if let Some(cover) = self.cloud_cover {
+            return cover.min(100);
+        }
+        match self.code {
+            Some(0) => 8,
+            Some(1) => 28,
+            Some(2) => 55,
+            Some(3) => 100,
+            Some(45 | 48) => 100,
+            Some(51..=67 | 80..=82) => 90,
+            Some(71..=77 | 85 | 86) => 92,
+            Some(95..=99) => 100,
+            Some(_) => 60,
+            None => 40,
         }
     }
 
@@ -126,6 +149,7 @@ pub fn fixture_january() -> WeatherReport {
             day("2026-01-19", 61, 40.0, 33.0),
         ],
         note: String::new(),
+        cloud_cover: Some(92),
         night: false,
     }
 }
@@ -241,7 +265,7 @@ pub fn fetch(place: &Place) -> Result<WeatherReport, String> {
     };
     let url = format!(
         "https://api.open-meteo.com/v1/forecast?latitude={lat:.4}&longitude={lon:.4}\
-         &current=temperature_2m,weather_code,wind_speed_10m\
+         &current=temperature_2m,weather_code,wind_speed_10m,cloud_cover\
          &daily=weather_code,temperature_2m_max,temperature_2m_min\
          &temperature_unit={unit_temp}&wind_speed_unit={unit_wind}&timezone=auto&forecast_days=5",
         lat = place.latitude,
@@ -301,6 +325,9 @@ pub fn parse_open_meteo(body: &str, place: &Place) -> Result<WeatherReport, Stri
         condition: condition_name(code).into(),
         daily,
         note: String::new(),
+        cloud_cover: current["cloud_cover"]
+            .as_f64()
+            .map(|v| v.clamp(0.0, 100.0) as u8),
         night: false,
     })
 }
@@ -331,6 +358,7 @@ mod tests {
         let place = Place::indianapolis();
         let report = parse_open_meteo(body, &place).unwrap();
         assert_eq!(report.condition, "mainly clear");
+        assert_eq!(report.cloud_cover(), 28);
         assert!((report.temperature - 72.4).abs() < 0.01);
         assert_eq!(report.daily[0].date, "2026-07-04");
     }

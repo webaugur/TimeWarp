@@ -15,7 +15,6 @@ use chrono::{DateTime, Local};
 use egui::epaint::Vertex;
 use egui::{Color32, Context, Id, Mesh, Painter, Pos2, TextureOptions};
 
-use crate::roman::direction;
 use crate::sky::{self, season_name};
 use crate::weather::{Scene, WeatherReport};
 
@@ -46,6 +45,8 @@ struct SkyIds {
     day: String,
     twilight: String,
     night: String,
+    #[serde(default)]
+    overcast: Option<String>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -66,6 +67,12 @@ struct SeasonFour {
 struct WeatherIds {
     #[serde(default)]
     clouds: Vec<String>,
+    #[serde(default)]
+    few: Vec<String>,
+    #[serde(default)]
+    partly: Vec<String>,
+    #[serde(default)]
+    thick: Vec<String>,
     #[serde(default)]
     rain: Vec<String>,
     #[serde(default)]
@@ -153,7 +160,12 @@ pub fn visible_layers(
     let mut on = BTreeSet::new();
     on.extend(manifest.always.iter().cloned());
 
+    let cover = weather.cloud_cover();
+    let scene = weather.scene();
+    let overcast =
+        cover >= 75 || matches!(scene, Scene::Rain | Scene::Snow | Scene::Storm | Scene::Fog);
     let sky = match sky_band(now) {
+        SkyBand::Day if overcast => manifest.sky.overcast.as_ref().unwrap_or(&manifest.sky.day),
         SkyBand::Day => &manifest.sky.day,
         SkyBand::Twilight => &manifest.sky.twilight,
         SkyBand::Night => &manifest.sky.night,
@@ -181,15 +193,14 @@ pub fn visible_layers(
     on.insert(leaves.clone());
     on.insert(ground.clone());
 
-    let scene = weather.scene();
     let weather_layers: &[String] = match scene {
-        Scene::Cloud => &manifest.weather.clouds,
         Scene::Rain => &manifest.weather.rain,
         Scene::Snow => &manifest.weather.snow,
         Scene::Storm => &manifest.weather.storm,
         Scene::Fog => &manifest.weather.fog,
-        Scene::Unknown => &manifest.weather.unknown,
-        Scene::ClearDay | Scene::ClearNight => &[],
+        Scene::Cloud | Scene::Unknown | Scene::ClearDay | Scene::ClearNight => {
+            cloud_band(&manifest.weather, cover)
+        }
     };
     on.extend(weather_layers.iter().cloned());
 
@@ -215,12 +226,30 @@ pub fn visible_layers(
     on
 }
 
+/// Cloud groups for a cover percentage. Themes that only list `clouds` use that
+/// one group whenever the sky is not clear.
+fn cloud_band(weather: &WeatherIds, cover: u8) -> &[String] {
+    let banded = !weather.few.is_empty() || !weather.partly.is_empty() || !weather.thick.is_empty();
+    if !banded {
+        return if cover < 15 { &[] } else { &weather.clouds };
+    }
+    match cover {
+        0..=15 => &[],
+        16..=40 => &weather.few,
+        41..=74 => &weather.partly,
+        _ => &weather.thick,
+    }
+}
+
 fn catalog(manifest: &Manifest) -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
     ids.extend(manifest.always.iter().cloned());
     ids.insert(manifest.sky.day.clone());
     ids.insert(manifest.sky.twilight.clone());
     ids.insert(manifest.sky.night.clone());
+    if let Some(id) = &manifest.sky.overcast {
+        ids.insert(id.clone());
+    }
     for id in [
         &manifest.season.leaves.spring,
         &manifest.season.leaves.summer,
@@ -235,6 +264,9 @@ fn catalog(manifest: &Manifest) -> BTreeSet<String> {
     }
     for list in [
         &manifest.weather.clouds,
+        &manifest.weather.few,
+        &manifest.weather.partly,
+        &manifest.weather.thick,
         &manifest.weather.rain,
         &manifest.weather.snow,
         &manifest.weather.storm,
@@ -351,7 +383,10 @@ fn cached_rgba(
     }
 
     let svg = apply_visibility(&theme.svg, &catalog(&theme.manifest), visible);
-    let rgba = render_svg(&svg, width, height)?;
+    let mut rgba = render_svg(&svg, width, height)?;
+    // A two-level hash breaks the steps of an 8-bit sky gradient. It is stable
+    // for a given pixel index, so the cache stays valid.
+    dither(&mut rgba);
     if let Ok(mut guard) = CACHE.lock() {
         *guard = Some(CachedPixels {
             hash,
@@ -361,6 +396,15 @@ fn cached_rgba(
         });
     }
     Ok(rgba)
+}
+
+fn dither(rgba: &mut [u8]) {
+    for (i, px) in rgba.chunks_exact_mut(4).enumerate() {
+        let n = ((i.wrapping_mul(1664525).wrapping_add(1013904223) >> 29) & 7) as i32 - 3;
+        for channel in &mut px[..3] {
+            *channel = (*channel as i32 + n).clamp(0, 255) as u8;
+        }
+    }
 }
 
 /// Rasterize the theme into the lower-half aperture.
@@ -377,8 +421,11 @@ pub fn paint_horizon(
 ) {
     let theme = theme();
     let visible = visible_layers(&theme, now, weather);
-    let width = (aperture * 2.0).round().clamp(64.0, 1200.0) as u32;
-    let height = (width / 2).max(32);
+    // Twice the aperture's physical pixels. The mesh then scales down, so the
+    // sky and clouds are not a small bitmap stretched to the dial.
+    let ppp = ctx.pixels_per_point().clamp(1.0, 3.0);
+    let width = (aperture * 2.0 * ppp * 2.0).round().clamp(128.0, 2048.0) as u32;
+    let height = (width / 2).max(64);
     match cached_rgba(&theme, &visible, width, height) {
         Ok(rgba) => {
             let image =
@@ -398,29 +445,35 @@ pub fn paint_horizon(
 }
 
 fn paint_lower_half(painter: &Painter, center: Pos2, aperture: f32, texture: egui::TextureId) {
+    // The top of the landscape, along the 9–3 line, fades to black over about
+    // 4% of the face radius so the sky meets the black quarters.
+    let band = (aperture / crate::layout::APERTURE_R * 0.04).max(1.0);
+    let segs = 72u32;
     let mut mesh = Mesh::with_texture(texture);
-    let center_i = mesh.vertices.len() as u32;
-    mesh.vertices.push(Vertex {
-        pos: center,
-        uv: Pos2::new(0.5, 0.0),
-        color: Color32::WHITE,
-    });
-    let segs = 48u32;
     for i in 0..=segs {
-        let deg = 90.0 + 180.0 * (i as f32 / segs as f32);
-        let pos = center + direction(deg) * aperture;
-        let uv = Pos2::new(
-            (pos.x - (center.x - aperture)) / (aperture * 2.0),
-            (pos.y - center.y) / aperture,
-        );
-        mesh.vertices.push(Vertex {
-            pos,
-            uv,
-            color: Color32::WHITE,
-        });
+        let t = i as f32 / segs as f32;
+        let x = -aperture + aperture * 2.0 * t;
+        let y_arc = (aperture * aperture - x * x).max(0.0).sqrt();
+        let mut push = |y: f32| {
+            let fade = (y / band).clamp(0.0, 1.0);
+            let c = (fade * 255.0).round() as u8;
+            mesh.vertices.push(Vertex {
+                pos: Pos2::new(center.x + x, center.y + y),
+                uv: Pos2::new(t, (y / aperture).clamp(0.0, 1.0)),
+                color: Color32::from_rgb(c, c, c),
+            });
+        };
+        push(0.0);
+        push(y_arc.min(band));
+        push(y_arc);
     }
     for i in 0..segs {
-        mesh.add_triangle(center_i, center_i + 1 + i, center_i + 2 + i);
+        let a = i * 3;
+        let b = a + 3;
+        mesh.add_triangle(a, b, b + 1);
+        mesh.add_triangle(a, b + 1, a + 1);
+        mesh.add_triangle(a + 1, b + 1, b + 2);
+        mesh.add_triangle(a + 1, b + 2, a + 2);
     }
     if mesh.indices.len() >= 3 {
         painter.add(egui::Shape::mesh(mesh));
@@ -519,20 +572,23 @@ mod tests {
         for id in [
             "land",
             "tree-trunk",
-            "sky-day",
             "leaves-winter",
             "ground-winter",
-            "clouds",
             "snow",
             "snow-cover",
-            "sun",
+            "clouds-thick",
+            "sky-overcast",
         ] {
             assert!(on.contains(id), "missing {id} in {on:?}");
         }
         for id in [
             "sky-night",
+            "sky-day",
             "sky-twilight",
+            "sun",
             "stars",
+            "clouds-few",
+            "clouds-partly",
             "rain",
             "storm",
             "fog",
@@ -584,14 +640,15 @@ mod tests {
         let theme = Theme::from_parts(DEFAULT_SVG, DEFAULT_TOML).unwrap();
         let on = visible_layers(&theme, screenshot_time(), &fixture_january());
         let rgba = cached_rgba(&theme, &on, 200, 100).unwrap();
-        // Zenith sample used by the kiosk test, scaled into this pixmap.
+        // Mid-sky of the January fixture, which is an overcast snow day.
         let x = 100usize;
         let y = 34usize;
         let i = (y * 200 + x) * 4;
         let px = &rgba[i..i + 4];
+        let spread = (px[0] as i32 - px[2] as i32).abs();
         assert!(
-            px[2] > 100 && px[2] as i32 + 10 > px[0] as i32,
-            "zenith should be blue sky, got {px:?}"
+            px[0] > 60 && spread < 40,
+            "zenith should be an overcast grey, got {px:?}"
         );
     }
 }

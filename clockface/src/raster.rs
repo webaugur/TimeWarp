@@ -487,21 +487,28 @@ mod tests {
             "bezel highlight {bezel_lit:?} vs shade {bezel_dark:?}"
         );
 
-        // Lower half is the landscape. Near the 9–3 line the theme's sky is blue.
-        let sky = at_pos(&rgba, width, height, center + direction(180.0) * (0.12 * r));
+        // Lower half is the overcast January sky, below the thin black fade.
+        let sky = at_pos(&rgba, width, height, center + direction(180.0) * (0.22 * r));
+        let sky_lum = sky[0] as i32 + sky[1] as i32 + sky[2] as i32;
         assert!(
-            sky[2] > 80 && sky[2] as i32 + 8 > sky[0] as i32,
-            "lower half should be sky, got {sky:?}"
+            sky_lum > 80 && (sky[2] as i32 - sky[0] as i32).abs() < 50,
+            "lower half should be a grey sky, got {sky:?}"
         );
-        // Upper-left quarter is the space gradient, not the old cream date disc.
-        let space = at_pos(&rgba, width, height, center + direction(300.0) * (0.10 * r));
-        assert!(
-            space[2] as i32 + 15 > space[0] as i32,
-            "upper-left quarter should fade from sky blue, got {space:?}"
+        let horizon = at_pos(
+            &rgba,
+            width,
+            height,
+            egui::Pos2::new(center.x + 0.22 * r, center.y + 0.012 * r),
         );
         assert!(
-            space[0] < 180,
-            "upper-left quarter should not be the cream disc, got {space:?}"
+            lum(horizon) + 30 < sky_lum,
+            "the horizon band should fade toward black, horizon {horizon:?} sky {sky:?}"
+        );
+        // Upper-left quarter is solid black, off the sun disc and the hands.
+        let space = at_pos(&rgba, width, height, center + direction(345.0) * (0.12 * r));
+        assert!(
+            space[0] < 20 && space[1] < 20 && space[2] < 20,
+            "upper quarter should be black, got {space:?}"
         );
 
         let wedge = at_pos(&rgba, width, height, center + direction(225.0) * (1.15 * r));

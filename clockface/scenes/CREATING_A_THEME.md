@@ -1,6 +1,6 @@
 # Creating a scenery theme
 
-A scenery theme is the landscape in the upper half of the clock face. It is a layered SVG, clipped to the semicircle that sits on the 9–3 line. Clockface shows or hides named groups for the season, the time of day, and the weather. Hands, numerals, ticks, and the two lower discs are painted on top and are not part of the theme.
+A scenery theme is the landscape in the lower half of the clock face. It is a layered SVG, clipped to the semicircle that sits on the 9–3 line. Clockface shows or hides named groups for the season, the time of day, and the weather. Hands, numerals, and ticks are painted on top and are not part of the theme. The sun and the moon are the two upper quarters, not groups in this drawing.
 
 The theme that ships with the crate is the one to copy:
 
@@ -34,7 +34,7 @@ view_box = [0.0, 0.0, 1000.0, 500.0]
 
 That box is a semicircle. The circle's center is the middle of the bottom edge, `(500, 500)`, and the radius is `500`. Draw the sky toward the top of the box and the ground toward the bottom edge. The clock places the top of the box on the 9–3 line and the bottom edge toward 6 o'clock, so the landscape sits in the lower half and stays upright. Anything outside the semicircle is not drawn.
 
-The clock maps this box onto the lower aperture: the full width, and the height from the 9–3 line down to 6 o'clock. It does not stretch a square bitmap.
+The clock maps this box onto the lower aperture: the full width, and the height from the 9–3 line down to 6 o'clock. It rasterizes the SVG at twice the aperture's on-screen pixels (and at the window's pixel scale), then keeps that image until the weather band, the time-of-day band, or the size changes. Draw in the 1000×500 view box. Do not bake a small bitmap into the file.
 
 ## What the manifest means
 
@@ -48,6 +48,7 @@ always = ["land", "tree-trunk"]
 
 [sky]
 day = "sky-day"
+overcast = "sky-overcast"
 twilight = "sky-twilight"
 night = "sky-night"
 
@@ -64,16 +65,18 @@ autumn = "ground-autumn"
 winter = "ground-winter"
 
 [weather]
-clouds = ["clouds"]
-rain = ["clouds", "rain"]
-snow = ["clouds", "snow", "snow-cover"]
-storm = ["clouds", "storm"]
-fog = ["clouds", "fog"]
-unknown = ["clouds"]
+few = ["clouds-few"]
+partly = ["clouds-partly"]
+thick = ["clouds-thick"]
+rain = ["clouds-thick", "rain"]
+snow = ["clouds-thick", "snow", "snow-cover"]
+storm = ["clouds-thick", "storm"]
+fog = ["clouds-thick", "fog"]
+unknown = ["clouds-partly"]
 
 [time]
-day = ["sun"]
-twilight = ["sun"]
+day = []
+twilight = []
 night = ["stars"]
 
 hide_sun = ["storm", "fog"]
@@ -86,22 +89,23 @@ The same split is used for the rest of the scene:
 | Role | Default group ids | When it is on |
 | --- | --- | --- |
 | Always | `land`, `tree-trunk` | Every frame. Distant hills and the bare tree. |
-| Sky | `sky-day`, `sky-twilight`, `sky-night` | One of them. Day when the sun is up, night when it is below the twilight band, twilight at dawn and dusk. |
+| Sky | `sky-day`, `sky-overcast`, `sky-twilight`, `sky-night` | One of them. Day is a clear blue that darkens toward the top of the box and hazes toward the land. Overcast replaces it when the cover is about 75% or more, and for rain, snow, storm, and fog: grey, darker at the top. Twilight is the warm dawn and dusk gradient. Night is the dark one. `overcast` may be omitted; the day sky is used instead. |
 | Leaves | `leaves-spring`, `leaves-summer`, `leaves-autumn`, `leaves-winter` | One of them, from the local date. Winter is a few clinging leaves, not a second trunk. |
 | Ground | `ground-spring`, `ground-summer`, `ground-autumn`, `ground-winter` | One of them, same season as the leaves. |
-| Clouds | `clouds` | Cloud, rain, snow, storm, fog, and an unknown forecast. |
-| Rain | `rain` | Rain, on top of clouds. |
-| Snow | `snow`, `snow-cover` | Snow. `snow` is the falling flakes. `snow-cover` is the snow on the ground and on the branches. |
-| Storm | `storm` | Thunderstorm, on top of clouds. |
-| Fog | `fog` | Fog, on top of clouds. |
-| Sun | `sun` | Day and twilight, unless `hide_sun` names the current condition. Storm and fog hide it. |
-| Stars | `stars` | Night only. A stormy or foggy night still shows the stars group, because `hide_sun` only removes the sun. |
+| Clouds | `clouds-few`, `clouds-partly`, `clouds-thick` | One of them, from Open-Meteo cloud cover (or from the weather code when cover was not stored). Under about 15% none of them. Few, then partly, then thick. Rain, snow, storm, and fog use the thick deck along with their own group. A theme that only has a `clouds` list still uses that single group. |
+| Rain | `rain` | Rain, on top of the thick clouds. Keep the strokes thin. |
+| Snow | `snow`, `snow-cover` | Snow. `snow` is small flakes. `snow-cover` is the snow on the ground and on the branches. |
+| Storm | `storm` | The lightning, on top of the thick clouds. |
+| Fog | `fog` | Fog, on top of the thick clouds. |
+| Stars | `stars` | Night only. |
 
-Clear weather adds no weather group. The sun or the stars carry that scene.
+The default drawing has no sun. `[time]` `day` and `twilight` are empty. A theme may name a group there; `hide_sun` still drops it for storm and fog. Do not draw a sun in a new copy of the default theme. The NOAA disc is the sun.
 
 Seasons follow the same dates as the sun box: winter from 21 December, spring from 20 March, summer from 21 June, autumn from 22 September. The time of day uses the local civil clock. Around the `--screenshot` instant (10:08) the band is day, not twilight.
 
-Draw later groups further down the file. resvg paints in document order, so snow, rain, and fog should come after the tree if they are meant to sit in front of it. In the default file the order is sky, stars, sun, clouds, storm, hills, seasonal ground, snow on the ground, trunk, leaves, rain, falling snow, fog.
+Draw later groups further down the file. resvg paints in document order, so snow, rain, and fog should come after the tree if they are meant to sit in front of it. In the default file the order is sky, stars, clouds, lightning, hills, seasonal ground, snow on the ground, trunk, leaves, rain, falling snow, fog.
+
+Clouds in the default file are ellipses passed through one filter: fractal noise, a displacement map, then a small blur, with a darker shape under a lighter one so the tops read as lit. Share that filter. Do not give each puff its own turbulence; the Pi redraws the layer only when the band or the size changes, but a stack of filters still has to finish. The clock adds a few levels of stable noise after the raster so a long gradient does not band. You do not paint that noise in the SVG.
 
 ## The mural wheels
 
@@ -112,15 +116,13 @@ The two windows beside the dial are separate from the horizon theme. They are di
 
 Face radius 1 is 353.6 px from the center of the 1000×1000 view. The dial covers the inside of that circle. Draw motifs between about 1.02 and 1.41 face radii, and make them large enough to read in the corner (a tree or a sun should be a sizable fraction of the window, not a speck on a gradient). Replacing either SVG replaces the mural. No Rust change is required if the view box and the angle layout stay the same.
 
-## The moon
+## The sun and the moon
 
-Do not paint the moon in the SVG. The moon is the upper-right quarter, a photograph shaded to the phase, not part of the landscape.
+Do not paint either disc in the SVG. The sun is the upper-left quarter (a GOES image). The moon is the upper-right quarter, a photograph shaded to the phase.
 
-A group whose id is `moon` is forced to `display="none"` so a copied illustration does not sit under the real disc.
+A group whose id is `moon` is forced to `display="none"` so a copied illustration does not appear in the landscape.
 
-Placement, in face coordinates, is unchanged: 45° clockwise from 12, at 0.36 of the face radius, with a radius of 0.11 of the face radius. In the default view box that is about `(699, 301)` with radius `86`. Leave that patch of sky readable. The moon is painted on top of the theme, so a cloud there will not hide it, but a busy drawing behind it still looks crowded.
-
-On Thursday 15 January 2026 at 10:08:37 the phase is about 0.89, a waning crescent, lit on the western (left) limb. The default theme at that instant shows winter, a day sky, the sun, clouds, falling snow, and snow on the ground.
+On Thursday 15 January 2026 at 10:08:37 the phase is about 0.89, a waning crescent, lit on the western (left) limb. The default theme at that instant shows winter, an overcast sky, the thick cloud deck, falling snow, and snow on the ground.
 
 ## Preview
 
@@ -133,7 +135,7 @@ cargo build --release
 
 That frame is local 2026-01-15 10:08:37, Indianapolis, imperial units, and the January fixture (light snow). It does not use the network. The status line is the machine you ran it on.
 
-To force another instant you would need a different build. The screenshot hour is fixed so themes can be compared. To see summer or night, set `CLOCKFACE_SCENE` only after checking the layer logic with a small program, or temporarily call the same `visible_layers` rules from a unit test. `scene.rs` already tests that the January fixture enables `sky-day`, `leaves-winter`, `ground-winter`, `clouds`, `snow`, `snow-cover`, and `sun`, and leaves the other seasons and the rain, storm, and fog groups off.
+To force another instant you would need a different build. The screenshot hour is fixed so themes can be compared. To see summer or night, set `CLOCKFACE_SCENE` only after checking the layer logic with a small program, or temporarily call the same `visible_layers` rules from a unit test. `scene.rs` already tests that the January fixture enables `sky-overcast`, `leaves-winter`, `ground-winter`, `clouds-thick`, `snow`, and `snow-cover`, and leaves the sun, the clear day sky, the other seasons, and the rain, storm, and fog groups off.
 
 The live window uses the same painter. Weather from Open-Meteo selects the weather groups; the clock selects the sky and the season.
 

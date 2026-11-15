@@ -14,12 +14,12 @@ use std::time::Duration;
 
 use chrono::{DateTime, Datelike, Local, TimeZone, Timelike, Utc};
 
-use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Stroke, Vec2};
+use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Vec2};
 
 use crate::brass::shade_bezel;
 use crate::draw::stroke_arc;
 use crate::events::{self, CalendarEvent};
-use crate::layout::{KioskLayout, APERTURE_R, SKY_WEDGE, YEAR_WEDGE};
+use crate::layout::{KioskLayout, APERTURE_R};
 use crate::matrix;
 use crate::mural;
 use crate::quarters;
@@ -71,9 +71,6 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
         sky::year_fraction(model.now),
         sky::day_fraction(model.now),
     );
-    paint_wedge_rim(painter, center, radius, YEAR_WEDGE);
-    paint_wedge_rim(painter, center, radius, SKY_WEDGE);
-
     let aperture = APERTURE_R * radius;
     // Lower half: the landscape, sky on the 9–3 line and ground toward 6.
     scene::paint_horizon(
@@ -108,18 +105,6 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
 
     paint_boxes(painter, &layout, model);
     paint_status(painter, &layout, model);
-}
-
-fn paint_wedge_rim(painter: &Painter, center: Pos2, radius: f32, wedge: (f32, f32)) {
-    // Straight outer edges: the side tangent and the bottom tangent. The dial is the inner edge.
-    let side = if wedge.0 >= 180.0 { -1.0 } else { 1.0 };
-    let nine_or_three = center + Vec2::new(side * radius, 0.0);
-    let corner = center + Vec2::new(side * radius, radius);
-    let six = center + Vec2::new(0.0, radius);
-    let brass = shade_bezel(Vec2::new(side, 0.2), 0.45);
-    let width = (radius * 0.02).max(1.5);
-    painter.line_segment([nine_or_three, corner], Stroke::new(width, brass));
-    painter.line_segment([corner, six], Stroke::new(width, brass));
 }
 
 fn paint_weather_caption(painter: &Painter, center: Pos2, radius: f32, weather: &WeatherReport) {
@@ -173,19 +158,6 @@ fn paint_aperture_rims(painter: &Painter, center: Pos2, radius: f32) {
         360.0,
         width,
         brass,
-    );
-    let aperture = APERTURE_R * radius;
-    // Horizon across the 9–3 line, and the divider between the two upper quarters.
-    painter.line_segment(
-        [
-            Pos2::new(center.x - aperture, center.y),
-            Pos2::new(center.x + aperture, center.y),
-        ],
-        Stroke::new(width, brass),
-    );
-    painter.line_segment(
-        [center, center + direction(0.0) * aperture],
-        Stroke::new(width, brass),
     );
 }
 

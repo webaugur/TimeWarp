@@ -1,6 +1,6 @@
 //! Upper quarters: a NOAA sun on the left, a photographed moon on the right.
 //!
-//! Each quarter fades from sky blue at the face center to black at the rim.
+//! Each quarter is solid black, the space behind the discs.
 //! The moon photograph is NASA SVS 5001 (LRO), shaded with the current phase.
 //! The unlit side stays a dim photograph (earthshine), never transparent.
 
@@ -51,20 +51,9 @@ fn disc_place(center: Pos2, aperture: f32, degrees: f32) -> (Pos2, f32) {
 }
 
 fn paint_quarter(painter: &Painter, center: Pos2, aperture: f32, start: f32, end: f32) {
-    paint_pie(painter, center, aperture, start, end, 28, |point| {
-        let dist = (point - center).length() / aperture.max(1.0);
-        space_color(dist)
+    paint_pie(painter, center, aperture, start, end, 24, |_| {
+        Color32::BLACK
     });
-}
-
-fn space_color(dist: f32) -> Color32 {
-    let t = dist.clamp(0.0, 1.0).powf(1.35);
-    let sky = [78.0, 156.0, 214.0];
-    Color32::from_rgb(
-        (sky[0] * (1.0 - t)) as u8,
-        (sky[1] * (1.0 - t)) as u8,
-        (sky[2] * (1.0 - t)) as u8,
-    )
 }
 
 fn paint_sun_photo(painter: &Painter, ctx: &Context, origin: Pos2, radius: f32, image: &SunImage) {
