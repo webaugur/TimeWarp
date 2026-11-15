@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 SDCARD = Path(__file__).resolve().parents[1]
 SCRIPT = SDCARD / "make-boot-theme.py"
@@ -32,6 +32,31 @@ class RotateTest(unittest.TestCase):
         self.assertEqual(turned.size, (1280, 1024))
         self.assertEqual(turned.getpixel((1279, 512)), (255, 0, 0))
         self.assertEqual(theme.rotate_cw(image, 0).size, (1024, 1280))
+
+
+class EyeFillTest(unittest.TestCase):
+    def test_only_the_paired_eye_sockets_are_filled(self) -> None:
+        theme = load_theme()
+        image = Image.new("RGBA", (80, 80), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        skin = (236, 186, 150, 255)
+        draw.rectangle([8, 8, 71, 71], fill=skin)
+        # Two hollow eyes with dark pupils, plus a scroll-like hole that must stay clear.
+        for left in (18, 46):
+            draw.ellipse([left, 24, left + 14, 44], fill=(0, 0, 0, 0))
+            draw.ellipse([left + 4, 30, left + 10, 38], fill=(16, 42, 48, 255))
+        draw.rectangle([22, 56, 40, 66], fill=(0, 0, 0, 0))
+        filled = theme.fill_hollow_eyes(image)
+        pupil = filled.getpixel((25, 34))
+        self.assertLess(theme._luminance(*pupil[:3]), 80)
+        self.assertEqual(pupil[3], 255)
+        # A pixel in the sclera ring, outside the pupil, becomes opaque white.
+        sclera = filled.getpixel((19, 28))
+        self.assertEqual(sclera[3], 255)
+        self.assertGreater(sclera[0], 240)
+        # The extra interior hole, and the exterior, stay transparent.
+        self.assertEqual(filled.getpixel((30, 60))[3], 0)
+        self.assertEqual(filled.getpixel((0, 0))[3], 0)
 
 
 class FrameTest(unittest.TestCase):

@@ -27,6 +27,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+from collections import deque
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -168,6 +169,179 @@ def knock_out_background(image: Image.Image) -> Image.Image:
         out.append((red, green, blue, alpha))
     image.putdata(out)
     return _crop_alpha(image)
+
+
+# Eye whites in wizard.png are transparent, so a black splash shows through
+# them and the dark pupils read as empty sockets. Other interior gaps (the
+# scroll, hair, sparkle cutouts) stay clear.
+_SCLERA = (255, 250, 244, 255)
+_CLEAR_ALPHA = 48
+
+
+def _luminance(red: int, green: int, blue: int) -> float:
+    return 0.299 * red + 0.587 * green + 0.114 * blue
+
+
+def _enclosed_clear(image: Image.Image) -> list[list[tuple[int, int]]]:
+    """Transparent components that do not touch the image border."""
+    width, height = image.size
+    pixels = image.load()
+    outside = [[False] * width for _ in range(height)]
+    queue: deque[tuple[int, int]] = deque()
+
+    def clear(x: int, y: int) -> bool:
+        return pixels[x, y][3] < _CLEAR_ALPHA
+
+    for x in range(width):
+        for y in (0, height - 1):
+            if clear(x, y) and not outside[y][x]:
+                outside[y][x] = True
+                queue.append((x, y))
+    for y in range(height):
+        for x in (0, width - 1):
+            if clear(x, y) and not outside[y][x]:
+                outside[y][x] = True
+                queue.append((x, y))
+    while queue:
+        x, y = queue.popleft()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < width and 0 <= ny < height and not outside[ny][nx] and clear(nx, ny):
+                outside[ny][nx] = True
+                queue.append((nx, ny))
+
+    visited = [[False] * width for _ in range(height)]
+    components: list[list[tuple[int, int]]] = []
+    for y in range(height):
+        for x in range(width):
+            if not (clear(x, y) and not outside[y][x] and not visited[y][x]):
+                continue
+            queue = deque([(x, y)])
+            visited[y][x] = True
+            cells: list[tuple[int, int]] = []
+            while queue:
+                cx, cy = queue.popleft()
+                cells.append((cx, cy))
+                for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    nx, ny = cx + dx, cy + dy
+                    if (
+                        0 <= nx < width
+                        and 0 <= ny < height
+                        and clear(nx, ny)
+                        and not outside[ny][nx]
+                        and not visited[ny][nx]
+                    ):
+                        visited[ny][nx] = True
+                        queue.append((nx, ny))
+            components.append(cells)
+    return components
+
+
+def _has_filled_pupil(image: Image.Image, cells: list[tuple[int, int]]) -> bool:
+    """True when a compact dark blob sits inside this hole.
+
+    wizard.png anti-aliases the pupil, so the transparent sclera does not
+    share an edge with the darkest pixels. The blob is measured inside the
+    hole's box instead. A thin outline or a robe shadow is not dense enough.
+    """
+    pixels = image.load()
+    xs = [x for x, _y in cells]
+    ys = [y for _x, y in cells]
+    dark: list[tuple[int, int]] = []
+    for y in range(min(ys), max(ys) + 1):
+        for x in range(min(xs), max(xs) + 1):
+            red, green, blue, alpha = pixels[x, y]
+            if alpha >= 200 and _luminance(red, green, blue) < 70:
+                dark.append((x, y))
+    if len(dark) < 8:
+        return False
+    dxs = [x for x, _y in dark]
+    dys = [y for _x, y in dark]
+    box = (max(dxs) - min(dxs) + 1) * (max(dys) - min(dys) + 1)
+    return len(dark) / box >= 0.55
+
+
+def _eye_pair(image: Image.Image, components: list[list[tuple[int, int]]]) -> list[list[tuple[int, int]]]:
+    """The two face sockets: similar ovals, side by side, each holding a pupil."""
+    candidates: list[tuple[float, float, float, float, list[tuple[int, int]]]] = []
+    for cells in components:
+        if len(cells) < 24:
+            continue
+        xs = [x for x, _y in cells]
+        ys = [y for _x, y in cells]
+        box_w = max(xs) - min(xs) + 1
+        box_h = max(ys) - min(ys) + 1
+        if box_w < 6 or box_h < 8:
+            continue
+        aspect = box_w / box_h
+        if not 0.35 <= aspect <= 1.6:
+            continue
+        if len(cells) < 0.25 * box_w * box_h:
+            continue
+        if not _has_filled_pupil(image, cells):
+            continue
+        cx = sum(xs) / len(xs)
+        cy = sum(ys) / len(ys)
+        candidates.append((cx, cy, float(box_w), float(len(cells)), cells))
+    best: list[list[tuple[int, int]]] | None = None
+    best_score = -1.0
+    for index, left in enumerate(candidates):
+        for right in candidates[index + 1 :]:
+            if abs(left[1] - right[1]) > max(left[2], right[2]) * 0.45:
+                continue
+            gap = abs(left[0] - right[0])
+            span = (left[2] + right[2]) / 2
+            if not span * 0.6 <= gap <= span * 4.0:
+                continue
+            area_ratio = max(left[3], right[3]) / max(1.0, min(left[3], right[3]))
+            if area_ratio > 2.5:
+                continue
+            score = left[3] + right[3]
+            if score > best_score:
+                best_score = score
+                best = [left[4], right[4]]
+    return best or []
+
+
+def fill_hollow_eyes(image: Image.Image) -> Image.Image:
+    """Paint opaque sclera into the wizard's transparent eye whites.
+
+    Pupils are already dark opaque pixels inside those sockets and are left
+    as they are. A second hole in the silhouette (scroll, sparkle, hair) is
+    not a paired socket touching a pupil, so it stays transparent.
+    """
+    image = image.convert("RGBA")
+    sockets = _eye_pair(image, _enclosed_clear(image))
+    if not sockets:
+        return image
+    pixels = image.load()
+    width, height = image.size
+    for cells in sockets:
+        xs = [x for x, _y in cells]
+        ys = [y for _x, y in cells]
+        x0 = max(0, min(xs) - 2)
+        y0 = max(0, min(ys) - 2)
+        x1 = min(width - 1, max(xs) + 2)
+        y1 = min(height - 1, max(ys) + 2)
+        # Stay inside the socket. Flooding the whole sprite would leak through
+        # any soft edge into the transparent background.
+        seen: set[tuple[int, int]] = set()
+        queue: deque[tuple[int, int]] = deque(cells)
+        for cell in cells:
+            seen.add(cell)
+        while queue:
+            x, y = queue.popleft()
+            if pixels[x, y][3] < 200:
+                pixels[x, y] = _SCLERA
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = x + dx, y + dy
+                if not (x0 <= nx <= x1 and y0 <= ny <= y1) or (nx, ny) in seen:
+                    continue
+                if pixels[nx, ny][3] >= 200:
+                    continue
+                seen.add((nx, ny))
+                queue.append((nx, ny))
+    return image
 
 
 def _crop_alpha(image: Image.Image, threshold: int = 16, pad: int = 2) -> Image.Image:
@@ -449,7 +623,7 @@ def build_theme(
     if wizard_path is None:
         sprite, tip = synthetic_wizard()
     else:
-        sprite = knock_out_background(Image.open(wizard_path))
+        sprite = fill_hollow_eyes(knock_out_background(Image.open(wizard_path)))
         tip = wand_tip(sprite)
         print(f"wizard {wizard_path} {sprite.size} tip=({tip[0]:.0f},{tip[1]:.0f})")
     if font is None:
