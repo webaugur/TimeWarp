@@ -16,8 +16,10 @@ use crate::sun_image::{self, SunImage};
 
 const MOON_PNG: &[u8] = include_bytes!("../images/lro-full-moon.png");
 
-/// How far the disc center sits along the quarter's bisector, in aperture radii.
+/// Bisector distance that sets how far each disc sits from 12 o'clock, horizontally.
 const DISC_DISTANCE: f32 = 0.52;
+/// Disc center above the 9–3 line, in aperture radii. The middle of the quarter.
+const DISC_HEIGHT: f32 = 0.5;
 /// Disc radius, in aperture radii. Stays inside the arc and off the diameters.
 const DISC_RADIUS: f32 = 0.34;
 /// The sun's corona makes the same radius look larger, so the moon is smaller.
@@ -46,8 +48,9 @@ pub fn paint(
 }
 
 fn disc_place(center: Pos2, aperture: f32, degrees: f32) -> (Pos2, f32) {
+    let along = direction(degrees) * (aperture * DISC_DISTANCE);
     (
-        center + direction(degrees) * (aperture * DISC_DISTANCE),
+        Pos2::new(center.x + along.x, center.y - aperture * DISC_HEIGHT),
         aperture * DISC_RADIUS,
     )
 }
