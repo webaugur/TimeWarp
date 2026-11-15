@@ -27,6 +27,18 @@ pub fn render_rgba(
     now: DateTime<Local>,
     place: &Place,
 ) -> Result<Vec<u8>, String> {
+    render_rgba_with(width, height, center, diameter, now, place, None)
+}
+
+pub fn render_rgba_with(
+    width: u32,
+    height: u32,
+    center: Pos2,
+    diameter: f32,
+    now: DateTime<Local>,
+    place: &Place,
+    sun: Option<std::sync::Arc<crate::sun_image::SunImage>>,
+) -> Result<Vec<u8>, String> {
     if width == 0 || height == 0 || width > 8192 || height > 8192 {
         return Err(format!("screenshot size {width}x{height} is out of range"));
     }
@@ -52,7 +64,8 @@ pub fn render_rgba(
         },
     );
 
-    let model = KioskModel::for_screenshot(now, place);
+    let mut model = KioskModel::for_screenshot(now, place);
+    model.sun = sun;
     let output = ctx.run_pass(input, |ctx| {
         let painter = ctx.layer_painter(egui::LayerId::background());
         kiosk::paint(&painter, screen, center, diameter, &model);
@@ -474,17 +487,28 @@ mod tests {
             "bezel highlight {bezel_lit:?} vs shade {bezel_dark:?}"
         );
 
-        // Upper half is the daytime sky at 10:08 (light snow), not the cream date disc.
-        let sky = at_pos(&rgba, width, height, center + direction(0.0) * (0.42 * r));
+        // Lower half is the overcast January sky, below the thin black fade.
+        let sky = at_pos(&rgba, width, height, center + direction(180.0) * (0.22 * r));
+        let sky_lum = sky[0] as i32 + sky[1] as i32 + sky[2] as i32;
         assert!(
-            sky[2] > 100 && sky[2] as i32 + 10 > sky[0] as i32,
-            "upper half should be sky, got {sky:?}"
+            sky_lum > 80 && (sky[2] as i32 - sky[0] as i32).abs() < 50,
+            "lower half should be a grey sky, got {sky:?}"
         );
-        // Lower-left quarter, off the red second hand (222°) and off the date glyphs.
-        let date = at_pos(&rgba, width, height, center + direction(250.0) * (0.28 * r));
+        let horizon = at_pos(
+            &rgba,
+            width,
+            height,
+            egui::Pos2::new(center.x + 0.22 * r, center.y + 0.012 * r),
+        );
         assert!(
-            date[0] > 180 && date[0] as i32 > date[2] as i32 + 30,
-            "lower-left quarter should be the cream date disc, got {date:?}"
+            lum(horizon) + 30 < sky_lum,
+            "the horizon band should fade toward black, horizon {horizon:?} sky {sky:?}"
+        );
+        // Upper-left quarter is solid black, off the sun disc and the hands.
+        let space = at_pos(&rgba, width, height, center + direction(345.0) * (0.12 * r));
+        assert!(
+            space[0] < 20 && space[1] < 20 && space[2] < 20,
+            "upper quarter should be black, got {space:?}"
         );
 
         let wedge = at_pos(&rgba, width, height, center + direction(225.0) * (1.15 * r));

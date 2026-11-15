@@ -13,24 +13,30 @@ mod kiosk;
 mod layout;
 mod matrix;
 mod mural;
+mod quarters;
 mod raster;
 mod roman;
 mod scene;
 mod settings;
 mod sky;
 mod status;
+mod sun_image;
 mod weather;
 
 pub use events::{examples as example_events, CalendarEvent};
 pub use fonts::install_fonts;
-pub use kiosk::{paint as paint_kiosk, KioskModel};
-pub use raster::{render_rgba, write_png};
+pub use kiosk::{paint as paint_kiosk, repaint_delay, KioskModel};
+pub use raster::{render_rgba, render_rgba_with, write_png};
 pub use roman::{
     hand_angles, milliseconds_since_midnight, paint, paint_with, screenshot_time, HandStyle,
     RomanClockStyle, SecondBounce, ShadowStyle, TickStyle,
 };
 pub use settings::{load_settings, Place, Settings, SettingsOverride, Units};
 pub use status::{gather as gather_status, StatusLine};
+pub use sun_image::{
+    load_cached as load_cached_sun, load_or_fetch as load_sun, SunImage,
+    REFRESH_SECS as SUN_REFRESH_SECS,
+};
 pub use weather::{fetch as fetch_weather, load_cache, now_unix, store_cache, WeatherReport};
 
 /// Default face diameter, in pixels.

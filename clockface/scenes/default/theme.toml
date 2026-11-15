@@ -4,17 +4,28 @@
 
 name = "default"
 
-# Upper half of a circle. The circle's center is the bottom-middle of this box
-# (500, 500) and the radius is 500. The horizon is the bottom edge.
+# Semicircle. The circle's center is the bottom-middle of this box (500, 500)
+# and the radius is 500. Sky is the top of the box; ground is the bottom edge.
 view_box = [0.0, 0.0, 1000.0, 500.0]
 
 # Drawn in every season, at every hour, in every weather.
 always = ["land", "tree-trunk"]
 
 [sky]
-day = "sky-day"
-twilight = "sky-twilight"
+day = "sky-clear"
+overcast = "sky-overcast"
+twilight = "tint-dusk"
 night = "sky-night"
+
+# Real photographs. Rain, snow, storm, and fog use the overcast plate,
+# with the vector precipitation drawn on top. Dawn and dusk are tints.
+[photos]
+clear = "sky-clear"
+partly = "sky-partly"
+overcast = "sky-overcast"
+night = "sky-night"
+dawn = "tint-dawn"
+dusk = "tint-dusk"
 
 [season.leaves]
 spring = "leaves-spring"
@@ -28,19 +39,17 @@ summer = "ground-summer"
 autumn = "ground-autumn"
 winter = "ground-winter"
 
-# Added for the current condition. Clear adds nothing here; the sun comes from [time].
+# Precipitation stays vector, drawn over the photograph.
 [weather]
-clouds = ["clouds"]
-rain = ["clouds", "rain"]
-snow = ["clouds", "snow", "snow-cover"]
-storm = ["clouds", "storm"]
-fog = ["clouds", "fog"]
-unknown = ["clouds"]
+rain = ["rain"]
+snow = ["snow", "snow-cover"]
+storm = ["storm"]
+fog = ["fog"]
 
+# The shipped theme draws no sun. The upper-left quarter is the NOAA disc.
 [time]
-day = ["sun"]
-twilight = ["sun"]
-night = ["stars"]
+day = []
+twilight = []
+night = []
 
-# Scene names that suppress the sun even when [time] would show it.
 hide_sun = ["storm", "fog"]

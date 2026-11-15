@@ -38,6 +38,28 @@ pub fn paint_board(painter: &Painter, rect: Rect, pitch: f32) {
     }
 }
 
+/// One row of lit lamps across the text column. `y` is a grid row, the same pitch as the glyphs.
+pub fn paint_rule(painter: &Painter, bounds: Rect, y: f32, pitch: f32) {
+    let painter = painter.with_clip_rect(bounds);
+    let mut glow = Mesh::default();
+    let mut lit = Mesh::default();
+    let glow_color = Color32::from_rgba_premultiplied(0x55, 0x32, 0x08, 0x66);
+    let mut x = bounds.left() + pitch;
+    let right = bounds.right() - pitch * 0.3;
+    while x < right {
+        let at = Pos2::new(x, y);
+        push_dot(&mut glow, at, pitch * 0.72, glow_color);
+        push_dot(&mut lit, at, pitch * 0.36, AMBER);
+        x += pitch;
+    }
+    if glow.indices.len() >= 3 {
+        painter.add(Shape::mesh(glow));
+    }
+    if lit.indices.len() >= 3 {
+        painter.add(Shape::mesh(lit));
+    }
+}
+
 /// Width of one 5×7 character cell, including the gap before the next glyph.
 pub fn cell(pitch: f32) -> f32 {
     pitch * 6.0
@@ -425,6 +447,9 @@ fn glyph(ch: char) -> Option<[u8; 7]> {
         '°' => rows([
             ".##..", "#..#.", ".##..", ".....", ".....", ".....", ".....",
         ]),
+        '@' => rows([
+            ".###.", "#...#", "#.##.", "#.#.#", "#.##.", "#....", ".###.",
+        ]),
         '·' | '•' => rows([
             ".....", ".....", "..#..", ".....", "..#..", ".....", ".....",
         ]),
@@ -461,6 +486,7 @@ mod tests {
         assert_eq!(glyph('a'), glyph('A'));
         assert_eq!(glyph(' '), Some([0; 7]));
         assert!(glyph('°').unwrap().iter().any(|row| *row != 0));
+        assert!(glyph('@').unwrap().iter().any(|row| *row != 0));
         assert!(glyph('❄').is_none());
     }
 

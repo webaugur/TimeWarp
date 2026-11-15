@@ -1,35 +1,26 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Default clockface horizon. Upper half of a circle: center (500, 500), radius 500.
+  Default clockface horizon. Semicircle: center (500, 500), radius 500.
+  Sky is toward the top of this box (the 9–3 line); ground is toward the bottom (6 o'clock).
   Each toggleable piece is a group whose id is listed in theme.toml.
-  Leave the sky around (699, 301) reasonably open; the app paints the moon there.
+  Do not draw a sun or a moon. Those discs are the upper quarters.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500" width="1000" height="500">
   <defs>
-    <linearGradient id="grad-day" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2a568f"/>
-      <stop offset="0.42" stop-color="#5d8fbe"/>
-      <stop offset="0.72" stop-color="#9ec0d6"/>
-      <stop offset="0.9" stop-color="#e7d3b4"/>
-      <stop offset="1" stop-color="#f3e6cf"/>
+    <linearGradient id="grad-dawn" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffb070" stop-opacity="0"/>
+      <stop offset="0.35" stop-color="#ffb070" stop-opacity="0.05"/>
+      <stop offset="0.62" stop-color="#ff9a55" stop-opacity="0.16"/>
+      <stop offset="0.82" stop-color="#ff8840" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#ffd0a0" stop-opacity="0.38"/>
     </linearGradient>
-    <linearGradient id="grad-twilight" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#1b2348"/>
-      <stop offset="0.45" stop-color="#6a3a58"/>
-      <stop offset="0.78" stop-color="#e07a45"/>
-      <stop offset="1" stop-color="#f2c9a0"/>
+    <linearGradient id="grad-dusk" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a1848" stop-opacity="0.10"/>
+      <stop offset="0.30" stop-color="#6a3058" stop-opacity="0.16"/>
+      <stop offset="0.58" stop-color="#c45a40" stop-opacity="0.22"/>
+      <stop offset="0.80" stop-color="#e8944e" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#f3c898" stop-opacity="0.36"/>
     </linearGradient>
-    <linearGradient id="grad-night" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#070b18"/>
-      <stop offset="0.55" stop-color="#141c36"/>
-      <stop offset="1" stop-color="#24324a"/>
-    </linearGradient>
-    <radialGradient id="grad-sun" cx="50%" cy="50%" r="50%">
-      <stop offset="0" stop-color="#fff6d4"/>
-      <stop offset="0.35" stop-color="#ffd56a"/>
-      <stop offset="0.7" stop-color="#ffb14a" stop-opacity="0.85"/>
-      <stop offset="1" stop-color="#ffb14a" stop-opacity="0"/>
-    </radialGradient>
     <linearGradient id="grad-fog" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#e7ecee" stop-opacity="0"/>
       <stop offset="0.45" stop-color="#d5dcde" stop-opacity="0.25"/>
@@ -45,61 +36,28 @@
     </linearGradient>
   </defs>
 
+  <!-- Photographs sit under the vector land. One of these groups is shown. -->
+  <g id="sky-clear">
+    <image href="skies/clear.jpg" x="0" y="0" width="1000" height="500" preserveAspectRatio="xMidYMid slice"/>
+  </g>
+  <g id="sky-partly">
+    <image href="skies/partly.jpg" x="0" y="0" width="1000" height="500" preserveAspectRatio="xMidYMid slice"/>
+  </g>
+  <g id="sky-overcast">
+    <image href="skies/over.jpg" x="0" y="0" width="1000" height="500" preserveAspectRatio="xMidYMid slice"/>
+  </g>
   <g id="sky-night">
-    <rect width="1000" height="500" fill="url(#grad-night)"/>
+    <image href="skies/night.jpg" x="0" y="0" width="1000" height="500" preserveAspectRatio="xMidYMid slice"/>
   </g>
-  <g id="sky-twilight">
-    <rect width="1000" height="500" fill="url(#grad-twilight)"/>
+  <g id="tint-dawn">
+    <rect width="1000" height="500" fill="url(#grad-dawn)"/>
   </g>
-  <g id="sky-day">
-    <rect width="1000" height="500" fill="url(#grad-day)"/>
-  </g>
-
-  <g id="stars" fill="#f7f3e4">
-    <circle cx="80" cy="40" r="1.4"/>
-    <circle cx="140" cy="90" r="1.1"/>
-    <circle cx="210" cy="36" r="1.6"/>
-    <circle cx="260" cy="120" r="1"/>
-    <circle cx="320" cy="54" r="1.3"/>
-    <circle cx="390" cy="28" r="1.1"/>
-    <circle cx="450" cy="96" r="1.5"/>
-    <circle cx="520" cy="42" r="1.2"/>
-    <circle cx="580" cy="110" r="1"/>
-    <circle cx="640" cy="30" r="1.7"/>
-    <circle cx="700" cy="78" r="1.1"/>
-    <circle cx="760" cy="24" r="1.2"/>
-    <circle cx="830" cy="70" r="1.4"/>
-    <circle cx="900" cy="36" r="1"/>
-    <circle cx="960" cy="100" r="1.3"/>
-    <circle cx="110" cy="160" r="1"/>
-    <circle cx="360" cy="150" r="1.2"/>
-    <circle cx="620" cy="160" r="1"/>
-    <circle cx="860" cy="140" r="1.1"/>
-    <circle cx="480" cy="170" r="0.9"/>
+  <g id="tint-dusk">
+    <rect width="1000" height="500" fill="url(#grad-dusk)"/>
   </g>
 
-  <g id="sun">
-    <circle cx="610" cy="118" r="78" fill="url(#grad-sun)"/>
-    <circle cx="610" cy="118" r="22" fill="#fff8e4"/>
-  </g>
-
-  <g id="clouds" fill="#f4f7fa" opacity="0.92">
-    <ellipse cx="250" cy="250" rx="90" ry="28"/>
-    <ellipse cx="300" cy="236" rx="64" ry="24"/>
-    <ellipse cx="210" cy="240" rx="50" ry="20"/>
-    <ellipse cx="470" cy="280" rx="100" ry="26"/>
-    <ellipse cx="530" cy="266" rx="70" ry="22"/>
-    <ellipse cx="420" cy="270" rx="54" ry="18"/>
-    <ellipse cx="760" cy="240" rx="86" ry="24"/>
-    <ellipse cx="820" cy="228" rx="58" ry="20"/>
-    <ellipse cx="700" cy="232" rx="48" ry="16"/>
-  </g>
-
-  <g id="storm" fill="#3c4654">
-    <ellipse cx="300" cy="230" rx="120" ry="36" opacity="0.9"/>
-    <ellipse cx="520" cy="200" rx="150" ry="40"/>
-    <ellipse cx="740" cy="230" rx="110" ry="32" opacity="0.9"/>
-    <polyline points="500,210 478,268 508,268 470,340" fill="none" stroke="#ffe7a0" stroke-width="3" stroke-linejoin="round"/>
+  <g id="storm">
+    <polyline points="500,150 482,196 508,196 474,250" fill="none" stroke="#ffe7a0" stroke-width="1.4" stroke-linejoin="round" opacity="0.8"/>
   </g>
 
   <g id="land">
@@ -198,40 +156,61 @@
     <ellipse cx="70" cy="270" rx="10" ry="6" fill="#8a6244"/>
   </g>
 
-  <g id="rain" stroke="#9ec4dc" stroke-width="1.4" stroke-linecap="round">
-    <line x1="180" y1="200" x2="166" y2="236"/>
-    <line x1="240" y1="230" x2="226" y2="268"/>
-    <line x1="310" y1="190" x2="296" y2="228"/>
-    <line x1="420" y1="240" x2="406" y2="278"/>
-    <line x1="500" y1="210" x2="486" y2="248"/>
-    <line x1="590" y1="250" x2="576" y2="286"/>
-    <line x1="680" y1="200" x2="666" y2="236"/>
-    <line x1="760" y1="230" x2="746" y2="266"/>
-    <line x1="860" y1="190" x2="846" y2="226"/>
-    <line x1="140" y1="260" x2="128" y2="292"/>
+  <g id="rain" stroke="#c5d5e0" stroke-width="0.6" stroke-linecap="round" opacity="0.45">
+    <line x1="80" y1="150" x2="74" y2="168"/>
+    <line x1="130" y1="190" x2="124" y2="206"/>
+    <line x1="180" y1="160" x2="174" y2="176"/>
+    <line x1="230" y1="210" x2="224" y2="226"/>
+    <line x1="280" y1="140" x2="274" y2="156"/>
+    <line x1="330" y1="185" x2="324" y2="202"/>
+    <line x1="380" y1="155" x2="374" y2="170"/>
+    <line x1="430" y1="200" x2="424" y2="216"/>
+    <line x1="480" y1="145" x2="474" y2="160"/>
+    <line x1="530" y1="175" x2="524" y2="190"/>
+    <line x1="580" y1="220" x2="574" y2="236"/>
+    <line x1="630" y1="150" x2="624" y2="166"/>
+    <line x1="680" y1="195" x2="674" y2="210"/>
+    <line x1="730" y1="160" x2="724" y2="176"/>
+    <line x1="790" y1="210" x2="784" y2="226"/>
+    <line x1="850" y1="145" x2="844" y2="160"/>
+    <line x1="910" y1="185" x2="904" y2="200"/>
+    <line x1="160" y1="240" x2="155" y2="254"/>
+    <line x1="360" y1="230" x2="355" y2="244"/>
+    <line x1="560" y1="245" x2="555" y2="258"/>
+    <line x1="760" y1="235" x2="755" y2="248"/>
   </g>
 
-  <g id="snow" fill="#ffffff">
-    <circle cx="150" cy="210" r="5.5"/>
-    <circle cx="210" cy="250" r="4"/>
-    <circle cx="280" cy="190" r="5"/>
-    <circle cx="340" cy="240" r="3.5"/>
-    <circle cx="410" cy="200" r="5"/>
-    <circle cx="470" cy="270" r="4"/>
-    <circle cx="540" cy="220" r="4.5"/>
-    <circle cx="600" cy="260" r="5.5"/>
-    <circle cx="670" cy="190" r="4"/>
-    <circle cx="730" cy="240" r="5"/>
-    <circle cx="800" cy="180" r="4"/>
-    <circle cx="870" cy="230" r="5"/>
-    <circle cx="120" cy="280" r="3.5"/>
-    <circle cx="250" cy="310" r="4.5"/>
-    <circle cx="390" cy="300" r="3.5"/>
-    <circle cx="560" cy="310" r="4"/>
-    <circle cx="700" cy="290" r="3.5"/>
-    <circle cx="920" cy="270" r="4.5"/>
-    <circle cx="180" cy="160" r="3"/>
-    <circle cx="640" cy="160" r="3.5"/>
+  <g id="snow" fill="#ffffff" opacity="0.8">
+    <circle cx="70" cy="140" r="1.1"/>
+    <circle cx="110" cy="190" r="1.4"/>
+    <circle cx="150" cy="160" r="1.0"/>
+    <circle cx="190" cy="220" r="1.3"/>
+    <circle cx="230" cy="145" r="1.1"/>
+    <circle cx="270" cy="185" r="1.5"/>
+    <circle cx="310" cy="230" r="1.0"/>
+    <circle cx="350" cy="155" r="1.2"/>
+    <circle cx="390" cy="200" r="1.4"/>
+    <circle cx="430" cy="170" r="1.0"/>
+    <circle cx="470" cy="240" r="1.3"/>
+    <circle cx="510" cy="150" r="1.1"/>
+    <circle cx="550" cy="195" r="1.4"/>
+    <circle cx="590" cy="225" r="1.0"/>
+    <circle cx="630" cy="160" r="1.2"/>
+    <circle cx="670" cy="210" r="1.5"/>
+    <circle cx="710" cy="145" r="1.0"/>
+    <circle cx="750" cy="185" r="1.3"/>
+    <circle cx="800" cy="230" r="1.1"/>
+    <circle cx="850" cy="165" r="1.4"/>
+    <circle cx="900" cy="205" r="1.0"/>
+    <circle cx="950" cy="150" r="1.2"/>
+    <circle cx="140" cy="260" r="1.1"/>
+    <circle cx="300" cy="270" r="1.3"/>
+    <circle cx="480" cy="280" r="1.0"/>
+    <circle cx="660" cy="265" r="1.2"/>
+    <circle cx="820" cy="275" r="1.1"/>
+    <circle cx="200" cy="120" r="0.9"/>
+    <circle cx="520" cy="115" r="1.0"/>
+    <circle cx="780" cy="125" r="0.9"/>
   </g>
 
   <g id="fog">

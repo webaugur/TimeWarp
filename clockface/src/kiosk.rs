@@ -10,21 +10,25 @@
 //! `shown = content + (angle - wedge_center) / 360`, so the middle of each window shows the
 //! current season or time of day and the mural eases instead of snapping.
 
-use chrono::{DateTime, Datelike, Local, Timelike};
+use std::time::Duration;
 
-use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Stroke, Vec2};
+use chrono::{DateTime, Datelike, Local, TimeZone, Timelike, Utc};
 
-use crate::brass::{mix, shade_bezel};
-use crate::draw::{paint_pie, stroke_arc};
+use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Vec2};
+
+use crate::brass::shade_bezel;
+use crate::draw::stroke_arc;
 use crate::events::{self, CalendarEvent};
-use crate::layout::{KioskLayout, APERTURE_R, SKY_WEDGE, YEAR_WEDGE};
+use crate::layout::{KioskLayout, APERTURE_R};
 use crate::matrix;
 use crate::mural;
+use crate::quarters;
 use crate::roman::{self, direction};
 use crate::scene;
 use crate::settings::Place;
 use crate::sky::{self, season_name};
 use crate::status::StatusLine;
+use crate::sun_image::SunImage;
 use crate::weather::{self, WeatherReport};
 
 #[derive(Clone, Debug)]
@@ -34,6 +38,8 @@ pub struct KioskModel {
     pub weather: WeatherReport,
     pub events: Vec<CalendarEvent>,
     pub status: StatusLine,
+    /// Latest GOES SUVI frame, when one has been fetched. None draws a plain sun.
+    pub sun: Option<std::sync::Arc<SunImage>>,
 }
 
 impl KioskModel {
@@ -47,6 +53,7 @@ impl KioskModel {
             weather: weather::fixture_january(),
             events: events::examples(),
             status,
+            sun: None,
         }
     }
 }
@@ -64,11 +71,8 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
         sky::year_fraction(model.now),
         sky::day_fraction(model.now),
     );
-    paint_wedge_rim(painter, center, radius, YEAR_WEDGE);
-    paint_wedge_rim(painter, center, radius, SKY_WEDGE);
-
     let aperture = APERTURE_R * radius;
-    // Upper half, horizon on the 9–3 line. The SVG theme fills that semicircle.
+    // Lower half: the landscape, sky on the 9–3 line and ground toward 6.
     scene::paint_horizon(
         painter,
         painter.ctx(),
@@ -77,15 +81,16 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
         model.now,
         &model.weather,
     );
-    paint_aperture(painter, center, aperture, 180.0, 270.0, |p| {
-        date_disc_color(center, aperture, p)
-    });
-    paint_aperture(painter, center, aperture, 90.0, 180.0, |p| {
-        date_disc_color(center, aperture, p)
-    });
-
-    paint_date_words(painter, center, radius, model.now);
-    paint_condition_words(painter, center, radius, &model.weather, model.now);
+    // Upper quarters: sun on the left (9 to 12), moon on the right (12 to 3).
+    quarters::paint(
+        painter,
+        painter.ctx(),
+        center,
+        aperture,
+        sky::moon_phase(model.now),
+        model.sun.as_deref(),
+    );
+    paint_weather_caption(painter, center, radius, &model.weather);
 
     // Same brass mesh the window and the screenshot both fill.
     roman::paint_brass(painter, center, radius, aperture);
@@ -102,109 +107,44 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
     paint_status(painter, &layout, model);
 }
 
-fn paint_wedge_rim(painter: &Painter, center: Pos2, radius: f32, wedge: (f32, f32)) {
-    // Straight outer edges: the side tangent and the bottom tangent. The dial is the inner edge.
-    let side = if wedge.0 >= 180.0 { -1.0 } else { 1.0 };
-    let nine_or_three = center + Vec2::new(side * radius, 0.0);
-    let corner = center + Vec2::new(side * radius, radius);
-    let six = center + Vec2::new(0.0, radius);
-    let brass = shade_bezel(Vec2::new(side, 0.2), 0.45);
-    let width = (radius * 0.02).max(1.5);
-    painter.line_segment([nine_or_three, corner], Stroke::new(width, brass));
-    painter.line_segment([corner, six], Stroke::new(width, brass));
-}
-
-fn paint_aperture(
-    painter: &Painter,
-    center: Pos2,
-    radius: f32,
-    start: f32,
-    end: f32,
-    color_at: impl FnMut(Pos2) -> Color32,
-) {
-    paint_pie(painter, center, radius, start, end, 36, color_at);
-}
-
-fn date_disc_color(center: Pos2, radius: f32, point: Pos2) -> Color32 {
-    let rel = (point - center) / radius.max(1.0);
-    let dist = rel.length();
-    mix(
-        Color32::from_rgb(0xf4, 0xe6, 0xcc),
-        Color32::from_rgb(0xd9, 0xc2, 0x98),
-        (dist * 0.75).clamp(0.0, 1.0),
-    )
-}
-
-fn quarter_clip(center: Pos2, radius: f32, left: bool) -> Rect {
+fn paint_weather_caption(painter: &Painter, center: Pos2, radius: f32, weather: &WeatherReport) {
     let aperture = APERTURE_R * radius;
-    let (x0, x1) = if left {
-        (center.x - aperture, center.x)
-    } else {
-        (center.x, center.x + aperture)
-    };
-    Rect::from_min_max(Pos2::new(x0, center.y), Pos2::new(x1, center.y + aperture))
-}
-
-fn paint_date_words(painter: &Painter, center: Pos2, radius: f32, now: DateTime<Local>) {
-    let painter = painter.with_clip_rect(quarter_clip(center, radius, true));
-    let origin = center + direction(225.0) * (0.36 * radius);
-    let color = Color32::from_rgb(0x3a, 0x28, 0x16);
-    let weekday = weekday_name(now.weekday().num_days_from_monday());
-    let month = month_name(now.month());
-    painter.text(
-        origin + Vec2::new(0.0, -0.055 * radius),
-        Align2::CENTER_CENTER,
-        weekday,
-        FontId::new(0.042 * radius, serif()),
+    let clip = Rect::from_min_max(
+        Pos2::new(center.x - aperture, center.y),
+        Pos2::new(center.x + aperture, center.y + aperture),
+    );
+    let painter = painter.with_clip_rect(clip);
+    let origin = center + direction(180.0) * (0.46 * radius);
+    let color = Color32::from_rgb(0xff, 0xf6, 0xe8);
+    paint_shadowed(
+        &painter,
+        origin + Vec2::new(0.0, -0.028 * radius),
+        &weather.temperature_text(),
+        0.055 * radius,
         color,
     );
-    painter.text(
-        origin,
-        Align2::CENTER_CENTER,
-        month,
-        FontId::new(0.04 * radius, serif()),
-        color,
-    );
-    painter.text(
-        origin + Vec2::new(0.0, 0.06 * radius),
-        Align2::CENTER_CENTER,
-        format!("\u{1F4C5} {}", now.day()),
-        FontId::new(0.07 * radius, serif()),
+    paint_shadowed(
+        &painter,
+        origin + Vec2::new(0.0, 0.028 * radius),
+        &weather.condition,
+        0.032 * radius,
         color,
     );
 }
 
-fn paint_condition_words(
-    painter: &Painter,
-    center: Pos2,
-    radius: f32,
-    weather: &WeatherReport,
-    _now: DateTime<Local>,
-) {
-    let painter = painter.with_clip_rect(quarter_clip(center, radius, false));
-    let origin = center + direction(135.0) * (0.36 * radius);
-    let color = Color32::from_rgb(0x3a, 0x28, 0x16);
-    painter.text(
-        origin + Vec2::new(0.0, -0.02 * radius),
-        Align2::CENTER_CENTER,
-        weather.temperature_text(),
-        FontId::new(0.055 * radius, serif()),
-        color,
-    );
-    painter.text(
-        origin + Vec2::new(0.0, 0.045 * radius),
-        Align2::CENTER_CENTER,
-        {
-            let mark = weather::condition_mark(weather.code.unwrap_or(-1));
-            if mark.is_empty() {
-                weather.condition.clone()
-            } else {
-                format!("{mark} {}", weather.condition)
-            }
-        },
-        FontId::new(0.034 * radius, serif()),
-        color,
-    );
+fn paint_shadowed(painter: &Painter, pos: Pos2, text: &str, size: f32, color: Color32) {
+    let font = FontId::new(size, serif());
+    let shadow = Color32::from_rgba_unmultiplied(0, 0, 0, 170);
+    for (dx, dy) in [(-1.3, 0.0), (1.3, 0.0), (0.0, -1.3), (0.0, 1.3)] {
+        painter.text(
+            pos + Vec2::new(dx, dy),
+            Align2::CENTER_CENTER,
+            text,
+            font.clone(),
+            shadow,
+        );
+    }
+    painter.text(pos, Align2::CENTER_CENTER, text, font, color);
 }
 
 fn paint_aperture_rims(painter: &Painter, center: Pos2, radius: f32) {
@@ -218,19 +158,6 @@ fn paint_aperture_rims(painter: &Painter, center: Pos2, radius: f32) {
         360.0,
         width,
         brass,
-    );
-    let aperture = APERTURE_R * radius;
-    // Horizon across the 9–3 line, and the divider between the two lower quarters.
-    painter.line_segment(
-        [
-            Pos2::new(center.x - aperture, center.y),
-            Pos2::new(center.x + aperture, center.y),
-        ],
-        Stroke::new(width, brass),
-    );
-    painter.line_segment(
-        [center, center + direction(180.0) * aperture],
-        Stroke::new(width, brass),
     );
 }
 
@@ -249,9 +176,8 @@ fn paint_boxes(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
 fn paint_calendar(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, model: &KioskModel) {
     let mut y = origin.y;
     if line_fits(y, pitch, panel) {
-        let clock = format!("\u{1F55B} {}", board_hm(model.now));
-        y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, &clock, 2);
-        y += pitch;
+        let clock = board_clock_line(&model.now);
+        y = paint_heading(painter, panel, origin, pitch, &clock);
     }
     let today = model.now.date_naive();
     let rows = events::upcoming(&model.events, today, 4);
@@ -303,8 +229,7 @@ fn paint_forecast(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, mode
     let mut y = origin.y;
     if line_fits(y, pitch, panel) {
         let today = format!("\u{1F4C5} {}", board_date(model.now));
-        y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, &today, 2);
-        y += pitch;
+        y = paint_heading(painter, panel, origin, pitch, &today);
     }
     let date = model.now.date_naive();
     let mut sky_lines = Vec::new();
@@ -444,9 +369,49 @@ fn serif() -> FontFamily {
     FontFamily::Name("serif".into())
 }
 
-/// Local civil time as HH:MM, the same 24-hour form as sunrise and sunset.
-fn board_hm(now: DateTime<Local>) -> String {
-    format!("{:02}:{:02}", now.hour(), now.minute())
+/// How long to wait before painting again.
+///
+/// The seconds digit, the Swatch beat, and the hands change on the whole second.
+/// During the second hand's bounce the face still paints often enough to show it.
+/// After that it waits for the next second.
+pub fn repaint_delay(now: DateTime<Local>) -> Duration {
+    let into_ms = f64::from(now.timestamp_subsec_millis());
+    let window = crate::roman::RomanClockStyle::default()
+        .second_bounce
+        .window_ms;
+    if into_ms < window {
+        Duration::from_millis(16)
+    } else {
+        let remain = (1000.0 - into_ms).ceil() as u64;
+        Duration::from_millis(remain.max(1))
+    }
+}
+
+/// Local civil time as HH:MM:SS, the same 24-hour form as sunrise and sunset.
+fn board_hms(now: &DateTime<Local>) -> String {
+    format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
+}
+
+/// Left-board clock: local `HH:MM:SS`, then Swatch beats, for example `10:08:37 @464`.
+fn board_clock_line(now: &DateTime<Local>) -> String {
+    format!(
+        "\u{1F55B} {} @{:03} {}",
+        board_hms(now),
+        swatch_beats(now),
+        crate::cycles::period_color_name(*now)
+    )
+}
+
+/// Swatch Internet Time, `@000` through `@999`.
+///
+/// Biel Mean Time is UTC+1 and does not observe daylight saving.
+/// `floor(((utc seconds since midnight + 3600) mod 86400) / 86.4)`.
+fn swatch_beats(now: &DateTime<impl TimeZone>) -> u32 {
+    let utc = now.with_timezone(&Utc);
+    let secs = u64::from(utc.time().num_seconds_from_midnight());
+    let bmt = (secs + 3600) % 86_400;
+    // 86.4 = 864/10, so floor division stays exact in integers.
+    ((bmt * 10) / 864) as u32
 }
 
 /// Local civil date in the board's short style, for example `THU JAN 15 2026`.
@@ -468,16 +433,16 @@ fn line_fits(y: f32, pitch: f32, panel: Rect) -> bool {
     y + pitch * 7.0 <= panel.bottom()
 }
 
-fn weekday_name(index: u32) -> &'static str {
-    [
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-        "Sunday",
-    ][index as usize]
+/// A heading, then one lit row, then a blank character cell before the next line.
+///
+/// The glyph occupies seven rows and the line advances nine, so one grid row
+/// stays dark above the rule. The next line starts seven pitches below the rule,
+/// which is the height of one character cell of unlit lamps.
+fn paint_heading(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, text: &str) -> f32 {
+    let next = matrix::paint_text(painter, panel, origin, pitch, text, 2);
+    let rule_y = next - pitch;
+    matrix::paint_rule(painter, panel, rule_y, pitch);
+    rule_y + pitch * 7.0
 }
 
 #[cfg(test)]
@@ -491,15 +456,66 @@ mod tests {
     #[test]
     fn the_board_clock_is_24_hour_and_the_date_is_the_short_form() {
         let now = screenshot_time();
-        assert_eq!(board_hm(now), "10:08");
+        assert_eq!(board_hms(&now), "10:08:37");
         assert_eq!(board_date(now), "THU JAN 15 2026");
+        assert!(board_clock_line(&now).starts_with("\u{1F55B} 10:08:37 @"));
+        assert!(board_clock_line(&now).ends_with(" RED"));
         let sunday = match Local.with_ymd_and_hms(2026, 11, 15, 9, 5, 0) {
             chrono::LocalResult::Single(time) => time,
             chrono::LocalResult::Ambiguous(earliest, _) => earliest,
             chrono::LocalResult::None => panic!("2026-11-15 09:05 is not a local time"),
         };
-        assert_eq!(board_hm(sunday), "09:05");
+        assert_eq!(board_hms(&sunday), "09:05:00");
         assert_eq!(board_date(sunday), "SUN NOV 15 2026");
+    }
+
+    #[test]
+    fn swatch_beats_follow_biel_mean_time() {
+        // 00:00 BMT is 23:00 UTC.
+        let midnight = Utc.with_ymd_and_hms(2026, 1, 14, 23, 0, 0).unwrap();
+        assert_eq!(swatch_beats(&midnight), 0);
+        // 12:00 BMT is 11:00 UTC, exactly @500.
+        let noon = Utc.with_ymd_and_hms(2026, 1, 15, 11, 0, 0).unwrap();
+        assert_eq!(swatch_beats(&noon), 500);
+        // The same civil clock in a UTC−5 zone is five hours later in Biel.
+        let west = chrono::FixedOffset::west_opt(5 * 3600).unwrap();
+        let local = west.with_ymd_and_hms(2026, 1, 15, 10, 8, 37).unwrap();
+        let as_utc = Utc.with_ymd_and_hms(2026, 1, 15, 15, 8, 37).unwrap();
+        let same_digits_in_utc = Utc.with_ymd_and_hms(2026, 1, 15, 10, 8, 37).unwrap();
+        assert_eq!(swatch_beats(&local), swatch_beats(&as_utc));
+        assert_eq!(swatch_beats(&local), 672);
+        assert_eq!(swatch_beats(&same_digits_in_utc), 464);
+        let at_tick = screenshot_time();
+        assert_eq!(repaint_delay(at_tick), Duration::from_millis(16));
+        let after_bounce = at_tick + chrono::Duration::milliseconds(400);
+        let wait = repaint_delay(after_bounce);
+        assert_eq!(wait, Duration::from_millis(600));
+    }
+
+    #[test]
+    fn the_clock_line_fits_on_one_row_of_the_board() {
+        // Longest Heindel name. The 643-pixel face holds it on one line.
+        assert!(clock_line_fits(
+            "\u{1F55B} 10:08:37 @347 ORANGE",
+            Vec2::new(1920.0, 1080.0)
+        ));
+        // The screenshot's RED also fits the smaller window. A six-letter name
+        // there wraps, two cells in, rather than being abbreviated.
+        assert!(clock_line_fits(
+            "\u{1F55B} 10:08:37 @464 RED",
+            Vec2::new(1200.0, 800.0)
+        ));
+    }
+
+    fn clock_line_fits(line: &str, viewport: Vec2) -> bool {
+        let (center, diameter) = Settings::default().placement(viewport);
+        let screen = Rect::from_min_size(Pos2::ZERO, viewport);
+        let layout = KioskLayout::new(screen, center, diameter);
+        let pitch = matrix::frame_pitch(layout.radius);
+        let panel = layout.boxes[0];
+        let room = panel.width() - pitch - pitch * 0.4;
+        let width = matrix::text_width(line, pitch, |_| pitch * 8.0);
+        width <= room
     }
 
     #[test]
@@ -511,37 +527,22 @@ mod tests {
             let pitch = matrix::frame_pitch(layout.radius);
             let line = pitch * 9.0;
             let left = layout.boxes[0];
-            // Time, a gap, four events of title plus when, one extra wrap, and the gaps.
-            let left_used = line + pitch + 4.0 * (2.0 * line + pitch) + line;
+            // Heading ends one character cell below the rule. Then four events, one wrap.
+            let heading = line + pitch * 6.0;
+            let left_used = heading + 4.0 * (2.0 * line + pitch) + line;
+            let rule = line - pitch;
+            assert!((heading - (rule + pitch * 7.0)).abs() < 0.01);
             assert!(
                 left.top() + pitch + left_used <= left.bottom() + 0.5,
                 "left board overflows on {viewport:?}"
             );
             let right = layout.boxes[1];
-            // Date, a gap, six sky lines, a gap, and five forecast days.
-            let right_used = line + pitch + 6.0 * line + pitch + 5.0 * line;
+            // Date and its rule, six sky lines, a gap, and five forecast days.
+            let right_used = heading + 6.0 * line + pitch + 5.0 * line;
             assert!(
                 right.top() + pitch + right_used <= right.bottom() + 0.5,
                 "right board overflows on {viewport:?}"
             );
         }
     }
-}
-
-fn month_name(month: u32) -> &'static str {
-    [
-        "",
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    ][month as usize]
 }
