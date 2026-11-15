@@ -444,9 +444,23 @@ fn serif() -> FontFamily {
     FontFamily::Name("serif".into())
 }
 
-/// How soon the live window asks to paint again. At most one second, so the
-/// seconds digit on the departure board keeps moving.
-pub const REPAINT_AFTER: Duration = Duration::from_millis(16);
+/// How long to wait before painting again.
+///
+/// The seconds digit, the Swatch beat, and the hands change on the whole second.
+/// During the second hand's bounce the face still paints often enough to show it.
+/// After that it waits for the next second.
+pub fn repaint_delay(now: DateTime<Local>) -> Duration {
+    let into_ms = f64::from(now.timestamp_subsec_millis());
+    let window = crate::roman::RomanClockStyle::default()
+        .second_bounce
+        .window_ms;
+    if into_ms < window {
+        Duration::from_millis(16)
+    } else {
+        let remain = (1000.0 - into_ms).ceil() as u64;
+        Duration::from_millis(remain.max(1))
+    }
+}
 
 /// Local civil time as HH:MM:SS, the same 24-hour form as sunrise and sunset.
 fn board_hms(now: &DateTime<Local>) -> String {
@@ -455,7 +469,12 @@ fn board_hms(now: &DateTime<Local>) -> String {
 
 /// Left-board clock: local `HH:MM:SS`, then Swatch beats, for example `10:08:37 @464`.
 fn board_clock_line(now: &DateTime<Local>) -> String {
-    format!("\u{1F55B} {} @{:03}", board_hms(now), swatch_beats(now))
+    format!(
+        "\u{1F55B} {} @{:03} {}",
+        board_hms(now),
+        swatch_beats(now),
+        crate::cycles::period_color_name(*now)
+    )
 }
 
 /// Swatch Internet Time, `@000` through `@999`.
@@ -489,14 +508,16 @@ fn line_fits(y: f32, pitch: f32, panel: Rect) -> bool {
     y + pitch * 7.0 <= panel.bottom()
 }
 
-/// A heading, then one lit row in the gap before the next line.
+/// A heading, then one lit row, then a blank character cell before the next line.
 ///
 /// The glyph occupies seven rows and the line advances nine, so one grid row
-/// stays dark above the rule. The extra pitch below leaves one dark row under it.
+/// stays dark above the rule. The next line starts seven pitches below the rule,
+/// which is the height of one character cell of unlit lamps.
 fn paint_heading(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, text: &str) -> f32 {
     let next = matrix::paint_text(painter, panel, origin, pitch, text, 2);
-    matrix::paint_rule(painter, panel, next - pitch, pitch);
-    next + pitch
+    let rule_y = next - pitch;
+    matrix::paint_rule(painter, panel, rule_y, pitch);
+    rule_y + pitch * 7.0
 }
 
 fn weekday_name(index: u32) -> &'static str {
@@ -524,7 +545,8 @@ mod tests {
         let now = screenshot_time();
         assert_eq!(board_hms(&now), "10:08:37");
         assert_eq!(board_date(now), "THU JAN 15 2026");
-        assert!(board_clock_line(&now).contains("10:08:37 @"));
+        assert!(board_clock_line(&now).starts_with("\u{1F55B} 10:08:37 @"));
+        assert!(board_clock_line(&now).ends_with(" RED"));
         let sunday = match Local.with_ymd_and_hms(2026, 11, 15, 9, 5, 0) {
             chrono::LocalResult::Single(time) => time,
             chrono::LocalResult::Ambiguous(earliest, _) => earliest,
@@ -550,26 +572,37 @@ mod tests {
         assert_eq!(swatch_beats(&local), swatch_beats(&as_utc));
         assert_eq!(swatch_beats(&local), 672);
         assert_eq!(swatch_beats(&same_digits_in_utc), 464);
-        assert!(REPAINT_AFTER <= Duration::from_secs(1));
+        let at_tick = screenshot_time();
+        assert_eq!(repaint_delay(at_tick), Duration::from_millis(16));
+        let after_bounce = at_tick + chrono::Duration::milliseconds(400);
+        let wait = repaint_delay(after_bounce);
+        assert_eq!(wait, Duration::from_millis(600));
     }
 
     #[test]
     fn the_clock_line_fits_on_one_row_of_the_board() {
-        let line = format!("\u{1F55B} 10:08:37 @347");
-        for viewport in [Vec2::new(1920.0, 1080.0), Vec2::new(1200.0, 800.0)] {
-            let (center, diameter) = Settings::default().placement(viewport);
-            let screen = Rect::from_min_size(Pos2::ZERO, viewport);
-            let layout = KioskLayout::new(screen, center, diameter);
-            let pitch = matrix::frame_pitch(layout.radius);
-            let panel = layout.boxes[0];
-            // Origin is one pitch in; paint wraps at the right edge minus a small inset.
-            let room = panel.width() - pitch - pitch * 0.4;
-            let width = matrix::text_width(&line, pitch, |_| pitch * 8.0);
-            assert!(
-                width <= room,
-                "clock line {width} exceeds {room} on {viewport:?}"
-            );
-        }
+        // Longest Heindel name. The 643-pixel face holds it on one line.
+        assert!(clock_line_fits(
+            "\u{1F55B} 10:08:37 @347 ORANGE",
+            Vec2::new(1920.0, 1080.0)
+        ));
+        // The screenshot's RED also fits the smaller window. A six-letter name
+        // there wraps, two cells in, rather than being abbreviated.
+        assert!(clock_line_fits(
+            "\u{1F55B} 10:08:37 @464 RED",
+            Vec2::new(1200.0, 800.0)
+        ));
+    }
+
+    fn clock_line_fits(line: &str, viewport: Vec2) -> bool {
+        let (center, diameter) = Settings::default().placement(viewport);
+        let screen = Rect::from_min_size(Pos2::ZERO, viewport);
+        let layout = KioskLayout::new(screen, center, diameter);
+        let pitch = matrix::frame_pitch(layout.radius);
+        let panel = layout.boxes[0];
+        let room = panel.width() - pitch - pitch * 0.4;
+        let width = matrix::text_width(line, pitch, |_| pitch * 8.0);
+        width <= room
     }
 
     #[test]
@@ -581,18 +614,18 @@ mod tests {
             let pitch = matrix::frame_pitch(layout.radius);
             let line = pitch * 9.0;
             let left = layout.boxes[0];
-            // Time, the rule in that gap, four events of title plus when, one extra wrap.
-            let left_used = line + pitch + 4.0 * (2.0 * line + pitch) + line;
+            // Heading ends one character cell below the rule. Then four events, one wrap.
+            let heading = line + pitch * 6.0;
+            let left_used = heading + 4.0 * (2.0 * line + pitch) + line;
             let rule = line - pitch;
-            assert!(rule - pitch * 6.0 >= pitch - 0.01);
-            assert!(line + pitch - rule >= pitch - 0.01);
+            assert!((heading - (rule + pitch * 7.0)).abs() < 0.01);
             assert!(
                 left.top() + pitch + left_used <= left.bottom() + 0.5,
                 "left board overflows on {viewport:?}"
             );
             let right = layout.boxes[1];
-            // Date, a gap, six sky lines, a gap, and five forecast days.
-            let right_used = line + pitch + 6.0 * line + pitch + 5.0 * line;
+            // Date and its rule, six sky lines, a gap, and five forecast days.
+            let right_used = heading + 6.0 * line + pitch + 5.0 * line;
             assert!(
                 right.top() + pitch + right_used <= right.bottom() + 0.5,
                 "right board overflows on {viewport:?}"

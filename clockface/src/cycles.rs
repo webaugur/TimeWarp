@@ -76,6 +76,14 @@ pub fn minute_tick_color(now: DateTime<Local>) -> Color32 {
     color_for_letter(letter_at(now))
 }
 
+/// Heindel pigment name for the period that contains `now`.
+///
+/// The period is local standard time, with daylight saving removed. The name
+/// matches the tick colors: orange, yellow, violet, green, indigo, blue, red.
+pub fn period_color_name(now: DateTime<Local>) -> &'static str {
+    color_name_for_letter(letter_at(now))
+}
+
 /// Letter for one 1-minute mark on the 12-hour dial.
 ///
 /// The dial is the civil half the hour hand is in: midnight–noon before noon,
@@ -138,6 +146,18 @@ fn shift_weekday(mut weekday: Weekday, days: i32) -> Weekday {
     weekday
 }
 
+pub fn color_name_for_letter(letter: char) -> &'static str {
+    match letter {
+        'A' => "ORANGE",
+        'B' => "YELLOW",
+        'C' => "VIOLET",
+        'D' => "GREEN",
+        'E' => "INDIGO",
+        'F' => "BLUE",
+        _ => "RED",
+    }
+}
+
 pub fn color_for_letter(letter: char) -> Color32 {
     match letter {
         'A' => Color32::from_rgb(0xFF, 0x8C, 0x00), // Sun, orange
@@ -173,6 +193,15 @@ mod tests {
         assert_eq!(chart_e_letter(Weekday::Sun, 0), 'G');
         assert_eq!(chart_e_letter(Weekday::Sat, 2), 'F');
         assert_eq!(chart_e_letter(Weekday::Wed, 6), 'A');
+    }
+
+    #[test]
+    fn the_period_that_contains_now_names_its_heindel_color() {
+        // Thursday 10:08 is the third period, letter G, Mars, red.
+        assert_eq!(period_color_name(screenshot_time()), "RED");
+        assert_eq!(color_name_for_letter('A'), "ORANGE");
+        assert_eq!(color_name_for_letter('E'), "INDIGO");
+        assert_eq!(color_name_for_letter('G'), "RED");
     }
 
     #[test]

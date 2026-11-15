@@ -14,8 +14,8 @@ use clap::Parser;
 
 use clockface::{
     example_events, fetch_weather, gather_status, install_fonts, load_cache, load_settings,
-    now_unix, paint_kiosk, render_rgba, store_cache, write_png, KioskModel, Place, Settings,
-    SettingsOverride, StatusLine, Units, WeatherReport, REPAINT_AFTER,
+    now_unix, paint_kiosk, render_rgba, repaint_delay, store_cache, write_png, KioskModel, Place,
+    Settings, SettingsOverride, StatusLine, Units, WeatherReport,
 };
 
 #[derive(Parser, Debug)]
@@ -191,7 +191,8 @@ impl ClockApp {
 }
 
 fn show_clock(ui: &mut egui::Ui, app: &mut ClockApp) {
-    ui.ctx().request_repaint_after(REPAINT_AFTER);
+    let now = Local::now();
+    ui.ctx().request_repaint_after(repaint_delay(now));
     if app.status_at.elapsed() >= Duration::from_secs(30) {
         app.status = gather_status();
         app.status_at = Instant::now();
@@ -206,7 +207,7 @@ fn show_clock(ui: &mut egui::Ui, app: &mut ClockApp) {
     let screen = ui.ctx().viewport_rect();
     let (center, diameter) = app.settings.placement(screen.size());
     let model = KioskModel {
-        now: Local::now(),
+        now,
         place: app.settings.place.clone(),
         weather,
         events,
