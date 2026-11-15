@@ -13,7 +13,9 @@ default = ["desktop"]
 desktop = ["dep:eframe"]
 # Direct display on Linux: DRM/KMS + GBM + EGL, then linuxfb. No X11 or Wayland.
 # The feature is a no-op on other operating systems so those builds still compile.
-kms = ["eboard"]
+# leds-spi is the WS281x writer on /dev/spidev. The Pi image turns it on with kms.
+kms = ["eboard", "leds-spi"]
+leds-spi = []
 
 [dependencies]
 chrono = { version = "0.4.38", default-features = false, features = ["clock", "std"] }

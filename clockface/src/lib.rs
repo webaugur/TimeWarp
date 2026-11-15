@@ -12,6 +12,7 @@ mod events;
 mod fonts;
 mod kiosk;
 mod layout;
+mod leds;
 mod matrix;
 mod mural;
 mod ornament;

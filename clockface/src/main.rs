@@ -198,7 +198,7 @@ impl ClockApp {
     fn new(settings: Settings) -> Self {
         let weather = load_cache(&settings.place)
             .unwrap_or_else(|| WeatherReport::unavailable(&settings.place));
-        let sound_fault = start_audio(&settings.audio);
+        let sound_fault = start_audio(&settings.audio, &settings.leds);
         let initial = Almanac::builtin(Local::now(), &settings.place, settings.events.as_deref());
         Self {
             settings,

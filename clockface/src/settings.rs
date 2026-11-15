@@ -75,6 +75,7 @@ pub struct Settings {
     /// and the built-in examples are used only when that list cannot be read.
     pub events: Option<Vec<CalendarEvent>>,
     pub audio: crate::chime::AudioSettings,
+    pub leds: crate::leds::LedSettings,
     /// Overrides the `timewarp` found on `PATH`.
     pub timewarp_bin: Option<String>,
 }
@@ -91,6 +92,7 @@ impl Default for Settings {
             refresh_minutes: DEFAULT_REFRESH_MINUTES,
             events: None,
             audio: crate::chime::AudioSettings::default(),
+            leds: crate::leds::LedSettings::default(),
             timewarp_bin: None,
         }
     }
@@ -169,7 +171,26 @@ struct FileConfig {
     #[serde(default)]
     audio: Option<AudioFile>,
     #[serde(default)]
+    leds: Option<LedsFile>,
+    #[serde(default)]
     timewarp_bin: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct LedsFile {
+    backend: Option<String>,
+    device: Option<String>,
+    count: Option<u16>,
+    brightness: Option<u8>,
+    order: Option<String>,
+    freq_hz: Option<u32>,
+    symbol_bits: Option<u8>,
+    serial_port: Option<String>,
+    serial_baud: Option<u32>,
+    honor_mute: Option<bool>,
+    mute_path: Option<String>,
+    debug: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -250,6 +271,7 @@ pub fn load_settings_with(
         return Err("diameter must be greater than zero".into());
     }
     settings.audio.validate()?;
+    settings.leds.validate()?;
     Ok(settings)
 }
 
@@ -292,7 +314,53 @@ fn apply_file(
     if let Some(audio) = file.audio {
         apply_audio(&mut settings.audio, audio)?;
     }
+    if let Some(leds) = file.leds {
+        apply_leds(&mut settings.leds, leds)?;
+    }
     Ok(layer)
+}
+
+fn apply_leds(leds: &mut crate::leds::LedSettings, file: LedsFile) -> Result<(), String> {
+    use crate::leds::{Backend, Order};
+    if let Some(backend) = file.backend {
+        leds.backend = Backend::parse(&backend)
+            .ok_or_else(|| format!("leds.backend must be none, spi, or serial, not {backend:?}"))?;
+    }
+    if let Some(device) = file.device {
+        leds.device = PathBuf::from(device);
+    }
+    if let Some(count) = file.count {
+        leds.count = count as usize;
+    }
+    if let Some(brightness) = file.brightness {
+        leds.brightness = brightness;
+    }
+    if let Some(order) = file.order {
+        leds.order = Order::parse(&order)
+            .ok_or_else(|| format!("leds.order must be a channel permutation, not {order:?}"))?;
+    }
+    if let Some(freq) = file.freq_hz {
+        leds.freq_hz = freq;
+    }
+    if let Some(bits) = file.symbol_bits {
+        leds.symbol_bits = bits;
+    }
+    if let Some(port) = file.serial_port {
+        leds.serial_port = PathBuf::from(port);
+    }
+    if let Some(baud) = file.serial_baud {
+        leds.serial_baud = baud;
+    }
+    if let Some(honor) = file.honor_mute {
+        leds.honor_mute = honor;
+    }
+    if let Some(path) = file.mute_path {
+        leds.mute_path = PathBuf::from(path);
+    }
+    if let Some(debug) = file.debug {
+        leds.debug = debug;
+    }
+    Ok(())
 }
 
 fn apply_audio(audio: &mut crate::chime::AudioSettings, file: AudioFile) -> Result<(), String> {
@@ -405,6 +473,7 @@ mod tests {
             refresh_minutes: None,
             events: None,
             audio: None,
+            leds: None,
             timewarp_bin: None,
         };
         let mut settings = Settings::default();
