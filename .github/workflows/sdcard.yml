@@ -1,0 +1,27 @@
+name: sdcard
+
+on:
+  pull_request:
+  push:
+    paths:
+      - "sdcard/**"
+      - ".github/workflows/sdcard.yml"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Shell and Python
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck sdcard/*.sh sdcard/files/*.sh
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pillow ruff
+          ruff check sdcard
+          python3 -m compileall -q sdcard
+          python3 -m unittest discover -s sdcard/tests -v
+          bash sdcard/build-image.sh --dry-run
+          bash sdcard/cross-build.sh --dry-run
+          bash sdcard/cross-build.sh --labwc --dry-run
