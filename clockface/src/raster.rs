@@ -514,13 +514,13 @@ mod tests {
             lum(wedge) > 40,
             "year wedge should show the season mural, got {wedge:?}"
         );
-        // Just outside the dial, over the blue sky. A black pixel here is the
-        // ground showing through the gap between the dial and the wheel art.
+        // Just outside the dial, over the blue sky, before the chrome trough.
+        // A black pixel here is the ground showing through a gap in the wheel art.
         let seam = at_pos(
             &rgba,
             width,
             height,
-            center + direction(225.0) * (1.012 * r),
+            center + direction(225.0) * (1.006 * r),
         );
         assert!(
             seam[2] > 100 && seam[2] as i32 > seam[0] as i32 + 20,
