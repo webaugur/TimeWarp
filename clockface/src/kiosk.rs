@@ -24,7 +24,7 @@ use crate::quarters;
 use crate::roman::{self, direction};
 use crate::scene;
 use crate::settings::Place;
-use crate::sky::{self, season_name};
+use crate::sky::{self, DaySky};
 use crate::status::StatusLine;
 use crate::sun_image::SunImage;
 use crate::weather::{self, WeatherReport};
@@ -35,6 +35,7 @@ pub struct KioskModel {
     pub place: Place,
     pub weather: WeatherReport,
     pub events: Vec<CalendarEvent>,
+    pub sky: DaySky,
     pub status: StatusLine,
     /// Latest GOES SUVI frame, when one has been fetched. None draws a plain sun.
     pub sun: Option<std::sync::Arc<SunImage>>,
@@ -50,6 +51,7 @@ impl KioskModel {
             place: place.clone(),
             weather: weather::fixture_january(),
             events: events::examples(),
+            sky: DaySky::builtin(now, place),
             status,
             sun: None,
         }
@@ -78,6 +80,7 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
         aperture,
         model.now,
         &model.weather,
+        Some(model.sky.season.as_str()),
     );
     // Upper quarters: sun on the left (9 to 12), moon on the right (12 to 3).
     quarters::paint(
@@ -85,7 +88,7 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
         painter.ctx(),
         center,
         aperture,
-        sky::moon_phase(model.now),
+        model.sky.moon_phase,
         model.sun.as_deref(),
     );
     paint_weather_caption(painter, center, radius, &model.weather);
@@ -215,28 +218,19 @@ fn paint_forecast(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, mode
         let today = format!("\u{1F4C5} {}", board_date(model.now));
         y = paint_heading(painter, panel, origin, pitch, &today);
     }
-    let date = model.now.date_naive();
     let mut sky_lines = Vec::new();
-    if let Some(times) = sky::sun_times(date, model.place.latitude, model.place.longitude) {
-        sky_lines.push(format!(
-            "\u{2B06} Sunrise  {}",
-            sky::format_local_hm(times.sunrise_unix)
-        ));
-        sky_lines.push(format!(
-            "\u{2B07} Sunset   {}",
-            sky::format_local_hm(times.sunset_unix)
-        ));
+    if let Some(when) = model.sky.sunrise_unix {
+        sky_lines.push(format!("\u{2B06} Sunrise  {}", sky::format_local_hm(when)));
     }
-    sky_lines.push(format!("\u{1F31E} {}", season_name(date)));
-    sky_lines.push(format!(
-        "\u{1F319} {}",
-        moon_name(sky::moon_phase(model.now))
-    ));
-    let (moonrise, moonset) = sky::moon_events(date, model.place.latitude, model.place.longitude);
-    if let Some(when) = moonrise {
+    if let Some(when) = model.sky.sunset_unix {
+        sky_lines.push(format!("\u{2B07} Sunset   {}", sky::format_local_hm(when)));
+    }
+    sky_lines.push(format!("\u{1F31E} {}", model.sky.season));
+    sky_lines.push(format!("\u{1F319} {}", moon_name(model.sky.moon_phase)));
+    if let Some(when) = model.sky.moonrise_unix {
         sky_lines.push(format!("\u{2B06} Moonrise  {}", sky::format_local_hm(when)));
     }
-    if let Some(when) = moonset {
+    if let Some(when) = model.sky.moonset_unix {
         sky_lines.push(format!("\u{2B07} Moonset   {}", sky::format_local_hm(when)));
     }
     for line in &sky_lines {

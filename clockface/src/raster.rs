@@ -27,7 +27,7 @@ pub fn render_rgba(
     now: DateTime<Local>,
     place: &Place,
 ) -> Result<Vec<u8>, String> {
-    render_rgba_with(width, height, center, diameter, now, place, None)
+    render_rgba_with(width, height, center, diameter, now, place, None, None)
 }
 
 pub fn render_rgba_with(
@@ -38,6 +38,7 @@ pub fn render_rgba_with(
     now: DateTime<Local>,
     place: &Place,
     sun: Option<std::sync::Arc<crate::sun_image::SunImage>>,
+    almanac: Option<&crate::timewarp::Almanac>,
 ) -> Result<Vec<u8>, String> {
     if width == 0 || height == 0 || width > 8192 || height > 8192 {
         return Err(format!("screenshot size {width}x{height} is out of range"));
@@ -66,6 +67,15 @@ pub fn render_rgba_with(
 
     let mut model = KioskModel::for_screenshot(now, place);
     model.sun = sun;
+    if let Some(almanac) = almanac {
+        if almanac.from_timewarp {
+            model.events = almanac.events.clone();
+            model.sky = almanac.sky.clone();
+        }
+        if !almanac.fault.is_empty() {
+            model.status.alert = almanac.fault.clone();
+        }
+    }
     let output = ctx.run_pass(input, |ctx| {
         let painter = ctx.layer_painter(egui::LayerId::background());
         kiosk::paint(&painter, screen, center, diameter, &model);

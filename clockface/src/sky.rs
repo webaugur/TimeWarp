@@ -321,6 +321,34 @@ fn rev(deg: f64) -> f64 {
     deg.rem_euclid(360.0)
 }
 
+/// One civil day's sky, either from TimeWarp or from the built-in math.
+#[derive(Clone, Debug)]
+pub struct DaySky {
+    pub sunrise_unix: Option<f64>,
+    pub sunset_unix: Option<f64>,
+    pub season: String,
+    pub moon_phase: f64,
+    pub moonrise_unix: Option<f64>,
+    pub moonset_unix: Option<f64>,
+}
+
+impl DaySky {
+    /// The Rust fallback. Used when `timewarp` is missing or a command fails.
+    pub fn builtin(now: DateTime<Local>, place: &crate::settings::Place) -> Self {
+        let date = now.date_naive();
+        let times = sun_times(date, place.latitude, place.longitude);
+        let (rise, set) = moon_events(date, place.latitude, place.longitude);
+        Self {
+            sunrise_unix: times.map(|times| times.sunrise_unix),
+            sunset_unix: times.map(|times| times.sunset_unix),
+            season: season_name(date).to_owned(),
+            moon_phase: moon_phase(now),
+            moonrise_unix: rise,
+            moonset_unix: set,
+        }
+    }
+}
+
 pub fn format_local_hm(unix_secs: f64) -> String {
     let secs = unix_secs.floor() as i64;
     let nanos = ((unix_secs - secs as f64) * 1e9).clamp(0.0, 999_999_999.0) as u32;
