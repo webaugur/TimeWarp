@@ -1,11 +1,12 @@
-//! Curved thermometer and barometer in the lower corner wedges.
+//! Curved thermometer and barometer in one chrome trough under the dial.
 //!
-//! Each gauge is a clinical glass thermometer bent along an arc concentric
-//! with the dial, just outside the rim. The left wedge is temperature in °F.
-//! The right wedge is mean-sea-level pressure in inches of mercury. A full
-//! quarter-circle outside the dial does not fit: the square corner pinches
-//! to nothing at 3, 6, and 9, so each arc is the span that stays inside the
-//! wedge with the numerals still clear of the dial.
+//! The trough is a single recessed arc from the left wedge, through 6 o'clock,
+//! to the right wedge. Its floor glows like a lamp behind frosted glass. Each
+//! vial floats in that channel: temperature in °F on the left, sea-level
+//! pressure in inches of mercury on the right. Numerals, unit labels, and the
+//! tick icons sit on the outer side of the tube, away from the dial. The
+//! square corner and the boards under the face pinch the arc, so it is wide
+//! in the wedges and only a slim channel at 6.
 
 use chrono::{DateTime, Duration, Local, NaiveDateTime};
 use egui::epaint::{Vertex, WHITE_UV};
@@ -40,15 +41,18 @@ const FLUID: &[Color32] = &[
     Color32::from_rgb(0x74, 0x05, 0x05),
 ];
 
-/// Scale plate, in face radii. Outside the cream dial (1.0) and inside the square.
-/// The ends stay about 30° off the 3, 6, and 9 tangents, where the square pinches shut.
-const PLATE_IN: f32 = 1.028;
-const PLATE_OUT: f32 = 1.112;
-const TUBE_IN: f32 = 1.076;
-const TUBE_OUT: f32 = 1.106;
-const FLUID_IN: f32 = 1.084;
-const FLUID_OUT: f32 = 1.098;
-const LABEL_R: f32 = 1.048;
+/// Trough and tube, in face radii. The dial ends at 1.0. Boards begin near 1.03.
+const TROUGH_IN: f32 = 1.014;
+const CHROME: f32 = 0.009;
+const TUBE_IN: f32 = 1.042;
+const TUBE_OUT: f32 = 1.074;
+const FLUID_IN: f32 = 1.050;
+const FLUID_OUT: f32 = 1.066;
+/// Numerals sit outside the tube.
+const LABEL_R: f32 = 1.122;
+/// Left high end, sweeping through 6 o'clock to the right high end.
+const TROUGH_A0: f32 = 246.0;
+const TROUGH_A1: f32 = 114.0;
 
 /// Left wedge, bulb toward 6, values increasing toward 9.
 const LEFT_START: f32 = 212.0;
@@ -211,8 +215,18 @@ pub fn paint(
     if radius < 8.0 {
         return;
     }
-    paint_thermometer(painter, center, radius, now, weather);
-    paint_barometer(painter, center, radius, now, weather, barometer_hours);
+    let show_thermo = weather.temperature.is_finite();
+    let show_baro = weather.pressure_hpa.is_some_and(|p| p.is_finite());
+    if !show_thermo && !show_baro {
+        return;
+    }
+    paint_trough(painter, center, radius);
+    if show_thermo {
+        paint_thermometer(painter, center, radius, now, weather);
+    }
+    if show_baro {
+        paint_barometer(painter, center, radius, now, weather, barometer_hours);
+    }
 }
 
 fn paint_thermometer(
@@ -379,33 +393,12 @@ fn paint_arc(
     fluid: f64,
 ) {
     let (plate_start, plate_end) = extended(spec);
-    let outline = 1.4 / radius;
-    band(
-        painter,
-        center,
-        radius,
-        plate_start,
-        plate_end,
-        PLATE_IN - outline,
-        PLATE_OUT + outline,
-        &[Color32::BLACK, Color32::BLACK],
-    );
-    band(
-        painter,
-        center,
-        radius,
-        plate_start,
-        plate_end,
-        PLATE_IN,
-        PLATE_OUT,
-        &[Color32::WHITE, Color32::WHITE],
-    );
     for value in tick_values(lo, hi, spec.minor) {
         let major = on_step(value, spec.major);
         let outer = if major {
-            TUBE_IN - 0.002
+            LABEL_R - 0.014
         } else {
-            TUBE_IN - 0.012
+            LABEL_R - 0.026
         };
         let width = if major { 1.25 } else { 0.8 };
         radial_line(
@@ -413,9 +406,9 @@ fn paint_arc(
             center,
             radius,
             angle_of(spec, lo, hi, value),
-            LABEL_R + 0.006,
+            TUBE_OUT + 0.004,
             outer,
-            Stroke::new(width, Color32::BLACK),
+            Stroke::new(width, Color32::from_rgb(0x2a, 0x18, 0x08)),
         );
         if major {
             let label = format_tick(value, spec.decimals);
@@ -425,28 +418,18 @@ fn paint_arc(
                 Align2::CENTER_CENTER,
                 label,
                 FontId::new(0.040 * radius, FontFamily::Proportional),
-                Color32::BLACK,
+                Color32::from_rgb(0x2a, 0x18, 0x08),
             );
         }
     }
     let mid = (spec.start + spec.end) * 0.5;
-    let unit_at = polar(center, radius, mid, PLATE_OUT + 0.062);
-    let unit_font = FontId::new(0.030 * radius, FontFamily::Proportional);
-    for (dx, dy) in [(-1.2, 0.0), (1.2, 0.0), (0.0, -1.2), (0.0, 1.2)] {
-        painter.text(
-            unit_at + Vec2::new(dx, dy),
-            Align2::CENTER_CENTER,
-            spec.unit,
-            unit_font.clone(),
-            Color32::WHITE,
-        );
-    }
+    let unit_at = polar(center, radius, mid, LABEL_R + 0.028);
     painter.text(
         unit_at,
         Align2::CENTER_CENTER,
         spec.unit,
-        unit_font,
-        Color32::from_rgb(0x1a, 0x1a, 0x1a),
+        FontId::new(0.030 * radius, FontFamily::Proportional),
+        Color32::from_rgb(0x3a, 0x22, 0x08),
     );
 
     let fluid_ang = angle_of(spec, lo, hi, fluid);
@@ -531,8 +514,8 @@ fn marker(
         center,
         radius,
         ang,
-        PLATE_IN + 0.004,
-        PLATE_OUT + 0.004,
+        TUBE_IN - 0.006,
+        TUBE_OUT + 0.008,
         Stroke::new(3.2, EDGE),
     );
     radial_line(
@@ -540,11 +523,11 @@ fn marker(
         center,
         radius,
         ang,
-        PLATE_IN + 0.004,
-        PLATE_OUT + 0.004,
+        TUBE_IN - 0.006,
+        TUBE_OUT + 0.008,
         Stroke::new(1.8, color),
     );
-    let tip = polar(center, radius, ang, PLATE_OUT + 0.010);
+    let tip = polar(center, radius, ang, TUBE_OUT + 0.016);
     painter.circle_filled(tip, 3.3, EDGE);
     painter.circle_filled(tip, 2.3, color);
     mark_icon(painter, center, radius, ang, color, kind, spec);
@@ -560,9 +543,9 @@ fn mark_icon(
     kind: Mark,
     spec: &ArcSpec,
 ) {
-    let s = (0.030 * radius).clamp(7.0, 12.0);
-    let out = PLATE_OUT + 0.010 + (3.6 + s * 0.62) / radius;
-    let origin = polar(center, radius, angle, out);
+    let s = (0.028 * radius).clamp(7.0, 11.0);
+    let tip = polar(center, radius, angle, TUBE_OUT + 0.016);
+    let origin = tip + ahead_tangent(angle, spec) * (s * 0.95 + 3.2);
     match kind {
         Mark::High => triangle(painter, origin, s, color, true),
         Mark::Dew => droplet(painter, origin, s, color),
@@ -839,17 +822,115 @@ fn angle_of(spec: &ArcSpec, lo: f64, hi: f64, value: f64) -> f32 {
 }
 
 fn wedge_rect(center: Pos2, radius: f32, left: bool) -> Rect {
+    let bottom = center.y + radius * 1.026;
     if left {
         Rect::from_min_max(
             Pos2::new(center.x - radius, center.y),
-            Pos2::new(center.x, center.y + radius),
+            Pos2::new(center.x, bottom),
         )
     } else {
         Rect::from_min_max(
             Pos2::new(center.x, center.y),
-            Pos2::new(center.x + radius, center.y + radius),
+            Pos2::new(center.x + radius, bottom),
         )
     }
+}
+
+/// One recessed channel from the left vial, under the dial, to the right vial.
+fn paint_trough(painter: &Painter, center: Pos2, radius: f32) {
+    let clip = Rect::from_min_max(
+        Pos2::new(center.x - radius - 1.0, center.y - 2.0),
+        Pos2::new(center.x + radius + 1.0, center.y + radius * 1.026),
+    );
+    let painter = painter.with_clip_rect(clip);
+    let steps = 78u32;
+    let bands = 8u32;
+    let cols = bands + 1;
+    let mut mesh = Mesh::default();
+    for i in 0..=steps {
+        let t = i as f32 / steps as f32;
+        let deg = TROUGH_A0 + (TROUGH_A1 - TROUGH_A0) * t;
+        let inner = TROUGH_IN;
+        let outer = trough_outer(deg);
+        for b in 0..=bands {
+            let u = b as f32 / bands as f32;
+            let r = inner + (outer - inner) * u;
+            mesh.vertices.push(Vertex {
+                pos: polar(center, radius, deg, r),
+                uv: WHITE_UV,
+                color: trough_color(deg, r, inner, outer),
+            });
+        }
+    }
+    for i in 0..steps {
+        for b in 0..bands {
+            let i0 = i * cols + b;
+            let i1 = i0 + 1;
+            let i2 = i0 + cols;
+            let i3 = i2 + 1;
+            mesh.add_triangle(i0, i2, i1);
+            mesh.add_triangle(i1, i2, i3);
+        }
+    }
+    painter.add(Shape::mesh(mesh));
+}
+
+/// Widest radius that stays inside the face width and above the info boards.
+fn trough_outer(deg: f32) -> f32 {
+    let rad = deg.to_radians();
+    let x = rad.sin().abs().max(0.16);
+    let y_down = (-rad.cos()).max(0.0);
+    let mut lim = 0.992 / x;
+    if y_down > 0.12 {
+        lim = lim.min(1.028 / y_down);
+    }
+    let want: f32 = 1.156;
+    want.min(lim).max(TROUGH_IN + 0.008)
+}
+
+fn trough_color(deg: f32, r: f32, inner: f32, outer: f32) -> Color32 {
+    let span = (outer - inner).max(0.001);
+    let lip = CHROME.min(span * 0.46);
+    if r <= inner + lip {
+        let u = ((r - inner) / lip.max(0.001)).clamp(0.0, 1.0);
+        return chrome(u);
+    }
+    if r >= outer - lip {
+        let u = ((outer - r) / lip.max(0.001)).clamp(0.0, 1.0);
+        return chrome(u);
+    }
+    let floor_in = inner + lip;
+    let floor_out = (outer - lip).max(floor_in + 0.001);
+    let u = ((r - floor_in) / (floor_out - floor_in)).clamp(0.0, 1.0);
+    let edge = u.min(1.0 - u);
+    let shade = ((0.07 - edge) / 0.07).clamp(0.0, 1.0);
+    let glow = lamp_color(deg, u);
+    lerp_color(glow, Color32::from_rgb(0xa0, 0x62, 0x18), shade * 0.45)
+}
+
+fn chrome(u: f32) -> Color32 {
+    const STOPS: &[Color32] = &[
+        Color32::from_rgb(0x4a, 0x4a, 0x4e),
+        Color32::from_rgb(0xf4, 0xf4, 0xf6),
+        Color32::from_rgb(0x8c, 0x8c, 0x90),
+        Color32::from_rgb(0xdc, 0xdc, 0xe0),
+        Color32::from_rgb(0x32, 0x32, 0x36),
+    ];
+    sample_stops(STOPS, u)
+}
+
+fn lamp_color(deg: f32, u: f32) -> Color32 {
+    let hot = Color32::from_rgb(0xff, 0xf3, 0xc4);
+    let edge = Color32::from_rgb(0xff, 0xb3, 0x47);
+    let bell = (1.0 - (u * 2.0 - 1.0).abs()).clamp(0.0, 1.0);
+    let glow = lerp_color(edge, hot, bell.powf(0.5));
+    let ang = ((deg - 180.0).abs() / 70.0).clamp(0.0, 1.0);
+    let fall = 1.0 - ang * 0.08;
+    Color32::from_rgb(
+        (glow.r() as f32 * fall).round() as u8,
+        (glow.g() as f32 * fall).round() as u8,
+        (glow.b() as f32 * fall).round() as u8,
+    )
 }
 
 fn tube_px(radius: f32) -> f32 {
