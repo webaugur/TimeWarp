@@ -76,6 +76,8 @@ pub struct Settings {
     pub events: Option<Vec<CalendarEvent>>,
     /// Overrides the `timewarp` found on `PATH`.
     pub timewarp_bin: Option<String>,
+    /// Hours ahead for the barometer forecast tick. The default is 3.
+    pub barometer_hours: u32,
 }
 
 impl Default for Settings {
@@ -90,6 +92,7 @@ impl Default for Settings {
             refresh_minutes: DEFAULT_REFRESH_MINUTES,
             events: None,
             timewarp_bin: None,
+            barometer_hours: 3,
         }
     }
 }
@@ -165,6 +168,8 @@ struct FileConfig {
     events: Option<Vec<CalendarEvent>>,
     #[serde(default)]
     timewarp_bin: Option<String>,
+    #[serde(default)]
+    barometer_hours: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -268,6 +273,9 @@ fn apply_file(
     }
     settings.events = file.events;
     settings.timewarp_bin = file.timewarp_bin;
+    if let Some(hours) = file.barometer_hours {
+        settings.barometer_hours = hours.clamp(1, 48);
+    }
     Ok(layer)
 }
 
@@ -339,6 +347,7 @@ mod tests {
             refresh_minutes: None,
             events: None,
             timewarp_bin: None,
+            barometer_hours: None,
         };
         let mut settings = Settings::default();
         apply_file(&mut settings, file).unwrap();

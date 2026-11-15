@@ -39,6 +39,8 @@ pub struct KioskModel {
     pub status: StatusLine,
     /// Latest GOES SUVI frame, when one has been fetched. None draws a plain sun.
     pub sun: Option<std::sync::Arc<SunImage>>,
+    /// Hours ahead for the barometer's forecast tick. Three is the tendency window.
+    pub barometer_hours: u32,
 }
 
 impl KioskModel {
@@ -54,6 +56,7 @@ impl KioskModel {
             sky: DaySky::builtin(now, place),
             status,
             sun: None,
+            barometer_hours: 3,
         }
     }
 }
@@ -102,6 +105,14 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
         model.now,
         &roman::RomanClockStyle::default(),
         model.weather.wind_hand(),
+    );
+    crate::gauges::paint(
+        painter,
+        center,
+        radius,
+        model.now,
+        &model.weather,
+        model.barometer_hours,
     );
 
     paint_boxes(painter, &layout, model);

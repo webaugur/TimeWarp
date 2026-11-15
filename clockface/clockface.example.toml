@@ -14,6 +14,9 @@ windowed = false
 # $XDG_CACHE_HOME/clockface/weather.toml (or ~/.cache/clockface/weather.toml).
 refresh_minutes = 20
 
+# Hours ahead for the yellow tick on the barometer. 3 is the usual tendency window.
+# barometer_hours = 3
+
 # imperial: °F and mph. metric: °C and km/h.
 units = "imperial"
 

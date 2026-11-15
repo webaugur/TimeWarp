@@ -227,6 +227,9 @@ fn show_clock(ui: &mut egui::Ui, app: &mut ClockApp) {
     let held = app.almanac.lock().expect("almanac lock").almanac.clone();
     let mut status = app.status.clone();
     status.alert = join_faults(&weather.note, &held.fault);
+    if let Some(fault) = clockface::gauge_fault(&weather) {
+        status.alert = join_faults(&status.alert, fault);
+    }
     let events = if held.from_timewarp {
         held.events.clone()
     } else {
@@ -247,6 +250,7 @@ fn show_clock(ui: &mut egui::Ui, app: &mut ClockApp) {
         sky,
         status,
         sun,
+        barometer_hours: app.settings.barometer_hours,
     };
     paint_kiosk(ui.painter(), screen, center, diameter, &model);
 }
