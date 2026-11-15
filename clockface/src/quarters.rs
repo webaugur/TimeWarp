@@ -20,6 +20,8 @@ const MOON_PNG: &[u8] = include_bytes!("../images/lro-full-moon.png");
 const DISC_DISTANCE: f32 = 0.52;
 /// Disc radius, in aperture radii. Stays inside the arc and off the diameters.
 const DISC_RADIUS: f32 = 0.34;
+/// The sun's corona makes the same radius look larger, so the moon is smaller.
+const MOON_RADIUS: f32 = DISC_RADIUS * 0.9;
 /// Unlit moon, as a fraction of the photograph. Faint, still a surface.
 const EARTHSHINE: f32 = 0.28;
 
@@ -40,7 +42,7 @@ pub fn paint(
     } else {
         paint_drawn_sun(painter, sun_at, radius);
     }
-    paint_moon_photo(painter, ctx, moon_at, radius, phase);
+    paint_moon_photo(painter, ctx, moon_at, aperture * MOON_RADIUS, phase);
 }
 
 fn disc_place(center: Pos2, aperture: f32, degrees: f32) -> (Pos2, f32) {
