@@ -38,6 +38,26 @@ units = "imperial"
 # half = "clock-hour"
 # bell = "clock-bell"
 
+# NeoPixel strip. none does not open a device. spi is the Pi strip and needs
+# the leds-spi feature (the kms build). serial is the future Arduino on a tty.
+# order gbr matches the old strip: logical (r, g, b) goes out as G, B, R.
+# freq_hz 400000 is what the Pi used (WS2812 is often 800000). symbol_bits is
+# 3 or 8 SPI symbols per LED bit. honor_mute turns the strip off when /tmp/mute
+# contains 1. debug draws the frame on the window and does not need hardware.
+# [leds]
+# backend = "none"
+# device = "/dev/spidev0.0"
+# count = 20
+# brightness = 192
+# order = "gbr"
+# freq_hz = 400000
+# symbol_bits = 3
+# serial_port = "/dev/ttyACM0"
+# serial_baud = 115200
+# honor_mute = true
+# mute_path = "/tmp/mute"
+# debug = false
+
 [place]
 name = "Indianapolis"
 latitude = 39.7684

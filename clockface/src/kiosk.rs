@@ -108,6 +108,7 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
 
     paint_boxes(painter, &layout, model);
     paint_status(painter, &layout, model);
+    crate::leds::paint_debug(painter, screen);
 }
 
 fn paint_weather_caption(painter: &Painter, center: Pos2, radius: f32, weather: &WeatherReport) {
