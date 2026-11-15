@@ -38,6 +38,8 @@ pub struct Place {
     pub latitude: f64,
     pub longitude: f64,
     pub units: Units,
+    /// IANA zone from TimeWarp, when the city lookup returned one.
+    pub tz: Option<String>,
 }
 
 impl Place {
@@ -47,6 +49,7 @@ impl Place {
             latitude: 39.7684,
             longitude: -86.1581,
             units: Units::Imperial,
+            tz: None,
         }
     }
 }
@@ -68,8 +71,11 @@ pub struct Settings {
     pub windowed: bool,
     pub place: Place,
     pub refresh_minutes: u32,
-    /// `None` means the file omitted events, so the built-in examples are used.
+    /// `None` means the file omitted events. Holidays from TimeWarp still show,
+    /// and the built-in examples are used only when that list cannot be read.
     pub events: Option<Vec<CalendarEvent>>,
+    /// Overrides the `timewarp` found on `PATH`.
+    pub timewarp_bin: Option<String>,
 }
 
 impl Default for Settings {
@@ -83,6 +89,7 @@ impl Default for Settings {
             place: Place::default(),
             refresh_minutes: DEFAULT_REFRESH_MINUTES,
             events: None,
+            timewarp_bin: None,
         }
     }
 }
@@ -152,9 +159,12 @@ struct FileConfig {
     units: Option<String>,
     #[serde(default)]
     refresh_minutes: Option<u32>,
-    /// Absent key stays `None` (use examples). Present, even if empty, is kept.
+    /// Absent key stays `None` (holidays only, or the examples if TimeWarp is down).
+    /// Present, even if empty, is kept and merged with the holiday list.
     #[serde(default)]
     events: Option<Vec<CalendarEvent>>,
+    #[serde(default)]
+    timewarp_bin: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -171,24 +181,61 @@ struct PlaceFile {
 }
 
 pub fn load_settings(path: Option<&Path>, over: &SettingsOverride) -> Result<Settings, String> {
+    let stored = crate::timewarp::read_stored_flags();
+    load_settings_with(path, over, &stored)
+}
+
+pub fn load_settings_with(
+    path: Option<&Path>,
+    over: &SettingsOverride,
+    stored: &crate::timewarp::StoredFlags,
+) -> Result<Settings, String> {
     let mut settings = Settings::default();
+    let mut file_layer = crate::timewarp::PlaceLayer::default();
     if let Some(path) = path {
         let text = fs::read_to_string(path)
             .map_err(|err| format!("could not read {}: {err}", path.display()))?;
         if !text.trim().is_empty() {
             let file: FileConfig = toml::from_str(&text)
                 .map_err(|err| format!("could not parse {}: {err}", path.display()))?;
-            apply_file(&mut settings, file)?;
+            file_layer = apply_file(&mut settings, file)?;
         }
     }
+    let cli_layer = crate::timewarp::PlaceLayer {
+        city: over.city.clone(),
+        latitude: over.latitude,
+        longitude: over.longitude,
+        tz: None,
+    };
+    let (place, fault) = crate::timewarp::resolve_place(
+        settings.place.clone(),
+        stored,
+        &file_layer,
+        &cli_layer,
+        settings.timewarp_bin.as_deref(),
+    );
+    settings.place.name = place.name;
+    settings.place.latitude = place.latitude;
+    settings.place.longitude = place.longitude;
+    settings.place.tz = place.tz;
     apply_override(&mut settings, over)?;
+    if let Some(fault) = fault {
+        // The almanac fetch reports a missing binary. An unknown city is the
+        // one case that has to be said here, because the coordinates never moved.
+        if fault.starts_with("unknown city") {
+            return Err(fault);
+        }
+    }
     if settings.diameter <= 0.0 {
         return Err("diameter must be greater than zero".into());
     }
     Ok(settings)
 }
 
-fn apply_file(settings: &mut Settings, file: FileConfig) -> Result<(), String> {
+fn apply_file(
+    settings: &mut Settings,
+    file: FileConfig,
+) -> Result<crate::timewarp::PlaceLayer, String> {
     if let Some(diameter) = file.diameter {
         settings.diameter = diameter;
         settings.diameter_explicit = true;
@@ -209,23 +256,19 @@ fn apply_file(settings: &mut Settings, file: FileConfig) -> Result<(), String> {
         settings.place.units = Units::parse(&units)
             .ok_or_else(|| format!("units must be imperial or metric, not {units:?}"))?;
     }
+    let mut layer = crate::timewarp::PlaceLayer::default();
     if let Some(place) = file.place {
-        if let Some(name) = place.name {
-            apply_city(&mut settings.place, &name)?;
-        }
-        if let Some(latitude) = place.latitude {
-            settings.place.latitude = latitude;
-        }
-        if let Some(longitude) = place.longitude {
-            settings.place.longitude = longitude;
-        }
+        layer.city = place.name;
+        layer.latitude = place.latitude;
+        layer.longitude = place.longitude;
         if let Some(units) = place.units {
             settings.place.units = Units::parse(&units)
                 .ok_or_else(|| format!("units must be imperial or metric, not {units:?}"))?;
         }
     }
     settings.events = file.events;
-    Ok(())
+    settings.timewarp_bin = file.timewarp_bin;
+    Ok(layer)
 }
 
 fn apply_override(settings: &mut Settings, over: &SettingsOverride) -> Result<(), String> {
@@ -242,9 +285,6 @@ fn apply_override(settings: &mut Settings, over: &SettingsOverride) -> Result<()
     if let Some(windowed) = over.windowed {
         settings.windowed = windowed;
     }
-    if let Some(city) = &over.city {
-        apply_city(&mut settings.place, city)?;
-    }
     if let Some(latitude) = over.latitude {
         settings.place.latitude = latitude;
     }
@@ -254,26 +294,6 @@ fn apply_override(settings: &mut Settings, over: &SettingsOverride) -> Result<()
     if let Some(units) = over.units {
         settings.place.units = units;
     }
-    Ok(())
-}
-
-fn apply_city(place: &mut Place, name: &str) -> Result<(), String> {
-    let key = name.trim().to_ascii_lowercase();
-    let (label, lat, lon) = match key.as_str() {
-        "indianapolis" | "indy" => ("Indianapolis", 39.7684, -86.1581),
-        "chicago" => ("Chicago", 41.8781, -87.6298),
-        "new york" | "nyc" | "newyork" => ("New York", 40.7128, -74.0060),
-        "london" => ("London", 51.5074, -0.1278),
-        "denver" => ("Denver", 39.7392, -104.9903),
-        _ => {
-            return Err(format!(
-                "unknown city {name:?} (indianapolis, chicago, new york, london, denver), or pass --lat and --lon"
-            ));
-        }
-    };
-    place.name = label.into();
-    place.latitude = lat;
-    place.longitude = lon;
     Ok(())
 }
 
@@ -318,6 +338,7 @@ mod tests {
             units: None,
             refresh_minutes: None,
             events: None,
+            timewarp_bin: None,
         };
         let mut settings = Settings::default();
         apply_file(&mut settings, file).unwrap();

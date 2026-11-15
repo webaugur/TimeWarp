@@ -22,8 +22,11 @@ name = "Indianapolis"
 latitude = 39.7684
 longitude = -86.1581
 
-# Omit this whole list to use the built-in examples. An empty list
-# (`events = []`) shows "Nothing on the calendar".
+# Path to the timewarp executable. The default is the `timewarp` on PATH.
+# timewarp_bin = "/usr/local/bin/timewarp"
+
+# Personal rows, merged with TimeWarp's holidays and seasons. Omit the list
+# and only those TimeWarp rows show. An empty list (`events = []`) adds none.
 [[events]]
 date = "2026-01-18"
 title = "Family dinner"
