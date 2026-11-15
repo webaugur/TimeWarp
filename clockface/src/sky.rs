@@ -39,6 +39,8 @@ pub fn day_fraction(now: DateTime<Local>) -> f32 {
 }
 
 /// Fraction of the year, 0 at the start of 1 January (local).
+/// Year angle for the season wheel. The kiosk corners are black, so nothing calls this.
+#[allow(dead_code)]
 pub fn year_fraction(now: DateTime<Local>) -> f32 {
     let date = now.date_naive();
     let ordinal = date.ordinal0() as f32;

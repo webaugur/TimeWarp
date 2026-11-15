@@ -4,11 +4,9 @@
 //! the discs they overlap. Every region is placed from the clock center and the face radius,
 //! so moving or resizing the face moves the complications with it.
 //!
-//! The year wheel (lower left) turns once per tropical year. The sky wheel (lower right)
-//! turns once per local civil day. Each window is the square corner outside the dial: the
-//! arc, the side tangent, and the bottom tangent. Sampling is
-//! `shown = content + (angle - wedge_center) / 360`, so the middle of each window shows the
-//! current season or time of day and the mural eases instead of snapping.
+//! The two lower corners, outside the dial and below the 9–3 line, stay the black
+//! screen. The trough and the gauges are the only paint there. The sun and moon
+//! quarters above the 9–3 line are a separate layer and still fill the upper half.
 
 use std::time::Duration;
 
@@ -19,7 +17,6 @@ use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Vec2};
 use crate::events::{self, CalendarEvent};
 use crate::layout::{KioskLayout, APERTURE_R};
 use crate::matrix;
-use crate::mural;
 use crate::quarters;
 use crate::roman::{self, direction};
 use crate::scene;
@@ -66,14 +63,6 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
     let layout = KioskLayout::new(screen, center, diameter);
     let radius = layout.radius;
 
-    mural::paint(
-        painter,
-        painter.ctx(),
-        center,
-        radius,
-        sky::year_fraction(model.now),
-        sky::day_fraction(model.now),
-    );
     let aperture = APERTURE_R * radius;
     // Lower half: the landscape, sky on the 9–3 line and ground toward 6.
     scene::paint_horizon(

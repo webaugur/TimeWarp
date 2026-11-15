@@ -511,8 +511,18 @@ mod tests {
 
         let wedge = at_pos(&rgba, width, height, center + direction(225.0) * (1.40 * r));
         assert!(
-            lum(wedge) > 40,
-            "year wedge should show the season mural beyond the trough, got {wedge:?}"
+            wedge[0] < 12 && wedge[1] < 12 && wedge[2] < 12,
+            "lower corner outside the trough should be black, got {wedge:?}"
+        );
+        let past_left = at_pos(
+            &rgba,
+            width,
+            height,
+            egui::Pos2::new(center.x - r - 4.0, center.y + 0.15 * r),
+        );
+        assert!(
+            past_left[0] < 12 && past_left[1] < 12 && past_left[2] < 12,
+            "the trough should not pass the dial's left edge, got {past_left:?}"
         );
         // The dial's amber meets the trough. Sky or a black ring in between is a gap.
         let rim = at_pos(&rgba, width, height, center + direction(225.0) * (0.97 * r));
