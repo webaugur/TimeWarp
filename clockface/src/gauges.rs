@@ -52,18 +52,32 @@ const TUBE_IN: f32 = 1.042;
 const TUBE_OUT: f32 = 1.074;
 const FLUID_IN: f32 = 1.050;
 const FLUID_OUT: f32 = 1.066;
-/// Numerals sit outside the tube and inside the outer chrome.
-const LABEL_R: f32 = 1.186;
+/// Numerals sit just outside the tube, still inside the outer chrome.
+const LABEL_R: f32 = 1.150;
+/// Glyphs must stay inside the dial's left and right edges, and above the boards.
+const DIAL_LIMIT: f32 = 0.988;
+const BOARD_LIMIT: f32 = 1.020;
+/// Glass past the low tick, before the bulb, and empty glass past the high tick.
+/// Degrees. Long enough to use the dial-width clip and the space above the boards.
+const TUBE_BEFORE_BULB: f32 = 12.5;
+const TUBE_PAST_CAP: f32 = 12.5;
+/// Outer glass radius of the bulb, in tube half-widths. 1.95 is 78% of the
+/// previous 2.5. The red reservoir sits inside that glass.
+const BULB_RADIUS: f32 = 1.95;
+/// Glass wall around the red, in the same half-width units.
+const BULB_WALL: f32 = 0.50;
 /// 9 o'clock, sweeping through 6 to 3 o'clock.
 const TROUGH_A0: f32 = 270.0;
 const TROUGH_A1: f32 = 90.0;
 
 /// Left wedge, bulb toward 6, values increasing toward 9.
-const LEFT_START: f32 = 212.0;
-const LEFT_END: f32 = 240.0;
+/// The span stops short of 9 and of the boards so the end numerals, the ticks,
+/// and the bulb stay inside the dial-width clip.
+const LEFT_START: f32 = 216.0;
+const LEFT_END: f32 = 234.0;
 /// Right wedge, mirrored: bulb toward 6, values increasing toward 3.
-const RIGHT_START: f32 = 148.0;
-const RIGHT_END: f32 = 120.0;
+const RIGHT_START: f32 = 144.0;
+const RIGHT_END: f32 = 126.0;
 
 struct ArcSpec {
     start: f32,
@@ -275,8 +289,9 @@ fn paint_thermometer(
         hi as f64,
         current as f64,
     );
+    let mut icons = Vec::new();
     if let Some(value) = high {
-        marker(
+        icons.push(marker(
             &painter,
             center,
             radius,
@@ -286,10 +301,10 @@ fn paint_thermometer(
             value as f64,
             RED,
             Mark::High,
-        );
+        ));
     }
     if let Some(value) = dew {
-        marker(
+        icons.push(marker(
             &painter,
             center,
             radius,
@@ -299,10 +314,10 @@ fn paint_thermometer(
             value as f64,
             GREEN,
             Mark::Dew,
-        );
+        ));
     }
     if let Some(value) = feels {
-        marker(
+        icons.push(marker(
             &painter,
             center,
             radius,
@@ -312,8 +327,9 @@ fn paint_thermometer(
             value as f64,
             YELLOW,
             Mark::Feels,
-        );
+        ));
     }
+    paint_marker_icons(&painter, center, radius, &icons);
 }
 
 fn paint_barometer(
@@ -358,8 +374,9 @@ fn paint_barometer(
     let clip = wedge_rect(center, radius, false);
     let painter = painter.with_clip_rect(clip);
     paint_arc(&painter, center, radius, &spec, lo, hi, current);
+    let mut icons = Vec::new();
     if let Some(value) = peak {
-        marker(
+        icons.push(marker(
             &painter,
             center,
             radius,
@@ -369,10 +386,10 @@ fn paint_barometer(
             value,
             RED,
             Mark::High,
-        );
+        ));
     }
     if let Some(value) = ahead {
-        marker(
+        icons.push(marker(
             &painter,
             center,
             radius,
@@ -382,8 +399,9 @@ fn paint_barometer(
             value,
             YELLOW,
             Mark::Forecast,
-        );
+        ));
     }
+    paint_marker_icons(&painter, center, radius, &icons);
 }
 
 fn paint_arc(
@@ -415,18 +433,33 @@ fn paint_arc(
         );
         if major {
             let label = format_tick(value, spec.decimals);
-            let pos = polar(center, radius, angle_of(spec, lo, hi, value), LABEL_R);
+            let angle = angle_of(spec, lo, hi, value);
+            let size = 0.040 * radius;
+            let (half_x, half_y) = text_half(painter, &label, size);
+            let pos = polar(
+                center,
+                radius,
+                angle,
+                label_face_r(angle, half_x / radius, half_y / radius),
+            );
             painter.text(
                 pos,
                 Align2::CENTER_CENTER,
                 label,
-                FontId::new(0.040 * radius, FontFamily::Proportional),
+                FontId::new(size, FontFamily::Proportional),
                 Color32::from_rgb(0x2a, 0x18, 0x08),
             );
         }
     }
     let mid = (spec.start + spec.end) * 0.5;
-    let unit_at = polar(center, radius, mid, LABEL_R);
+    let unit_size = 0.030 * radius;
+    let (unit_x, unit_y) = text_half(painter, spec.unit, unit_size);
+    let unit_at = polar(
+        center,
+        radius,
+        mid,
+        label_face_r(mid, unit_x / radius, unit_y / radius),
+    );
     painter.text(
         unit_at,
         Align2::CENTER_CENTER,
@@ -436,11 +469,16 @@ fn paint_arc(
     );
 
     let fluid_ang = angle_of(spec, lo, hi, fluid);
+    let sign = if spec.end >= spec.start { 1.0 } else { -1.0 };
+    let centerline = (TUBE_IN + TUBE_OUT) * 0.5;
+    // Carry the glass a little past the bulb center so the radial cut sits
+    // inside the bulb instead of showing as a step.
+    let tuck = sign * 1.6;
     band(
         painter,
         center,
         radius,
-        plate_start,
+        plate_start - tuck,
         plate_end,
         TUBE_IN,
         TUBE_OUT,
@@ -451,8 +489,17 @@ fn paint_arc(
         center,
         radius,
         plate_end,
-        (TUBE_IN + TUBE_OUT) * 0.5,
+        centerline,
         tube_px(radius),
+        GLASS,
+    );
+    cap(
+        painter,
+        center,
+        radius,
+        plate_start,
+        centerline,
+        tube_px(radius) * BULB_RADIUS,
         GLASS,
     );
     band(
@@ -474,21 +521,17 @@ fn paint_arc(
         fluid_px(radius),
         FLUID,
     );
-    let sign = if spec.end >= spec.start { 1.0 } else { -1.0 };
-    fluid_bulb(
-        painter,
-        center,
-        radius,
-        plate_start + sign * 1.5,
-        (TUBE_IN + TUBE_OUT) * 0.5 - 0.008,
-    );
+    fluid_bulb(painter, center, radius, plate_start, centerline);
 }
 
-/// A little plate past the first and last tick, so the end numerals and the bulb
-/// are not sitting on the edge. Degrees, in the direction of increasing value.
+/// Glass beyond the scale: a run of tube before the bulb, and empty glass
+/// past the high tick up to the cap. The scale angles themselves stay put.
 fn extended(spec: &ArcSpec) -> (f32, f32) {
     let sign = if spec.end >= spec.start { 1.0 } else { -1.0 };
-    (spec.start - sign * 3.5, spec.end + sign * 2.5)
+    (
+        spec.start - sign * TUBE_BEFORE_BULB,
+        spec.end + sign * TUBE_PAST_CAP,
+    )
 }
 
 /// What a colored tick is marking. These gauges have no minimum tick; a later
@@ -498,6 +541,14 @@ enum Mark {
     Dew,
     Feels,
     Forecast,
+}
+
+struct IconMark {
+    angle: f32,
+    color: Color32,
+    kind: Mark,
+    /// True when the scale runs clockwise, so the forecast arrow points that way.
+    increasing_clockwise: bool,
 }
 
 fn marker(
@@ -510,7 +561,7 @@ fn marker(
     value: f64,
     color: Color32,
     kind: Mark,
-) {
+) -> IconMark {
     let ang = angle_of(spec, lo, hi, value);
     radial_line(
         painter,
@@ -533,27 +584,89 @@ fn marker(
     let tip = polar(center, radius, ang, TUBE_OUT + 0.016);
     painter.circle_filled(tip, 3.3, EDGE);
     painter.circle_filled(tip, 2.3, color);
-    mark_icon(painter, center, radius, ang, color, kind, spec);
+    IconMark {
+        angle: ang,
+        color,
+        kind,
+        increasing_clockwise: spec.end >= spec.start,
+    }
 }
 
-/// A glyph in the tick's color, centered on the ray just past the marker dot.
-fn mark_icon(
-    painter: &Painter,
-    center: Pos2,
-    radius: f32,
-    angle: f32,
-    color: Color32,
-    kind: Mark,
-    spec: &ArcSpec,
-) {
-    let s = (0.028 * 1.4 * radius).clamp(9.5, 16.0);
-    let tip_r = TUBE_OUT + 0.016;
-    let origin = polar(center, radius, angle, tip_r + (3.6 + s * 0.55) / radius);
-    match kind {
-        Mark::High => triangle(painter, origin, s, color, true),
-        Mark::Dew => droplet(painter, origin, s, color),
-        Mark::Feels => figure(painter, origin, s, color),
-        Mark::Forecast => ahead_arrow(painter, origin, s, color, angle, spec),
+fn icon_px(radius: f32) -> f32 {
+    (0.028 * 1.4 * radius).clamp(9.5, 16.0)
+}
+
+/// Just inside the trough's outer lip, and inside the dial edge and the boards.
+fn icon_face_r(angle: f32, half: f32) -> f32 {
+    let mut face_r = TROUGH_OUT - OUTER_LIP - half - 0.008;
+    let rad = angle.to_radians();
+    let outward = rad.sin().abs();
+    let down = (-rad.cos()).max(0.0);
+    if outward > 1e-3 {
+        face_r = face_r.min((DIAL_LIMIT - half) / outward);
+    }
+    if down > 1e-3 {
+        face_r = face_r.min((BOARD_LIMIT - half) / down);
+    }
+    face_r.max(LABEL_R + half + 0.012)
+}
+
+/// Push icons apart along the arc. Each stays as close to its marker angle as
+/// the gap allows; a uniform shift keeps the group from walking off one end.
+fn spread_icon_angles(homes: &[f32], min_gap: f32) -> Vec<f32> {
+    let mut order: Vec<usize> = (0..homes.len()).collect();
+    order.sort_by(|&a, &b| homes[a].total_cmp(&homes[b]));
+    let mut placed = homes.to_vec();
+    if order.len() < 2 {
+        return placed;
+    }
+    let first = order[0];
+    placed[first] = homes[first];
+    for pair in order.windows(2) {
+        let prev = pair[0];
+        let cur = pair[1];
+        placed[cur] = homes[cur].max(placed[prev] + min_gap);
+    }
+    let last = *order.last().unwrap();
+    let excess = placed[last] - homes[last];
+    if excess > 0.0 {
+        for slot in &mut placed {
+            *slot -= excess;
+        }
+    }
+    placed
+}
+
+fn paint_marker_icons(painter: &Painter, center: Pos2, radius: f32, icons: &[IconMark]) {
+    if icons.is_empty() {
+        return;
+    }
+    let s = icon_px(radius);
+    let half = s * 0.55 / radius;
+    let sample = icon_face_r(icons[0].angle, half).max(1.05);
+    let gap = (s * 1.35 / (sample * radius)).to_degrees();
+    let homes: Vec<f32> = icons.iter().map(|icon| icon.angle).collect();
+    let placed = spread_icon_angles(&homes, gap);
+    let leader = Color32::from_rgba_unmultiplied(0x2a, 0x18, 0x08, 78);
+    for (icon, angle) in icons.iter().zip(placed) {
+        let face_r = icon_face_r(angle, half);
+        let from = polar(center, radius, icon.angle, TUBE_OUT + 0.024);
+        let to = polar(center, radius, angle, face_r - half - 0.006);
+        painter.line(vec![from, to], Stroke::new(0.75, leader));
+        let origin = polar(center, radius, angle, face_r);
+        match icon.kind {
+            Mark::High => triangle(painter, origin, s, icon.color, true),
+            Mark::Dew => droplet(painter, origin, s, icon.color),
+            Mark::Feels => figure(painter, origin, s, icon.color),
+            Mark::Forecast => ahead_arrow(
+                painter,
+                origin,
+                s,
+                icon.color,
+                angle,
+                icon.increasing_clockwise,
+            ),
+        }
     }
 }
 
@@ -616,9 +729,9 @@ fn ahead_arrow(
     s: f32,
     color: Color32,
     angle: f32,
-    spec: &ArcSpec,
+    increasing_clockwise: bool,
 ) {
-    let dir = ahead_tangent(angle, spec);
+    let dir = ahead_tangent(angle, increasing_clockwise);
     let tail = origin - dir * (s * 0.42);
     let head = origin + dir * (s * 0.46);
     stroke(painter, tail, head, 2.5, EDGE);
@@ -628,10 +741,10 @@ fn ahead_arrow(
     fill_poly(painter, &[head, back + side, back - side], color);
 }
 
-fn ahead_tangent(angle: f32, spec: &ArcSpec) -> Vec2 {
+fn ahead_tangent(angle: f32, increasing_clockwise: bool) -> Vec2 {
     let rad = angle.to_radians();
     let clockwise = Vec2::new(rad.cos(), rad.sin());
-    if spec.end >= spec.start {
+    if increasing_clockwise {
         clockwise
     } else {
         -clockwise
@@ -676,11 +789,12 @@ fn stroke(painter: &Painter, a: Pos2, b: Pos2, width: f32, color: Color32) {
     painter.line(vec![a, b], Stroke::new(width, color));
 }
 
-/// Reservoir at the low end. Diameter is about 2.5 tube-widths, so the radius
-/// is 1.25 tube-widths (`tube_px` is the tube's half-width).
+/// Reservoir at the tube's low end. The center is the argument: the caller
+/// places it on the tube centerline at `plate_start`, so the stem meets the
+/// bulb with no kink. Diameter is about 78% of the previous 2.5 tube-widths.
 fn fluid_bulb(painter: &Painter, center: Pos2, radius: f32, angle: f32, at: f32) {
     let origin = polar(center, radius, angle, at);
-    let px = tube_px(radius) * 2.5;
+    let px = tube_px(radius) * (BULB_RADIUS - BULB_WALL);
     let segs = 28u32;
     let mut mesh = Mesh::default();
     mesh.vertices.push(Vertex {
@@ -824,8 +938,42 @@ fn angle_of(spec: &ArcSpec, lo: f64, hi: f64, value: f64) -> f32 {
     value_to_angle(value, lo, hi, spec.start as f64, spec.end as f64) as f32
 }
 
+fn text_half(painter: &Painter, text: &str, size: f32) -> (f32, f32) {
+    let galley = painter.layout(
+        text.to_owned(),
+        FontId::new(size, FontFamily::Proportional),
+        Color32::PLACEHOLDER,
+        f32::INFINITY,
+    );
+    (galley.size().x * 0.5 + 1.5, galley.size().y * 0.5 + 1.0)
+}
+
+/// Preferred numeral radius, pulled in when the glyph would cross the dial edge
+/// or the top of the info boards.
+fn label_face_r(angle: f32, half_x: f32, half_y: f32) -> f32 {
+    let rad = angle.to_radians();
+    let outward = rad.sin().abs();
+    let down = (-rad.cos()).max(0.0);
+    let mut face_r = LABEL_R;
+    if outward > 1e-3 {
+        face_r = face_r.min((DIAL_LIMIT - half_x) / outward);
+    }
+    if down > 1e-3 {
+        face_r = face_r.min((BOARD_LIMIT - half_y) / down);
+    }
+    face_r.max(TUBE_OUT + 0.028)
+}
+
+fn glyph_inside(angle: f32, face_r: f32, half_x: f32, half_y: f32) -> bool {
+    let rad = angle.to_radians();
+    let x = rad.sin().abs() * face_r + half_x;
+    let y = (-rad.cos()).max(0.0) * face_r + half_y;
+    x <= DIAL_LIMIT + 1e-4 && y <= BOARD_LIMIT + 1e-4
+}
+
 fn wedge_rect(center: Pos2, radius: f32, left: bool) -> Rect {
-    let bottom = center.y + radius * 1.28;
+    // Stop at the board line so a numeral cannot draw underneath the lamps.
+    let bottom = center.y + radius * BOARD_LIMIT;
     if left {
         Rect::from_min_max(
             Pos2::new(center.x - radius, center.y),
@@ -1113,6 +1261,88 @@ mod tests {
         }
         let wide = barometer_scale(&[29.0, 30.8]).unwrap();
         assert!(wide.0 <= 29.0 && 30.8 <= wide.1);
+    }
+
+    #[test]
+    fn icons_sit_by_the_trough_edge_and_separate_when_close() {
+        let half = 0.024;
+        for angle in [216.0, 222.0, 227.0, 234.0, 144.0, 134.0, 126.0] {
+            let face_r = icon_face_r(angle, half);
+            assert!(
+                face_r >= LABEL_R + half,
+                "icon at {angle} still sits on the numerals ({face_r})"
+            );
+            assert!(
+                glyph_inside(angle, face_r, half, half),
+                "icon at {angle} r={face_r} leaves the dial or the boards"
+            );
+        }
+        let homes = [222.8, 223.9, 227.2];
+        let placed = spread_icon_angles(&homes, 3.0);
+        let mut ordered = placed.clone();
+        ordered.sort_by(|a, b| a.total_cmp(b));
+        for pair in ordered.windows(2) {
+            assert!(pair[1] - pair[0] >= 2.99, "{ordered:?}");
+        }
+        assert!(
+            (placed[2] - homes[2]).abs() < 0.01,
+            "the free icon should stay put"
+        );
+        assert!((placed[0] - homes[0]).abs() < 4.0);
+    }
+
+    #[test]
+    fn scale_ends_stay_inside_the_dial_and_above_the_boards() {
+        // "30.5" is the wide end numeral. Half-extents are in face radii.
+        let wide = (0.062, 0.026);
+        let narrow = (0.030, 0.026);
+        for (angle, half) in [
+            (LEFT_END, wide),
+            (RIGHT_END, wide),
+            (LEFT_START, narrow),
+            (RIGHT_START, wide),
+        ] {
+            let face_r = label_face_r(angle, half.0, half.1);
+            assert!(
+                face_r >= TUBE_OUT + 0.028,
+                "label at {angle} collapsed onto the tube ({face_r})"
+            );
+            assert!(
+                glyph_inside(angle, face_r, half.0, half.1),
+                "label at {angle} r={face_r} leaves the dial or the boards"
+            );
+        }
+        let centerline = (TUBE_IN + TUBE_OUT) * 0.5;
+        let bulb_half = (TUBE_OUT - TUBE_IN) * 0.5 * BULB_RADIUS;
+        let cap_half = (TUBE_OUT - TUBE_IN) * 0.5;
+        for (start, end) in [(LEFT_START, LEFT_END), (RIGHT_START, RIGHT_END)] {
+            let spec = ArcSpec {
+                start,
+                end,
+                unit: "",
+                minor: 1.0,
+                major: 1.0,
+                decimals: 0,
+            };
+            let (bulb, cap) = extended(&spec);
+            let sign = if end >= start { 1.0 } else { -1.0 };
+            assert!(
+                (start - bulb) * sign > 8.0,
+                "tube should run well past the low tick toward the bulb"
+            );
+            assert!(
+                (cap - end) * sign > 8.0,
+                "empty glass should run well past the high tick"
+            );
+            assert!(
+                glyph_inside(bulb, centerline, bulb_half, bulb_half),
+                "bulb at {bulb} is clipped"
+            );
+            assert!(
+                glyph_inside(cap, centerline, cap_half, cap_half),
+                "tube cap at {cap} is clipped"
+            );
+        }
     }
 
     #[test]

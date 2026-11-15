@@ -6,6 +6,7 @@
 //! binary is missing or a command fails. Every command runs with a short
 //! timeout, off the UI thread. One fault is reported on the status line.
 
+use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -26,6 +27,39 @@ const SYNODIC_DAYS: f64 = 29.530588853;
 const RETRY_AFTER: Duration = Duration::from_secs(15 * 60);
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
+thread_local! {
+    static ENV_HELD: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Hold the env lock. Re-entrant on this thread so a test can set `HOME` and
+/// then read the TimeWarp cache path.
+fn enter_env() -> EnvGuard {
+    if ENV_HELD.with(Cell::get) {
+        return EnvGuard::Reentrant;
+    }
+    let guard = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+    ENV_HELD.with(|held| held.set(true));
+    EnvGuard::Locked(guard)
+}
+
+enum EnvGuard {
+    Locked(std::sync::MutexGuard<'static, ()>),
+    Reentrant,
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        if matches!(self, EnvGuard::Locked(_)) {
+            ENV_HELD.with(|held| held.set(false));
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn with_env_lock<T>(body: impl FnOnce() -> T) -> T {
+    let _guard = enter_env();
+    body()
+}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct StoredFlags {
@@ -580,7 +614,7 @@ fn unix_to_local_date(unix: f64) -> Option<NaiveDate> {
 }
 
 pub fn read_stored_flags() -> StoredFlags {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+    let _guard = enter_env();
     read_stored_flags_locked()
 }
 
@@ -815,13 +849,6 @@ pub fn resolve_place(
         layers.push(over.clone());
     }
     fold_place(base, &layers, |name| lookup_city(configured_bin, name))
-}
-
-/// Used by the tests so a path check can set the environment without racing other tests.
-#[cfg(test)]
-fn with_env_lock<T>(body: impl FnOnce() -> T) -> T {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-    body()
 }
 
 #[cfg(test)]

@@ -287,12 +287,40 @@ def render_clockface_toml(
     text = example
     if not text.endswith("\n"):
         text += "\n"
+    text = _drop_commented_table(text, "audio")
     text = _replace_top_level(text, "units", '"imperial"')
     if timewarp_bin:
         text = _replace_or_insert_timewarp_bin(text, timewarp_bin)
     if audio:
         text = _upsert_audio(text)
     return text
+
+
+def _drop_commented_table(text: str, name: str) -> str:
+    """Remove a fully commented `[name]` block from the installed file.
+
+    The example documents `[audio]` with `#` lines. Those are comments, but the
+    shop file for a build that does not accept the table must not contain the
+    header, and an audio build must not keep the example's `gpio_path` line
+    beside the real table.
+    """
+    header = re.compile(rf"^#\s*\[{re.escape(name)}\]\s*$")
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    skipping = False
+    for line in lines:
+        bare = line.rstrip("\n")
+        if header.match(bare):
+            skipping = True
+            continue
+        if skipping:
+            if bare.startswith("#"):
+                continue
+            skipping = False
+            if bare.strip() == "":
+                continue
+        out.append(line)
+    return "".join(out)
 
 
 def _replace_top_level(text: str, key: str, toml_value: str) -> str:

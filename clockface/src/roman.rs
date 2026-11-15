@@ -283,6 +283,29 @@ pub(crate) fn paint_brass(painter: &Painter, center: Pos2, radius: f32, inner: f
     painter.add(Shape::mesh(mesh));
 }
 
+/// Soft shadow just inside the aperture, so the cream face reads as raised
+/// over the landscape windows. `inner` is the hole radius in pixels.
+pub(crate) fn paint_aperture_shadow(painter: &Painter, center: Pos2, inner: f32) {
+    if inner < 8.0 {
+        return;
+    }
+    // A few overlapping strokes, darkest against the rim and gone a short
+    // way in. Strokes composite; a transparent mesh did not darken the windows.
+    let depth = (inner * 0.045).clamp(4.0, 12.0);
+    let rings = 6;
+    for i in 0..rings {
+        let t = i as f32 / (rings - 1) as f32;
+        let width = depth / rings as f32 + 0.4;
+        let radius = inner - width * 0.5 - 0.4 - (depth - width) * t;
+        let alpha = (78.0 * (1.0 - t).powf(1.35)).round().clamp(0.0, 255.0) as u8;
+        painter.circle_stroke(
+            center,
+            radius,
+            Stroke::new(width, Color32::from_black_alpha(alpha)),
+        );
+    }
+}
+
 /// `#ffffb2` at the center, `#ffcc7f` at the dial edge. Opaque all the way out.
 fn dial_color(dist: f32, radius: f32) -> Color32 {
     let t = if radius > 0.0 {
