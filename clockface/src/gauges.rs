@@ -289,8 +289,9 @@ fn paint_thermometer(
         hi as f64,
         current as f64,
     );
+    let mut icons = Vec::new();
     if let Some(value) = high {
-        marker(
+        icons.push(marker(
             &painter,
             center,
             radius,
@@ -300,10 +301,10 @@ fn paint_thermometer(
             value as f64,
             RED,
             Mark::High,
-        );
+        ));
     }
     if let Some(value) = dew {
-        marker(
+        icons.push(marker(
             &painter,
             center,
             radius,
@@ -313,10 +314,10 @@ fn paint_thermometer(
             value as f64,
             GREEN,
             Mark::Dew,
-        );
+        ));
     }
     if let Some(value) = feels {
-        marker(
+        icons.push(marker(
             &painter,
             center,
             radius,
@@ -326,8 +327,9 @@ fn paint_thermometer(
             value as f64,
             YELLOW,
             Mark::Feels,
-        );
+        ));
     }
+    paint_marker_icons(&painter, center, radius, &icons);
 }
 
 fn paint_barometer(
@@ -372,8 +374,9 @@ fn paint_barometer(
     let clip = wedge_rect(center, radius, false);
     let painter = painter.with_clip_rect(clip);
     paint_arc(&painter, center, radius, &spec, lo, hi, current);
+    let mut icons = Vec::new();
     if let Some(value) = peak {
-        marker(
+        icons.push(marker(
             &painter,
             center,
             radius,
@@ -383,10 +386,10 @@ fn paint_barometer(
             value,
             RED,
             Mark::High,
-        );
+        ));
     }
     if let Some(value) = ahead {
-        marker(
+        icons.push(marker(
             &painter,
             center,
             radius,
@@ -396,8 +399,9 @@ fn paint_barometer(
             value,
             YELLOW,
             Mark::Forecast,
-        );
+        ));
     }
+    paint_marker_icons(&painter, center, radius, &icons);
 }
 
 fn paint_arc(
@@ -539,6 +543,14 @@ enum Mark {
     Forecast,
 }
 
+struct IconMark {
+    angle: f32,
+    color: Color32,
+    kind: Mark,
+    /// True when the scale runs clockwise, so the forecast arrow points that way.
+    increasing_clockwise: bool,
+}
+
 fn marker(
     painter: &Painter,
     center: Pos2,
@@ -549,7 +561,7 @@ fn marker(
     value: f64,
     color: Color32,
     kind: Mark,
-) {
+) -> IconMark {
     let ang = angle_of(spec, lo, hi, value);
     radial_line(
         painter,
@@ -572,28 +584,89 @@ fn marker(
     let tip = polar(center, radius, ang, TUBE_OUT + 0.016);
     painter.circle_filled(tip, 3.3, EDGE);
     painter.circle_filled(tip, 2.3, color);
-    mark_icon(painter, center, radius, ang, color, kind, spec);
+    IconMark {
+        angle: ang,
+        color,
+        kind,
+        increasing_clockwise: spec.end >= spec.start,
+    }
 }
 
-/// A glyph in the tick's color, centered on the ray just past the marker dot.
-fn mark_icon(
-    painter: &Painter,
-    center: Pos2,
-    radius: f32,
-    angle: f32,
-    color: Color32,
-    kind: Mark,
-    spec: &ArcSpec,
-) {
-    let s = (0.028 * 1.4 * radius).clamp(9.5, 16.0);
-    let tip_r = TUBE_OUT + 0.016;
-    // Just past the dot, a little closer to the tube than the numerals.
-    let origin = polar(center, radius, angle, tip_r + (1.2 + s * 0.42) / radius);
-    match kind {
-        Mark::High => triangle(painter, origin, s, color, true),
-        Mark::Dew => droplet(painter, origin, s, color),
-        Mark::Feels => figure(painter, origin, s, color),
-        Mark::Forecast => ahead_arrow(painter, origin, s, color, angle, spec),
+fn icon_px(radius: f32) -> f32 {
+    (0.028 * 1.4 * radius).clamp(9.5, 16.0)
+}
+
+/// Just inside the trough's outer lip, and inside the dial edge and the boards.
+fn icon_face_r(angle: f32, half: f32) -> f32 {
+    let mut face_r = TROUGH_OUT - OUTER_LIP - half - 0.008;
+    let rad = angle.to_radians();
+    let outward = rad.sin().abs();
+    let down = (-rad.cos()).max(0.0);
+    if outward > 1e-3 {
+        face_r = face_r.min((DIAL_LIMIT - half) / outward);
+    }
+    if down > 1e-3 {
+        face_r = face_r.min((BOARD_LIMIT - half) / down);
+    }
+    face_r.max(LABEL_R + half + 0.012)
+}
+
+/// Push icons apart along the arc. Each stays as close to its marker angle as
+/// the gap allows; a uniform shift keeps the group from walking off one end.
+fn spread_icon_angles(homes: &[f32], min_gap: f32) -> Vec<f32> {
+    let mut order: Vec<usize> = (0..homes.len()).collect();
+    order.sort_by(|&a, &b| homes[a].total_cmp(&homes[b]));
+    let mut placed = homes.to_vec();
+    if order.len() < 2 {
+        return placed;
+    }
+    let first = order[0];
+    placed[first] = homes[first];
+    for pair in order.windows(2) {
+        let prev = pair[0];
+        let cur = pair[1];
+        placed[cur] = homes[cur].max(placed[prev] + min_gap);
+    }
+    let last = *order.last().unwrap();
+    let excess = placed[last] - homes[last];
+    if excess > 0.0 {
+        for slot in &mut placed {
+            *slot -= excess;
+        }
+    }
+    placed
+}
+
+fn paint_marker_icons(painter: &Painter, center: Pos2, radius: f32, icons: &[IconMark]) {
+    if icons.is_empty() {
+        return;
+    }
+    let s = icon_px(radius);
+    let half = s * 0.55 / radius;
+    let sample = icon_face_r(icons[0].angle, half).max(1.05);
+    let gap = (s * 1.35 / (sample * radius)).to_degrees();
+    let homes: Vec<f32> = icons.iter().map(|icon| icon.angle).collect();
+    let placed = spread_icon_angles(&homes, gap);
+    let leader = Color32::from_rgba_unmultiplied(0x2a, 0x18, 0x08, 78);
+    for (icon, angle) in icons.iter().zip(placed) {
+        let face_r = icon_face_r(angle, half);
+        let from = polar(center, radius, icon.angle, TUBE_OUT + 0.024);
+        let to = polar(center, radius, angle, face_r - half - 0.006);
+        painter.line(vec![from, to], Stroke::new(0.75, leader));
+        let origin = polar(center, radius, angle, face_r);
+        match icon.kind {
+            Mark::High => triangle(painter, origin, s, icon.color, true),
+            Mark::Dew => droplet(painter, origin, s, icon.color),
+            Mark::Feels => figure(painter, origin, s, icon.color),
+            Mark::Forecast => ahead_arrow(
+                painter,
+                origin,
+                s,
+                icon.color,
+                angle,
+                icon.increasing_clockwise,
+            ),
+        }
     }
 }
 
@@ -656,9 +729,9 @@ fn ahead_arrow(
     s: f32,
     color: Color32,
     angle: f32,
-    spec: &ArcSpec,
+    increasing_clockwise: bool,
 ) {
-    let dir = ahead_tangent(angle, spec);
+    let dir = ahead_tangent(angle, increasing_clockwise);
     let tail = origin - dir * (s * 0.42);
     let head = origin + dir * (s * 0.46);
     stroke(painter, tail, head, 2.5, EDGE);
@@ -668,10 +741,10 @@ fn ahead_arrow(
     fill_poly(painter, &[head, back + side, back - side], color);
 }
 
-fn ahead_tangent(angle: f32, spec: &ArcSpec) -> Vec2 {
+fn ahead_tangent(angle: f32, increasing_clockwise: bool) -> Vec2 {
     let rad = angle.to_radians();
     let clockwise = Vec2::new(rad.cos(), rad.sin());
-    if spec.end >= spec.start {
+    if increasing_clockwise {
         clockwise
     } else {
         -clockwise
@@ -1188,6 +1261,34 @@ mod tests {
         }
         let wide = barometer_scale(&[29.0, 30.8]).unwrap();
         assert!(wide.0 <= 29.0 && 30.8 <= wide.1);
+    }
+
+    #[test]
+    fn icons_sit_by_the_trough_edge_and_separate_when_close() {
+        let half = 0.024;
+        for angle in [216.0, 222.0, 227.0, 234.0, 144.0, 134.0, 126.0] {
+            let face_r = icon_face_r(angle, half);
+            assert!(
+                face_r >= LABEL_R + half,
+                "icon at {angle} still sits on the numerals ({face_r})"
+            );
+            assert!(
+                glyph_inside(angle, face_r, half, half),
+                "icon at {angle} r={face_r} leaves the dial or the boards"
+            );
+        }
+        let homes = [222.8, 223.9, 227.2];
+        let placed = spread_icon_angles(&homes, 3.0);
+        let mut ordered = placed.clone();
+        ordered.sort_by(|a, b| a.total_cmp(b));
+        for pair in ordered.windows(2) {
+            assert!(pair[1] - pair[0] >= 2.99, "{ordered:?}");
+        }
+        assert!(
+            (placed[2] - homes[2]).abs() < 0.01,
+            "the free icon should stay put"
+        );
+        assert!((placed[0] - homes[0]).abs() < 4.0);
     }
 
     #[test]

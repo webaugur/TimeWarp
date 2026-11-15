@@ -89,6 +89,7 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
     crate::gauges::paint_trough(painter, center, radius, &model.weather);
     // Same dial mesh the window and the screenshot both fill.
     roman::paint_brass(painter, center, radius, aperture);
+    roman::paint_aperture_shadow(painter, center, aperture);
     roman::paint_markings_and_hands(
         painter,
         center,
