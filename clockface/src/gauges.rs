@@ -57,6 +57,15 @@ const LABEL_R: f32 = 1.150;
 /// Glyphs must stay inside the dial's left and right edges, and above the boards.
 const DIAL_LIMIT: f32 = 0.988;
 const BOARD_LIMIT: f32 = 1.020;
+/// Glass past the low tick, before the bulb, and empty glass past the high tick.
+/// Degrees. Long enough to use the dial-width clip and the space above the boards.
+const TUBE_BEFORE_BULB: f32 = 12.5;
+const TUBE_PAST_CAP: f32 = 12.5;
+/// Outer glass radius of the bulb, in tube half-widths. 1.95 is 78% of the
+/// previous 2.5. The red reservoir sits inside that glass.
+const BULB_RADIUS: f32 = 1.95;
+/// Glass wall around the red, in the same half-width units.
+const BULB_WALL: f32 = 0.50;
 /// 9 o'clock, sweeping through 6 to 3 o'clock.
 const TROUGH_A0: f32 = 270.0;
 const TROUGH_A1: f32 = 90.0;
@@ -456,11 +465,16 @@ fn paint_arc(
     );
 
     let fluid_ang = angle_of(spec, lo, hi, fluid);
+    let sign = if spec.end >= spec.start { 1.0 } else { -1.0 };
+    let centerline = (TUBE_IN + TUBE_OUT) * 0.5;
+    // Carry the glass a little past the bulb center so the radial cut sits
+    // inside the bulb instead of showing as a step.
+    let tuck = sign * 1.6;
     band(
         painter,
         center,
         radius,
-        plate_start,
+        plate_start - tuck,
         plate_end,
         TUBE_IN,
         TUBE_OUT,
@@ -471,8 +485,17 @@ fn paint_arc(
         center,
         radius,
         plate_end,
-        (TUBE_IN + TUBE_OUT) * 0.5,
+        centerline,
         tube_px(radius),
+        GLASS,
+    );
+    cap(
+        painter,
+        center,
+        radius,
+        plate_start,
+        centerline,
+        tube_px(radius) * BULB_RADIUS,
         GLASS,
     );
     band(
@@ -494,21 +517,17 @@ fn paint_arc(
         fluid_px(radius),
         FLUID,
     );
-    let sign = if spec.end >= spec.start { 1.0 } else { -1.0 };
-    fluid_bulb(
-        painter,
-        center,
-        radius,
-        plate_start + sign * 1.5,
-        (TUBE_IN + TUBE_OUT) * 0.5 - 0.008,
-    );
+    fluid_bulb(painter, center, radius, plate_start, centerline);
 }
 
-/// A little plate past the first and last tick, so the end numerals and the bulb
-/// are not sitting on the edge. Degrees, in the direction of increasing value.
+/// Glass beyond the scale: a run of tube before the bulb, and empty glass
+/// past the high tick up to the cap. The scale angles themselves stay put.
 fn extended(spec: &ArcSpec) -> (f32, f32) {
     let sign = if spec.end >= spec.start { 1.0 } else { -1.0 };
-    (spec.start - sign * 3.5, spec.end + sign * 2.5)
+    (
+        spec.start - sign * TUBE_BEFORE_BULB,
+        spec.end + sign * TUBE_PAST_CAP,
+    )
 }
 
 /// What a colored tick is marking. These gauges have no minimum tick; a later
@@ -697,11 +716,12 @@ fn stroke(painter: &Painter, a: Pos2, b: Pos2, width: f32, color: Color32) {
     painter.line(vec![a, b], Stroke::new(width, color));
 }
 
-/// Reservoir at the low end. Diameter is about 2.5 tube-widths, so the radius
-/// is 1.25 tube-widths (`tube_px` is the tube's half-width).
+/// Reservoir at the tube's low end. The center is the argument: the caller
+/// places it on the tube centerline at `plate_start`, so the stem meets the
+/// bulb with no kink. Diameter is about 78% of the previous 2.5 tube-widths.
 fn fluid_bulb(painter: &Painter, center: Pos2, radius: f32, angle: f32, at: f32) {
     let origin = polar(center, radius, angle, at);
-    let px = tube_px(radius) * 2.5;
+    let px = tube_px(radius) * (BULB_RADIUS - BULB_WALL);
     let segs = 28u32;
     let mut mesh = Mesh::default();
     mesh.vertices.push(Vertex {
@@ -1191,19 +1211,34 @@ mod tests {
                 "label at {angle} r={face_r} leaves the dial or the boards"
             );
         }
-        let bulb_r = (TUBE_IN + TUBE_OUT) * 0.5 - 0.008;
-        let bulb_half = (TUBE_OUT - TUBE_IN) * 0.5 * 2.5;
+        let centerline = (TUBE_IN + TUBE_OUT) * 0.5;
+        let bulb_half = (TUBE_OUT - TUBE_IN) * 0.5 * BULB_RADIUS;
+        let cap_half = (TUBE_OUT - TUBE_IN) * 0.5;
         for (start, end) in [(LEFT_START, LEFT_END), (RIGHT_START, RIGHT_END)] {
+            let spec = ArcSpec {
+                start,
+                end,
+                unit: "",
+                minor: 1.0,
+                major: 1.0,
+                decimals: 0,
+            };
+            let (bulb, cap) = extended(&spec);
             let sign = if end >= start { 1.0 } else { -1.0 };
-            let angle = start - sign * 2.0;
             assert!(
-                glyph_inside(angle, bulb_r, bulb_half, bulb_half),
-                "bulb at {angle} is clipped"
+                (start - bulb) * sign > 8.0,
+                "tube should run well past the low tick toward the bulb"
             );
-            let cap = end + sign * 2.5;
-            let cap_half = (TUBE_OUT - TUBE_IN) * 0.5;
             assert!(
-                glyph_inside(cap, (TUBE_IN + TUBE_OUT) * 0.5, cap_half, cap_half),
+                (cap - end) * sign > 8.0,
+                "empty glass should run well past the high tick"
+            );
+            assert!(
+                glyph_inside(bulb, centerline, bulb_half, bulb_half),
+                "bulb at {bulb} is clipped"
+            );
+            assert!(
+                glyph_inside(cap, centerline, cap_half, cap_half),
                 "tube cap at {cap} is clipped"
             );
         }

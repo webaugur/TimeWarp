@@ -18,7 +18,7 @@ use crate::events::{self, CalendarEvent};
 use crate::layout::{KioskLayout, APERTURE_R};
 use crate::matrix;
 use crate::quarters;
-use crate::roman::{self, direction};
+use crate::roman;
 use crate::scene;
 use crate::settings::Place;
 use crate::sky::{self, DaySky};
@@ -118,35 +118,107 @@ fn paint_weather_caption(painter: &Painter, center: Pos2, radius: f32, weather: 
         Pos2::new(center.x + aperture, center.y + aperture),
     );
     let painter = painter.with_clip_rect(clip);
-    let origin = center + direction(180.0) * (0.46 * radius);
+    let temp = weather.temperature_text();
+    let condition = weather.condition.as_str();
     let color = Color32::from_rgb(0xff, 0xf6, 0xe8);
-    paint_shadowed(
-        &painter,
-        origin + Vec2::new(0.0, -0.028 * radius),
-        &weather.temperature_text(),
-        0.055 * radius,
-        color,
-    );
-    paint_shadowed(
-        &painter,
-        origin + Vec2::new(0.0, 0.028 * radius),
-        &weather.condition,
-        0.032 * radius,
-        color,
-    );
+    // Roman numeral cap height is `numeral_size` (0.24 of the radius). The
+    // condition line is 42% of that. Shrink only if the pair would leave the
+    // landscape circle or sit on the hand hub.
+    let mut temp_size = roman::RomanClockStyle::default().numeral_size * radius;
+    let (temp_at, cond_at, cond_size) = loop {
+        let cond_size = temp_size * 0.42;
+        let (_, th) = caption_extent(&painter, &temp, temp_size);
+        let (cw, ch) = caption_extent(&painter, condition, cond_size);
+        let (tw, _) = caption_extent(&painter, &temp, temp_size);
+        let gap = 0.018 * radius;
+        let sep = th * 0.5 + gap + ch * 0.5;
+        let halo = 0.014 * radius;
+        let hub = 0.12 * radius;
+        let temp_y = center.y + hub + th * 0.5 + halo;
+        let cond_y = temp_y + sep;
+        let bottom = cond_y + ch * 0.5 + halo;
+        let inside = bottom <= center.y + aperture - 0.012 * radius
+            && caption_in_circle(center, aperture, temp_y, tw, th, halo)
+            && caption_in_circle(center, aperture, cond_y, cw, ch, halo);
+        if inside || temp_size < 0.08 * radius {
+            break (
+                Pos2::new(center.x, temp_y),
+                Pos2::new(center.x, cond_y),
+                cond_size,
+            );
+        }
+        temp_size *= 0.94;
+    };
+    paint_shadowed(&painter, temp_at, &temp, temp_size, color, radius);
+    paint_shadowed(&painter, cond_at, condition, cond_size, color, radius);
 }
 
-fn paint_shadowed(painter: &Painter, pos: Pos2, text: &str, size: f32, color: Color32) {
+fn caption_extent(painter: &Painter, text: &str, size: f32) -> (f32, f32) {
+    let galley = painter.layout(
+        text.to_owned(),
+        FontId::new(size, serif()),
+        Color32::PLACEHOLDER,
+        f32::INFINITY,
+    );
+    (galley.size().x, galley.size().y)
+}
+
+fn caption_in_circle(
+    center: Pos2,
+    aperture: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    halo: f32,
+) -> bool {
+    let half_w = width * 0.5 + halo;
+    let half_h = height * 0.5 + halo;
+    for dy in [-half_h, half_h] {
+        let down = (y + dy) - center.y;
+        if down < 0.0 || down >= aperture {
+            return false;
+        }
+        let chord = (aperture * aperture - down * down).sqrt();
+        if half_w > chord - 1.0 {
+            return false;
+        }
+    }
+    true
+}
+
+/// Soft black halo, the same stacked blur the hands use, plus a slight drop.
+fn paint_shadowed(
+    painter: &Painter,
+    pos: Pos2,
+    text: &str,
+    size: f32,
+    color: Color32,
+    radius: f32,
+) {
     let font = FontId::new(size, serif());
-    let shadow = Color32::from_rgba_unmultiplied(0, 0, 0, 170);
-    for (dx, dy) in [(-1.3, 0.0), (1.3, 0.0), (0.0, -1.3), (0.0, 1.3)] {
-        painter.text(
-            pos + Vec2::new(dx, dy),
-            Align2::CENTER_CENTER,
-            text,
-            font.clone(),
-            shadow,
-        );
+    let blur = 0.012 * radius;
+    let drop = Vec2::new(0.15 * blur, 0.55 * blur);
+    let shadow = Color32::from_rgba_unmultiplied(0, 0, 0, 153);
+    let scale = (shadow.a() as f32 / 255.0) / 0.6;
+    let [red, green, blue, _] = shadow.to_array();
+    for (spread, alpha) in roman::SHADOW_LAYERS {
+        let a = ((alpha * scale) * 255.0).round().clamp(0.0, 255.0) as u8;
+        if a == 0 {
+            continue;
+        }
+        let layer = Color32::from_rgba_unmultiplied(red, green, blue, a);
+        let reach = blur * spread * 0.5;
+        for step in 0..12 {
+            let ang = step as f32 / 12.0 * std::f32::consts::TAU;
+            let offset = Vec2::new(ang.cos(), ang.sin()) * reach;
+            painter.text(
+                pos + drop + offset,
+                Align2::CENTER_CENTER,
+                text,
+                font.clone(),
+                layer,
+            );
+        }
     }
     painter.text(pos, Align2::CENTER_CENTER, text, font, color);
 }
