@@ -47,10 +47,18 @@ view_box = [0.0, 0.0, 1000.0, 500.0]
 always = ["land", "tree-trunk"]
 
 [sky]
-day = "sky-day"
+day = "sky-clear"
 overcast = "sky-overcast"
-twilight = "sky-twilight"
+twilight = "tint-dusk"
 night = "sky-night"
+
+[photos]
+clear = "sky-clear"
+partly = "sky-partly"
+overcast = "sky-overcast"
+night = "sky-night"
+dawn = "tint-dawn"
+dusk = "tint-dusk"
 
 [season.leaves]
 spring = "leaves-spring"
@@ -65,19 +73,15 @@ autumn = "ground-autumn"
 winter = "ground-winter"
 
 [weather]
-few = ["clouds-few"]
-partly = ["clouds-partly"]
-thick = ["clouds-thick"]
-rain = ["clouds-thick", "rain"]
-snow = ["clouds-thick", "snow", "snow-cover"]
-storm = ["clouds-thick", "storm"]
-fog = ["clouds-thick", "fog"]
-unknown = ["clouds-partly"]
+rain = ["rain"]
+snow = ["snow", "snow-cover"]
+storm = ["storm"]
+fog = ["fog"]
 
 [time]
 day = []
 twilight = []
-night = ["stars"]
+night = []
 
 hide_sun = ["storm", "fog"]
 ```
@@ -89,23 +93,22 @@ The same split is used for the rest of the scene:
 | Role | Default group ids | When it is on |
 | --- | --- | --- |
 | Always | `land`, `tree-trunk` | Every frame. Distant hills and the bare tree. |
-| Sky | `sky-day`, `sky-overcast`, `sky-twilight`, `sky-night` | One of them. Day is a clear blue that darkens toward the top of the box and hazes toward the land. Overcast replaces it when the cover is about 75% or more, and for rain, snow, storm, and fog: grey, darker at the top. Twilight is the warm dawn and dusk gradient. Night is the dark one. `overcast` may be omitted; the day sky is used instead. |
+| Sky | `sky-clear`, `sky-partly`, `sky-overcast`, `sky-night` | One photograph. Clear under about 20% cover, partly from there to about 75%, overcast above that and for rain, snow, storm, and fog. Night uses the night plate at every cover. |
 | Leaves | `leaves-spring`, `leaves-summer`, `leaves-autumn`, `leaves-winter` | One of them, from the local date. Winter is a few clinging leaves, not a second trunk. |
 | Ground | `ground-spring`, `ground-summer`, `ground-autumn`, `ground-winter` | One of them, same season as the leaves. |
-| Clouds | `clouds-few`, `clouds-partly`, `clouds-thick` | One of them, from Open-Meteo cloud cover (or from the weather code when cover was not stored). Under about 15% none of them. Few, then partly, then thick. Rain, snow, storm, and fog use the thick deck along with their own group. A theme that only has a `clouds` list still uses that single group. |
-| Rain | `rain` | Rain, on top of the thick clouds. Keep the strokes thin. |
-| Snow | `snow`, `snow-cover` | Snow. `snow` is small flakes. `snow-cover` is the snow on the ground and on the branches. |
-| Storm | `storm` | The lightning, on top of the thick clouds. |
-| Fog | `fog` | Fog, on top of the thick clouds. |
-| Stars | `stars` | Night only. |
+| Dawn, dusk | `tint-dawn`, `tint-dusk` | A translucent gradient over the daytime photograph. Not used at night. |
+| Rain | `rain` | Thin strokes over the overcast photograph. |
+| Snow | `snow`, `snow-cover` | `snow` is small flakes. `snow-cover` is the snow on the ground and on the branches. |
+| Storm | `storm` | The lightning, over the overcast photograph. |
+| Fog | `fog` | Fog, over the overcast photograph. |
 
 The default drawing has no sun. `[time]` `day` and `twilight` are empty. A theme may name a group there; `hide_sun` still drops it for storm and fog. Do not draw a sun in a new copy of the default theme. The NOAA disc is the sun.
 
 Seasons follow the same dates as the sun box: winter from 21 December, spring from 20 March, summer from 21 June, autumn from 22 September. The time of day uses the local civil clock. Around the `--screenshot` instant (10:08) the band is day, not twilight.
 
-Draw later groups further down the file. resvg paints in document order, so snow, rain, and fog should come after the tree if they are meant to sit in front of it. In the default file the order is sky, stars, clouds, lightning, hills, seasonal ground, snow on the ground, trunk, leaves, rain, falling snow, fog.
+Draw later groups further down the file. resvg paints in document order. In the default file the photographs come first, then the dawn or dusk tint, then lightning, hills, seasonal ground, snow on the ground, trunk, leaves, rain, falling snow, and fog. The vector land covers the bottom of the photograph.
 
-Clouds in the default file are ellipses passed through one filter: fractal noise, a displacement map, then a small blur, with a darker shape under a lighter one so the tops read as lit. Share that filter. Do not give each puff its own turbulence; the Pi redraws the layer only when the band or the size changes, but a stack of filters still has to finish. The clock adds a few levels of stable noise after the raster so a long gradient does not band. You do not paint that noise in the SVG.
+A `[photos]` table in `theme.toml` names those groups. Without it, the clock falls back to the `sky` gradient ids. Each plate is an `<image>` whose `href` is a file under `scenes/default/skies/`. The clock compiles those four JPEGs in, and an external theme can put its own images next to `scene.svg`. Use a public-domain or CC0 photograph, crop out any sun or moon, and keep it near 1600 pixels wide. Do not draw the clouds as turbulence filters. The clock still adds a little stable noise after the raster so a tint gradient does not band.
 
 ## The mural wheels
 
@@ -135,7 +138,7 @@ cargo build --release
 
 That frame is local 2026-01-15 10:08:37, Indianapolis, imperial units, and the January fixture (light snow). It does not use the network. The status line is the machine you ran it on.
 
-To force another instant you would need a different build. The screenshot hour is fixed so themes can be compared. To see summer or night, set `CLOCKFACE_SCENE` only after checking the layer logic with a small program, or temporarily call the same `visible_layers` rules from a unit test. `scene.rs` already tests that the January fixture enables `sky-overcast`, `leaves-winter`, `ground-winter`, `clouds-thick`, `snow`, and `snow-cover`, and leaves the sun, the clear day sky, the other seasons, and the rain, storm, and fog groups off.
+To force another instant you would need a different build. The screenshot hour is fixed so themes can be compared. To see summer or night, set `CLOCKFACE_SCENE` only after checking the layer logic with a small program, or temporarily call the same `visible_layers` rules from a unit test. `scene.rs` already tests that the January fixture enables `sky-overcast`, `leaves-winter`, `ground-winter`, `snow`, and `snow-cover`, and leaves the clear, partly, and night plates, the dawn and dusk tints, and the rain, storm, and fog groups off.
 
 The live window uses the same painter. Weather from Open-Meteo selects the weather groups; the clock selects the sky and the season.
 

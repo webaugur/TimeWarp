@@ -7,43 +7,20 @@
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500" width="1000" height="500">
   <defs>
-    <linearGradient id="grad-day" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#163e78"/>
-      <stop offset="0.22" stop-color="#2f6eae"/>
-      <stop offset="0.48" stop-color="#6aa4d2"/>
-      <stop offset="0.70" stop-color="#b7d4e6"/>
-      <stop offset="0.86" stop-color="#e4e0d4"/>
-      <stop offset="1" stop-color="#f4efe4"/>
+    <linearGradient id="grad-dawn" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffb070" stop-opacity="0"/>
+      <stop offset="0.35" stop-color="#ffb070" stop-opacity="0.05"/>
+      <stop offset="0.62" stop-color="#ff9a55" stop-opacity="0.16"/>
+      <stop offset="0.82" stop-color="#ff8840" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#ffd0a0" stop-opacity="0.38"/>
     </linearGradient>
-    <linearGradient id="grad-overcast" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#4e5964"/>
-      <stop offset="0.28" stop-color="#6a7580"/>
-      <stop offset="0.55" stop-color="#8e989f"/>
-      <stop offset="0.78" stop-color="#b7bec3"/>
-      <stop offset="0.92" stop-color="#d5d3cc"/>
-      <stop offset="1" stop-color="#e6e2d8"/>
+    <linearGradient id="grad-dusk" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a1848" stop-opacity="0.10"/>
+      <stop offset="0.30" stop-color="#6a3058" stop-opacity="0.16"/>
+      <stop offset="0.58" stop-color="#c45a40" stop-opacity="0.22"/>
+      <stop offset="0.80" stop-color="#e8944e" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#f3c898" stop-opacity="0.36"/>
     </linearGradient>
-    <linearGradient id="grad-twilight" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#14182e"/>
-      <stop offset="0.22" stop-color="#2c2450"/>
-      <stop offset="0.46" stop-color="#6a3a58"/>
-      <stop offset="0.66" stop-color="#c45a40"/>
-      <stop offset="0.82" stop-color="#e8944e"/>
-      <stop offset="0.93" stop-color="#f3c898"/>
-      <stop offset="1" stop-color="#f8e2c4"/>
-    </linearGradient>
-    <linearGradient id="grad-night" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#05070f"/>
-      <stop offset="0.30" stop-color="#10182c"/>
-      <stop offset="0.62" stop-color="#1a2438"/>
-      <stop offset="0.84" stop-color="#243044"/>
-      <stop offset="1" stop-color="#2c3a4e"/>
-    </linearGradient>
-    <filter id="cloud-volume" x="-25%" y="-70%" width="150%" height="240%" color-interpolation-filters="sRGB">
-      <feTurbulence type="fractalNoise" baseFrequency="0.012 0.02" numOctaves="2" seed="11" result="noise"/>
-      <feDisplacementMap in="SourceGraphic" in2="noise" scale="18" xChannelSelector="R" yChannelSelector="G" result="warped"/>
-      <feGaussianBlur in="warped" stdDeviation="2.5"/>
-    </filter>
     <linearGradient id="grad-fog" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#e7ecee" stop-opacity="0"/>
       <stop offset="0.45" stop-color="#d5dcde" stop-opacity="0.25"/>
@@ -59,59 +36,24 @@
     </linearGradient>
   </defs>
 
-  <g id="sky-night">
-    <rect width="1000" height="500" fill="url(#grad-night)"/>
+  <!-- Photographs sit under the vector land. One of these groups is shown. -->
+  <g id="sky-clear">
+    <image href="skies/clear.jpg" x="0" y="0" width="1000" height="500" preserveAspectRatio="xMidYMid slice"/>
   </g>
-  <g id="sky-twilight">
-    <rect width="1000" height="500" fill="url(#grad-twilight)"/>
-  </g>
-  <g id="sky-day">
-    <rect width="1000" height="500" fill="url(#grad-day)"/>
+  <g id="sky-partly">
+    <image href="skies/partly.jpg" x="0" y="0" width="1000" height="500" preserveAspectRatio="xMidYMid slice"/>
   </g>
   <g id="sky-overcast">
-    <rect width="1000" height="500" fill="url(#grad-overcast)"/>
+    <image href="skies/over.jpg" x="0" y="0" width="1000" height="500" preserveAspectRatio="xMidYMid slice"/>
   </g>
-
-  <g id="stars" fill="#f7f3e4">
-    <circle cx="80" cy="40" r="1.4"/>
-    <circle cx="140" cy="90" r="1.1"/>
-    <circle cx="210" cy="36" r="1.6"/>
-    <circle cx="260" cy="120" r="1"/>
-    <circle cx="320" cy="54" r="1.3"/>
-    <circle cx="390" cy="28" r="1.1"/>
-    <circle cx="450" cy="96" r="1.5"/>
-    <circle cx="520" cy="42" r="1.2"/>
-    <circle cx="580" cy="110" r="1"/>
-    <circle cx="640" cy="30" r="1.7"/>
-    <circle cx="700" cy="78" r="1.1"/>
-    <circle cx="760" cy="24" r="1.2"/>
-    <circle cx="830" cy="70" r="1.4"/>
-    <circle cx="900" cy="36" r="1"/>
-    <circle cx="960" cy="100" r="1.3"/>
-    <circle cx="110" cy="160" r="1"/>
-    <circle cx="360" cy="150" r="1.2"/>
-    <circle cx="620" cy="160" r="1"/>
-    <circle cx="860" cy="140" r="1.1"/>
-    <circle cx="480" cy="170" r="0.9"/>
+  <g id="sky-night">
+    <image href="skies/night.jpg" x="0" y="0" width="1000" height="500" preserveAspectRatio="xMidYMid slice"/>
   </g>
-
-  <g id="clouds-few" filter="url(#cloud-volume)">
-    <ellipse cx="250" cy="150" rx="130" ry="22" fill="#6d7d8c"/>
-    <ellipse cx="242" cy="140" rx="100" ry="14" fill="#f3f6f8" opacity="0.55"/>
+  <g id="tint-dawn">
+    <rect width="1000" height="500" fill="url(#grad-dawn)"/>
   </g>
-  <g id="clouds-partly" filter="url(#cloud-volume)">
-    <ellipse cx="220" cy="146" rx="150" ry="26" fill="#667686"/>
-    <ellipse cx="210" cy="134" rx="110" ry="14" fill="#f4f7f9" opacity="0.5"/>
-    <ellipse cx="760" cy="168" rx="140" ry="24" fill="#5e7080"/>
-    <ellipse cx="748" cy="156" rx="100" ry="13" fill="#eef2f5" opacity="0.48"/>
-  </g>
-  <g id="clouds-thick" filter="url(#cloud-volume)">
-    <ellipse cx="200" cy="150" rx="180" ry="28" fill="#5c6c7c"/>
-    <ellipse cx="500" cy="132" rx="200" ry="30" fill="#556676"/>
-    <ellipse cx="800" cy="156" rx="170" ry="26" fill="#607080"/>
-    <ellipse cx="190" cy="136" rx="130" ry="14" fill="#e7edf1" opacity="0.45"/>
-    <ellipse cx="490" cy="116" rx="150" ry="14" fill="#f2f5f7" opacity="0.5"/>
-    <ellipse cx="790" cy="142" rx="120" ry="12" fill="#e4eaee" opacity="0.4"/>
+  <g id="tint-dusk">
+    <rect width="1000" height="500" fill="url(#grad-dusk)"/>
   </g>
 
   <g id="storm">

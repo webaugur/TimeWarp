@@ -26,6 +26,8 @@ pub struct Theme {
     pub name: String,
     svg: String,
     manifest: Manifest,
+    /// Directory of an external theme, so relative `<image>` hrefs resolve.
+    resources_dir: Option<std::path::PathBuf>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -38,6 +40,21 @@ struct Manifest {
     time: TimeIds,
     #[serde(default)]
     hide_sun: Vec<String>,
+    /// Photographic skies. When set, these replace the flat `sky` gradients.
+    #[serde(default)]
+    photos: Option<PhotoIds>,
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+struct PhotoIds {
+    clear: String,
+    partly: String,
+    overcast: String,
+    night: String,
+    #[serde(default)]
+    dawn: Option<String>,
+    #[serde(default)]
+    dusk: Option<String>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -96,9 +113,10 @@ struct TimeIds {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SkyBand {
-    Day,
-    Twilight,
     Night,
+    Dawn,
+    Day,
+    Dusk,
 }
 
 impl Theme {
@@ -112,6 +130,7 @@ impl Theme {
             name,
             svg: svg.to_owned(),
             manifest: file,
+            resources_dir: None,
         })
     }
 }
@@ -133,7 +152,9 @@ fn load_dir(dir: &Path) -> Result<Theme, String> {
         .map_err(|err| format!("scene.svg: {err}"))?;
     let toml_text = std::fs::read_to_string(dir.join("theme.toml"))
         .map_err(|err| format!("theme.toml: {err}"))?;
-    Theme::from_parts(&svg, &toml_text)
+    let mut theme = Theme::from_parts(&svg, &toml_text)?;
+    theme.resources_dir = Some(dir.to_path_buf());
+    Ok(theme)
 }
 
 pub fn sky_band(now: DateTime<Local>) -> SkyBand {
@@ -144,7 +165,11 @@ pub fn sky_band(now: DateTime<Local>) -> SkyBand {
     if dayness < 0.08 {
         SkyBand::Night
     } else if twilight > 0.55 && dayness < 0.35 {
-        SkyBand::Twilight
+        if day < 0.5 {
+            SkyBand::Dawn
+        } else {
+            SkyBand::Dusk
+        }
     } else {
         SkyBand::Day
     }
@@ -162,15 +187,28 @@ pub fn visible_layers(
 
     let cover = weather.cloud_cover();
     let scene = weather.scene();
-    let overcast =
-        cover >= 75 || matches!(scene, Scene::Rain | Scene::Snow | Scene::Storm | Scene::Fog);
-    let sky = match sky_band(now) {
-        SkyBand::Day if overcast => manifest.sky.overcast.as_ref().unwrap_or(&manifest.sky.day),
-        SkyBand::Day => &manifest.sky.day,
-        SkyBand::Twilight => &manifest.sky.twilight,
-        SkyBand::Night => &manifest.sky.night,
-    };
-    on.insert(sky.clone());
+    let band = sky_band(now);
+    if let Some(photos) = &manifest.photos {
+        on.insert(photo_layer(photos, band, scene, cover).to_owned());
+        let tint = match band {
+            SkyBand::Dawn => photos.dawn.as_ref(),
+            SkyBand::Dusk => photos.dusk.as_ref(),
+            _ => None,
+        };
+        if let Some(id) = tint {
+            on.insert(id.clone());
+        }
+    } else {
+        let overcast =
+            cover >= 75 || matches!(scene, Scene::Rain | Scene::Snow | Scene::Storm | Scene::Fog);
+        let sky = match band {
+            SkyBand::Night => &manifest.sky.night,
+            SkyBand::Dawn | SkyBand::Dusk => &manifest.sky.twilight,
+            SkyBand::Day if overcast => manifest.sky.overcast.as_ref().unwrap_or(&manifest.sky.day),
+            SkyBand::Day => &manifest.sky.day,
+        };
+        on.insert(sky.clone());
+    }
 
     let (leaves, ground) = match season_name(now.date_naive()) {
         "Spring" => (
@@ -204,9 +242,9 @@ pub fn visible_layers(
     };
     on.extend(weather_layers.iter().cloned());
 
-    let time_layers: &[String] = match sky_band(now) {
+    let time_layers: &[String] = match band {
         SkyBand::Day => &manifest.time.day,
-        SkyBand::Twilight => &manifest.time.twilight,
+        SkyBand::Dawn | SkyBand::Dusk => &manifest.time.twilight,
         SkyBand::Night => &manifest.time.night,
     };
     let scene_name = match scene {
@@ -224,6 +262,21 @@ pub fn visible_layers(
         on.extend(manifest.time.night.iter().cloned());
     }
     on
+}
+
+fn photo_layer(photos: &PhotoIds, band: SkyBand, scene: Scene, cover: u8) -> &str {
+    if band == SkyBand::Night {
+        return &photos.night;
+    }
+    let heavy =
+        cover >= 75 || matches!(scene, Scene::Rain | Scene::Snow | Scene::Storm | Scene::Fog);
+    if heavy {
+        &photos.overcast
+    } else if cover >= 20 {
+        &photos.partly
+    } else {
+        &photos.clear
+    }
 }
 
 /// Cloud groups for a cover percentage. Themes that only list `clouds` use that
@@ -249,6 +302,22 @@ fn catalog(manifest: &Manifest) -> BTreeSet<String> {
     ids.insert(manifest.sky.night.clone());
     if let Some(id) = &manifest.sky.overcast {
         ids.insert(id.clone());
+    }
+    if let Some(photos) = &manifest.photos {
+        for id in [
+            &photos.clear,
+            &photos.partly,
+            &photos.overcast,
+            &photos.night,
+        ] {
+            ids.insert(id.clone());
+        }
+        if let Some(id) = &photos.dawn {
+            ids.insert(id.clone());
+        }
+        if let Some(id) = &photos.dusk {
+            ids.insert(id.clone());
+        }
     }
     for id in [
         &manifest.season.leaves.spring,
@@ -344,8 +413,32 @@ struct CachedPixels {
     rgba: Vec<u8>,
 }
 
-fn render_svg(svg: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
-    let options = usvg::Options::default();
+fn render_svg(
+    svg: &str,
+    width: u32,
+    height: u32,
+    resources_dir: Option<&Path>,
+) -> Result<Vec<u8>, String> {
+    let mut options = usvg::Options::default();
+    options.resources_dir = resources_dir.map(|dir| dir.to_path_buf());
+    // The shipped photographs are compiled in. An external theme can still
+    // point `<image>` at a file next to its own scene.svg.
+    options.image_href_resolver.resolve_string = Box::new(|href, opts| {
+        if let Some(dir) = opts.resources_dir.as_ref() {
+            let path = dir.join(href);
+            if let Ok(data) = std::fs::read(&path) {
+                return image_kind(href, data);
+            }
+        }
+        let bundled: Option<&[u8]> = match href {
+            "skies/clear.jpg" => Some(include_bytes!("../scenes/default/skies/clear.jpg")),
+            "skies/partly.jpg" => Some(include_bytes!("../scenes/default/skies/partly.jpg")),
+            "skies/over.jpg" => Some(include_bytes!("../scenes/default/skies/over.jpg")),
+            "skies/night.jpg" => Some(include_bytes!("../scenes/default/skies/night.jpg")),
+            _ => None,
+        };
+        bundled.and_then(|bytes| image_kind(href, bytes.to_vec()))
+    });
     let tree = usvg::Tree::from_str(svg, &options).map_err(|err| err.to_string())?;
     let mut pixmap = tiny_skia::Pixmap::new(width, height).ok_or("pixmap")?;
     let size = tree.size();
@@ -357,6 +450,18 @@ fn render_svg(svg: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
         &mut pixmap.as_mut(),
     );
     Ok(pixmap.take())
+}
+
+fn image_kind(href: &str, data: Vec<u8>) -> Option<usvg::ImageKind> {
+    let jpeg = href.ends_with(".jpg") || href.ends_with(".jpeg") || data.starts_with(&[0xff, 0xd8]);
+    let png = href.ends_with(".png") || data.starts_with(b"\x89PNG");
+    if jpeg {
+        Some(usvg::ImageKind::JPEG(std::sync::Arc::new(data)))
+    } else if png {
+        Some(usvg::ImageKind::PNG(std::sync::Arc::new(data)))
+    } else {
+        None
+    }
 }
 
 fn cached_rgba(
@@ -383,9 +488,9 @@ fn cached_rgba(
     }
 
     let svg = apply_visibility(&theme.svg, &catalog(&theme.manifest), visible);
-    let mut rgba = render_svg(&svg, width, height)?;
-    // A two-level hash breaks the steps of an 8-bit sky gradient. It is stable
-    // for a given pixel index, so the cache stays valid.
+    let mut rgba = render_svg(&svg, width, height, theme.resources_dir.as_deref())?;
+    // A few levels of stable noise. A long vertical gradient otherwise posts
+    // as horizontal bands once it is quantized to 8 bits.
     dither(&mut rgba);
     if let Ok(mut guard) = CACHE.lock() {
         *guard = Some(CachedPixels {
@@ -400,8 +505,9 @@ fn cached_rgba(
 
 fn dither(rgba: &mut [u8]) {
     for (i, px) in rgba.chunks_exact_mut(4).enumerate() {
-        let n = ((i.wrapping_mul(1664525).wrapping_add(1013904223) >> 29) & 7) as i32 - 3;
-        for channel in &mut px[..3] {
+        let h = i.wrapping_mul(1664525).wrapping_add(1013904223);
+        for (k, channel) in px[..3].iter_mut().enumerate() {
+            let n = ((h >> (12 + k * 5)) & 15) as i32 - 7;
             *channel = (*channel as i32 + n).clamp(0, 255) as u8;
         }
     }
@@ -576,7 +682,6 @@ mod tests {
             "ground-winter",
             "snow",
             "snow-cover",
-            "clouds-thick",
             "sky-overcast",
         ] {
             assert!(on.contains(id), "missing {id} in {on:?}");
@@ -589,6 +694,12 @@ mod tests {
             "stars",
             "clouds-few",
             "clouds-partly",
+            "clouds-thick",
+            "sky-clear",
+            "sky-partly",
+            "sky-night",
+            "tint-dawn",
+            "tint-dusk",
             "rain",
             "storm",
             "fog",
@@ -647,8 +758,8 @@ mod tests {
         let px = &rgba[i..i + 4];
         let spread = (px[0] as i32 - px[2] as i32).abs();
         assert!(
-            px[0] > 60 && spread < 40,
-            "zenith should be an overcast grey, got {px:?}"
+            px[0] > 40 && spread < 90,
+            "mid sky should be the overcast photograph, got {px:?}"
         );
     }
 }

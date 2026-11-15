@@ -12,10 +12,20 @@ view_box = [0.0, 0.0, 1000.0, 500.0]
 always = ["land", "tree-trunk"]
 
 [sky]
-day = "sky-day"
+day = "sky-clear"
 overcast = "sky-overcast"
-twilight = "sky-twilight"
+twilight = "tint-dusk"
 night = "sky-night"
+
+# Real photographs. Rain, snow, storm, and fog use the overcast plate,
+# with the vector precipitation drawn on top. Dawn and dusk are tints.
+[photos]
+clear = "sky-clear"
+partly = "sky-partly"
+overcast = "sky-overcast"
+night = "sky-night"
+dawn = "tint-dawn"
+dusk = "tint-dusk"
 
 [season.leaves]
 spring = "leaves-spring"
@@ -29,22 +39,17 @@ summer = "ground-summer"
 autumn = "ground-autumn"
 winter = "ground-winter"
 
-# Cloud cover picks few, partly, or thick. Rain, snow, storm, and fog bring the thick deck.
+# Precipitation stays vector, drawn over the photograph.
 [weather]
-few = ["clouds-few"]
-partly = ["clouds-partly"]
-thick = ["clouds-thick"]
-rain = ["clouds-thick", "rain"]
-snow = ["clouds-thick", "snow", "snow-cover"]
-storm = ["clouds-thick", "storm"]
-fog = ["clouds-thick", "fog"]
-unknown = ["clouds-partly"]
+rain = ["rain"]
+snow = ["snow", "snow-cover"]
+storm = ["storm"]
+fog = ["fog"]
 
 # The shipped theme draws no sun. The upper-left quarter is the NOAA disc.
-# A theme may still name a group here; hide_sun drops it for those conditions.
 [time]
 day = []
 twilight = []
-night = ["stars"]
+night = []
 
 hide_sun = ["storm", "fog"]
