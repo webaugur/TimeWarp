@@ -472,7 +472,7 @@ mod tests {
         let rim = at_pos(&rgba, width, height, center + direction(20.0) * (0.99 * r));
         assert!(
             lum(rim) < 40,
-            "the outer rim should fade to black, got {rim:?}"
+            "the outer rim should be clear, so the ground shows through, got {rim:?}"
         );
 
         // Lower half is the overcast January sky, below the thin black fade.
@@ -533,8 +533,10 @@ mod tests {
         );
         let wind = at_pos(&rgba, width, height, center + direction(300.0) * (0.40 * r));
         assert!(
-            wind[0] > 200 && wind[1] > 150 && wind[0] as i32 > wind[2] as i32 + 80,
-            "wind hand from 300° should be yellow, got {wind:?}"
+            wind[1] > 180
+                && wind[1] as i32 > wind[0] as i32 + 40
+                && wind[1] as i32 > wind[2] as i32 + 40,
+            "wind hand from 300° should be bright green, got {wind:?}"
         );
 
         let numeral = center + direction(0.0) * (style.numeral_radius * r);

@@ -17,9 +17,12 @@ const NUMERAL_SVG: &str = include_str!("../images/numerals.svg");
 const HOUR_REACH: f32 = 0.60;
 /// Minute tip on the minute track. Matches the previous minute hand.
 const MINUTE_REACH: f32 = 0.70;
-/// Outer edge of the numeral ink, on the dial rim so the ring stays off the
-/// mural corners. The inner edge then clears the centers of the teardrop heads.
+/// Outer edge of the numeral ink before the 20% shrink, on the dial rim.
 const NUMERAL_OUTER: f32 = 1.0;
+/// Midline of the numeral band, as a fraction of the outer ink radius.
+const NUMERAL_BAND: f32 = 0.8655;
+/// Glyphs are this fraction of their drawn size, about that same midline.
+const NUMERAL_SHRINK: f32 = 0.80;
 
 struct Placement {
     view: [f32; 4],
@@ -56,7 +59,13 @@ fn attr<'a>(svg: &'a str, key: &str) -> &'a str {
     &svg[start..start + end]
 }
 
-pub fn paint_hour_hand(painter: &Painter, center: Pos2, radius: f32, degrees: f32) {
+pub fn paint_hour_hand(
+    painter: &Painter,
+    center: Pos2,
+    radius: f32,
+    degrees: f32,
+    shadow: &crate::roman::ShadowStyle,
+) {
     paint_placed(
         painter,
         "clockface-hour-hand",
@@ -65,10 +74,18 @@ pub fn paint_hour_hand(painter: &Painter, center: Pos2, radius: f32, degrees: f3
         radius,
         degrees,
         HOUR_REACH,
+        Some(shadow),
+        false,
     );
 }
 
-pub fn paint_minute_hand(painter: &Painter, center: Pos2, radius: f32, degrees: f32) {
+pub fn paint_minute_hand(
+    painter: &Painter,
+    center: Pos2,
+    radius: f32,
+    degrees: f32,
+    shadow: &crate::roman::ShadowStyle,
+) {
     paint_placed(
         painter,
         "clockface-minute-hand",
@@ -77,6 +94,8 @@ pub fn paint_minute_hand(painter: &Painter, center: Pos2, radius: f32, degrees: 
         radius,
         degrees,
         MINUTE_REACH,
+        Some(shadow),
+        false,
     );
 }
 
@@ -89,6 +108,8 @@ pub fn paint_numerals(painter: &Painter, center: Pos2, radius: f32) {
         radius,
         0.0,
         NUMERAL_OUTER,
+        None,
+        true,
     );
 }
 
@@ -100,6 +121,8 @@ fn paint_placed(
     radius: f32,
     degrees: f32,
     reach: f32,
+    shadow: Option<&crate::roman::ShadowStyle>,
+    numeral_ring: bool,
 ) {
     if radius < 8.0 {
         return;
@@ -127,7 +150,110 @@ fn paint_placed(
         image,
         TextureOptions::LINEAR,
     );
-    paint_quad(painter, texture.id(), center, degrees, scale, place.view);
+    if let Some(shadow) = shadow {
+        paint_hand_shadow(
+            painter,
+            texture.id(),
+            center,
+            degrees,
+            scale,
+            place.view,
+            shadow.blur * radius,
+            shadow.color,
+        );
+    }
+    if numeral_ring {
+        paint_numeral_ring(painter, texture.id(), center, scale, place.view, place.tip);
+    } else {
+        paint_quad(
+            painter,
+            texture.id(),
+            center,
+            degrees,
+            scale,
+            place.view,
+            Vec2::ZERO,
+            Color32::WHITE,
+        );
+    }
+}
+
+fn paint_hand_shadow(
+    painter: &Painter,
+    texture: egui::TextureId,
+    center: Pos2,
+    degrees: f32,
+    scale: f32,
+    view: [f32; 4],
+    blur: f32,
+    color: Color32,
+) {
+    let scale_a = (color.a() as f32 / 255.0) / 0.6;
+    let [red, green, blue, _] = color.to_array();
+    for (spread, alpha) in crate::roman::SHADOW_LAYERS {
+        let a = ((alpha * scale_a) * 255.0).round().clamp(0.0, 255.0) as u8;
+        if a == 0 {
+            continue;
+        }
+        let tint = Color32::from_rgba_unmultiplied(red, green, blue, a);
+        let radius = blur * spread * 0.5;
+        for step in 0..8 {
+            let ang = step as f32 / 8.0 * std::f32::consts::TAU;
+            let offset = Vec2::new(ang.cos(), ang.sin()) * radius;
+            paint_quad(painter, texture, center, degrees, scale, view, offset, tint);
+        }
+    }
+}
+
+/// Shrink each numeral about the band midline so the ring stays put.
+fn paint_numeral_ring(
+    painter: &Painter,
+    texture: egui::TextureId,
+    center: Pos2,
+    scale: f32,
+    view: [f32; 4],
+    tip: f32,
+) {
+    let [minx, miny, vw, vh] = view;
+    let band = NUMERAL_BAND * tip * scale;
+    let sectors = 12u32;
+    let ang_steps = 10u32;
+    let rad_steps = 8u32;
+    let r0 = tip * 0.62;
+    let r1 = tip * 1.04;
+    let mut mesh = Mesh::with_texture(texture);
+    for sector in 0..sectors {
+        let mid = sector as f32 * 30.0;
+        let base = mesh.vertices.len() as u32;
+        for i in 0..=ang_steps {
+            let along = i as f32 / ang_steps as f32;
+            let deg = mid - 15.0 + 30.0 * along;
+            let (sin, cos) = deg.to_radians().sin_cos();
+            for j in 0..=rad_steps {
+                let dist = r0 + (r1 - r0) * (j as f32 / rad_steps as f32);
+                let x = dist * sin;
+                let y = -dist * cos;
+                let d = dist * scale;
+                let d2 = band + NUMERAL_SHRINK * (d - band);
+                let deg2 = mid + NUMERAL_SHRINK * (deg - mid);
+                let (s2, c2) = deg2.to_radians().sin_cos();
+                mesh.vertices.push(Vertex {
+                    pos: Pos2::new(center.x + d2 * s2, center.y - d2 * c2),
+                    uv: Pos2::new((x - minx) / vw, (y - miny) / vh),
+                    color: Color32::WHITE,
+                });
+            }
+        }
+        let cols = rad_steps + 1;
+        for i in 0..ang_steps {
+            for j in 0..rad_steps {
+                let a = base + i * cols + j;
+                mesh.add_triangle(a, a + 1, a + cols);
+                mesh.add_triangle(a + 1, a + cols + 1, a + cols);
+            }
+        }
+    }
+    painter.add(egui::Shape::mesh(mesh));
 }
 
 fn paint_quad(
@@ -137,6 +263,8 @@ fn paint_quad(
     degrees: f32,
     scale: f32,
     view: [f32; 4],
+    offset: Vec2,
+    tint: Color32,
 ) {
     let [minx, miny, w, h] = view;
     let corners = [
@@ -150,9 +278,9 @@ fn paint_quad(
         let local = Vec2::new(x, y) * scale;
         let turned = rotate_clockwise(local, degrees);
         mesh.vertices.push(Vertex {
-            pos: Pos2::new(center.x + turned.x, center.y + turned.y),
+            pos: Pos2::new(center.x + turned.x, center.y + turned.y) + offset,
             uv: Pos2::new(u, v),
-            color: Color32::WHITE,
+            color: tint,
         });
     }
     mesh.add_triangle(0, 1, 2);

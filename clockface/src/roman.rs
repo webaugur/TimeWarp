@@ -43,7 +43,9 @@ pub struct SecondBounce {
     pub exp_divisor_ms: f64,
 }
 
-/// Soft shadow under each hand. No offset; the blur is a fraction of `r`.
+/// Soft shadow under every hand. No offset; the blur is a fraction of `r`.
+///
+/// The four layers stack to about 0.6 opacity, which is this color's alpha.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ShadowStyle {
     pub color: Color32,
@@ -232,7 +234,7 @@ pub(crate) fn paint_markings_and_hands(
         &style.shadow,
     );
     if let Some(wind) = wind {
-        paint_wind_hand(painter, center, r, wind);
+        paint_wind_hand(painter, center, r, wind, &style.shadow);
     }
     paint_hand(
         painter,
@@ -254,8 +256,8 @@ pub(crate) fn direction(degrees_clockwise_from_12: f32) -> Vec2 {
 
 /// Dial ring. `inner` is a hole radius in pixels (0 for a solid face).
 ///
-/// Cream at the center, amber at the rim, then a smooth darken to black over
-/// the outer 7% of the radius. The mesh stays fine so the rim does not band.
+/// Cream at the center, amber at the rim, then a smooth fade to transparent
+/// over the outer 7% of the radius. The mesh stays fine so the rim does not band.
 pub(crate) fn paint_brass(painter: &Painter, center: Pos2, radius: f32, inner: f32) {
     let angular = 192u32;
     let radial = 48u32;
@@ -281,23 +283,24 @@ pub(crate) fn paint_brass(painter: &Painter, center: Pos2, radius: f32, inner: f
     painter.add(Shape::mesh(mesh));
 }
 
-/// `#ffffb2` at the center, `#ffcc7f` at the dial edge, black in the outer 7%.
+/// `#ffffb2` at the center, `#ffcc7f` at the dial edge, transparent in the outer 7%.
 fn dial_color(dist: f32, radius: f32) -> Color32 {
     let t = if radius > 0.0 {
         (dist / radius).clamp(0.0, 1.0)
     } else {
         0.0
     };
-    let red = 255.0;
+    let red: f32 = 255.0;
     let green = 255.0 + (204.0 - 255.0) * t;
     let blue = 178.0 + (127.0 - 178.0) * t;
     let fade = ((t - 0.93) / 0.07).clamp(0.0, 1.0);
     let fade = fade * fade * (3.0 - 2.0 * fade);
-    let keep = 1.0 - fade;
-    Color32::from_rgb(
-        (red * keep).round() as u8,
-        (green * keep).round() as u8,
-        (blue * keep).round() as u8,
+    let alpha = ((1.0 - fade) * 255.0).round().clamp(0.0, 255.0) as u8;
+    Color32::from_rgba_unmultiplied(
+        red.round() as u8,
+        green.round() as u8,
+        blue.round() as u8,
+        alpha,
     )
 }
 
@@ -446,9 +449,9 @@ fn paint_hand(
     let blur = shadow.blur * r;
     if hand.color == Color32::BLACK {
         if hand.length < 0.65 {
-            crate::ornament::paint_hour_hand(painter, center, r, degrees);
+            crate::ornament::paint_hour_hand(painter, center, r, degrees, shadow);
         } else {
-            crate::ornament::paint_minute_hand(painter, center, r, degrees);
+            crate::ornament::paint_minute_hand(painter, center, r, degrees, shadow);
         }
     } else {
         paint_shadow(painter, tail, tip, center, width, cap, blur, shadow.color);
@@ -476,6 +479,11 @@ const GOLD_EDGE: Color32 = Color32::from_rgb(0x3a, 0x24, 0x08);
 /// Darker gold so the pins still read on the cream dial.
 const PIN_EDGE: Color32 = Color32::from_rgb(0x5c, 0x3a, 0x0c);
 
+/// (extra stroke width, in multiples of `blur`, and straight alpha).
+/// Composed opacity of the four alphas is ~0.596, i.e. the shadow's 0.6.
+pub(crate) const SHADOW_LAYERS: [(f32, f32); 4] =
+    [(2.0, 0.12), (1.2, 0.16), (0.55, 0.22), (0.18, 0.30)];
+
 fn paint_gold_hub(painter: &Painter, center: Pos2, radius: f32) {
     let light = crate::brass::light_vec2();
     let segs = 24u32;
@@ -496,15 +504,32 @@ fn paint_gold_hub(painter: &Painter, center: Pos2, radius: f32) {
     painter.add(Shape::mesh(mesh));
 }
 
-const WIND_YELLOW: Color32 = Color32::from_rgb(0xff, 0xd2, 0x1f);
-const WIND_EDGE: Color32 = Color32::from_rgb(0x1c, 0x14, 0x06);
+const WIND_GREEN: Color32 = Color32::from_rgb(0x39, 0xff, 0x14);
+const WIND_EDGE: Color32 = Color32::from_rgb(0x0e, 0x5c, 0x0a);
 
-/// Yellow staff pointing where the wind comes from, with station-model barbs.
-fn paint_wind_hand(painter: &Painter, center: Pos2, r: f32, wind: crate::weather::WindHand) {
+/// Bright green staff pointing where the wind comes from, with station-model barbs.
+fn paint_wind_hand(
+    painter: &Painter,
+    center: Pos2,
+    r: f32,
+    wind: crate::weather::WindHand,
+    shadow: &ShadowStyle,
+) {
+    let blur = shadow.blur * r;
     let Some((pennants, full, half)) = crate::weather::wind_barbs(wind.knots) else {
         let hub = (0.028 * r).max(3.0);
+        paint_shadow(
+            painter,
+            center,
+            center,
+            center,
+            hub * 2.0,
+            hub,
+            blur,
+            shadow.color,
+        );
         painter.circle_filled(center, hub + 1.1, WIND_EDGE);
-        painter.circle_filled(center, hub, WIND_YELLOW);
+        painter.circle_filled(center, hub, WIND_GREEN);
         return;
     };
     let dir = direction(wind.from_degrees);
@@ -514,8 +539,9 @@ fn paint_wind_hand(painter: &Painter, center: Pos2, r: f32, wind: crate::weather
     // Just under the minute hand (0.01 of the radius). The barb strokes match.
     let width = 0.009 * r;
     let outline = width * 0.42;
+    shadow_segment(painter, center, tip, width, blur, shadow.color);
     painter.line_segment([center, tip], Stroke::new(width + outline * 2.0, WIND_EDGE));
-    painter.line_segment([center, tip], Stroke::new(width, WIND_YELLOW));
+    painter.line_segment([center, tip], Stroke::new(width, WIND_GREEN));
 
     let full_len = 0.11 * r;
     let step = 0.040 * r;
@@ -531,9 +557,11 @@ fn paint_wind_hand(painter: &Painter, center: Pos2, r: f32, wind: crate::weather
         let outer = center + dir * along;
         let inner = center + dir * (along - 0.048 * r);
         let point = barb(outer, full_len * 0.92);
+        let pennant = vec![outer, inner, point];
+        shadow_polygon(painter, &pennant, blur, shadow.color);
         painter.add(Shape::convex_polygon(
-            vec![outer, inner, point],
-            WIND_YELLOW,
+            pennant,
+            WIND_GREEN,
             Stroke::new(outline.max(1.2), WIND_EDGE),
         ));
         along -= 0.062 * r;
@@ -545,8 +573,9 @@ fn paint_wind_hand(painter: &Painter, center: Pos2, r: f32, wind: crate::weather
             }
             let attach = center + dir * along;
             let end = barb(attach, len);
+            shadow_segment(painter, attach, end, width, blur, shadow.color);
             painter.line_segment([attach, end], Stroke::new(width + outline * 2.0, WIND_EDGE));
-            painter.line_segment([attach, end], Stroke::new(width, WIND_YELLOW));
+            painter.line_segment([attach, end], Stroke::new(width, WIND_GREEN));
             along -= step;
         }
     }
@@ -564,20 +593,49 @@ fn paint_shadow(
     blur: f32,
     color: Color32,
 ) {
-    // (extra stroke width, in multiples of `blur`, and straight alpha).
-    // Composed opacity of the four alphas is ~0.596, i.e. the spec's 0.6.
-    const LAYERS: [(f32, f32); 4] = [(2.0, 0.12), (1.2, 0.16), (0.55, 0.22), (0.18, 0.30)];
+    shadow_segment(painter, tail, tip, width, blur, color);
     let scale = (color.a() as f32 / 255.0) / 0.6;
     let [red, green, blue, _] = color.to_array();
-    for (spread, alpha) in LAYERS {
+    for (spread, alpha) in SHADOW_LAYERS {
         let a = ((alpha * scale) * 255.0).round().clamp(0.0, 255.0) as u8;
         if a == 0 {
             continue;
         }
         let layer = Color32::from_rgba_unmultiplied(red, green, blue, a);
-        let extra = blur * spread;
-        painter.line_segment([tail, tip], Stroke::new((width + extra).max(0.0), layer));
-        painter.circle_filled(center, (cap + extra * 0.5).max(0.0), layer);
+        painter.circle_filled(center, (cap + blur * spread * 0.5).max(0.0), layer);
+    }
+}
+
+fn shadow_segment(painter: &Painter, tail: Pos2, tip: Pos2, width: f32, blur: f32, color: Color32) {
+    let scale = (color.a() as f32 / 255.0) / 0.6;
+    let [red, green, blue, _] = color.to_array();
+    for (spread, alpha) in SHADOW_LAYERS {
+        let a = ((alpha * scale) * 255.0).round().clamp(0.0, 255.0) as u8;
+        if a == 0 {
+            continue;
+        }
+        let layer = Color32::from_rgba_unmultiplied(red, green, blue, a);
+        painter.line_segment(
+            [tail, tip],
+            Stroke::new((width + blur * spread).max(0.0), layer),
+        );
+    }
+}
+
+fn shadow_polygon(painter: &Painter, pts: &[Pos2], blur: f32, color: Color32) {
+    let scale = (color.a() as f32 / 255.0) / 0.6;
+    let [red, green, blue, _] = color.to_array();
+    for (spread, alpha) in SHADOW_LAYERS {
+        let a = ((alpha * scale) * 255.0).round().clamp(0.0, 255.0) as u8;
+        if a == 0 {
+            continue;
+        }
+        let layer = Color32::from_rgba_unmultiplied(red, green, blue, a);
+        painter.add(Shape::convex_polygon(
+            pts.to_vec(),
+            Color32::TRANSPARENT,
+            Stroke::new((blur * spread).max(0.5), layer),
+        ));
     }
 }
 
@@ -606,6 +664,16 @@ mod tests {
         // 10:08 is just past the 10, not on a fixed UTC-4 conversion.
         assert!((f64::from(hour) - 304.308333).abs() < 1e-3);
         assert!((f64::from(minute) - 51.7).abs() < 1e-3);
+    }
+
+    #[test]
+    fn dial_edge_fades_out_instead_of_to_black() {
+        let center = dial_color(0.0, 100.0);
+        assert_eq!(center.a(), 255);
+        assert!(center.r() > 250 && center.g() > 250 && center.b() > 160);
+        assert_eq!(dial_color(100.0, 100.0).a(), 0);
+        let mid = dial_color(96.5, 100.0);
+        assert!(mid.a() > 20 && mid.a() < 235, "mid fade alpha {}", mid.a());
     }
 
     #[test]

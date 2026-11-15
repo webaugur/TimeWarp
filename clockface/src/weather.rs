@@ -359,7 +359,7 @@ pub fn speed_to_knots(speed: f32, units: Units) -> f32 {
     }
 }
 
-/// Where the wind comes from, and how hard, for the yellow hand.
+/// Where the wind comes from, and how hard, for the green hand.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WindHand {
     pub from_degrees: f32,
