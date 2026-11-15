@@ -220,10 +220,8 @@ pub(crate) fn paint_markings_and_hands(
     paint_ticks(painter, center, r, &style, now);
     paint_numerals(painter, center, r, &style);
     let (hour, minute, second) = hand_angles(now, &style);
-    // Hour, then minute, then second, so the second hand (and its cap) is on top.
-    if let Some(wind) = wind {
-        paint_wind_hand(painter, center, r, wind);
-    }
+    // Gold hands, then the wind hand, then the red second hand. The hub is
+    // painted again last so it stays above all of them.
     paint_hand(painter, center, r, hour, &style.hour_hand, &style.shadow);
     paint_hand(
         painter,
@@ -233,6 +231,9 @@ pub(crate) fn paint_markings_and_hands(
         &style.minute_hand,
         &style.shadow,
     );
+    if let Some(wind) = wind {
+        paint_wind_hand(painter, center, r, wind);
+    }
     paint_hand(
         painter,
         center,
@@ -241,6 +242,9 @@ pub(crate) fn paint_markings_and_hands(
         &style.second_hand,
         &style.shadow,
     );
+    paint_hub(painter, center, r, &style.hour_hand);
+    paint_hub(painter, center, r, &style.minute_hand);
+    paint_hub(painter, center, r, &style.second_hand);
 }
 
 pub(crate) fn direction(degrees_clockwise_from_12: f32) -> Vec2 {
@@ -427,20 +431,29 @@ fn paint_hand(
     let blur = shadow.blur * r;
     paint_shadow(painter, tail, tip, center, width, cap, blur, shadow.color);
     if hand.color == Color32::BLACK {
-        paint_gold_hand(painter, tail, tip, center, width, cap);
+        paint_gold_hand(painter, tail, tip, width);
+    } else if width > 0.0 {
+        painter.line_segment([tail, tip], Stroke::new(width, hand.color));
+    }
+    paint_hub(painter, center, r, hand);
+}
+
+fn paint_hub(painter: &Painter, center: Pos2, r: f32, hand: &HandStyle) {
+    let cap = hand.cap_radius * r;
+    if cap <= 0.0 {
+        return;
+    }
+    if hand.color == Color32::BLACK {
+        painter.circle_filled(center, cap + 1.15, GOLD_EDGE);
+        paint_gold_hub(painter, center, cap);
     } else {
-        if width > 0.0 {
-            painter.line_segment([tail, tip], Stroke::new(width, hand.color));
-        }
-        if cap > 0.0 {
-            painter.circle_filled(center, cap, hand.color);
-        }
+        painter.circle_filled(center, cap, hand.color);
     }
 }
 
 const GOLD_EDGE: Color32 = Color32::from_rgb(0x3a, 0x24, 0x08);
 
-fn paint_gold_hand(painter: &Painter, tail: Pos2, tip: Pos2, center: Pos2, width: f32, cap: f32) {
+fn paint_gold_hand(painter: &Painter, tail: Pos2, tip: Pos2, width: f32) {
     let delta = tip - tail;
     let len = delta.length();
     if len > 1.0 && width > 0.0 {
@@ -454,10 +467,6 @@ fn paint_gold_hand(painter: &Painter, tail: Pos2, tip: Pos2, center: Pos2, width
         paint_capsule(painter, tail, tip, dir, perp, width * 0.5, |cross| {
             crate::brass::shade_gold_pin(cross, 0.72, light_bias, 1.0)
         });
-    }
-    if cap > 0.0 {
-        painter.circle_filled(center, cap + 1.15, GOLD_EDGE);
-        paint_gold_hub(painter, center, cap);
     }
 }
 
@@ -549,9 +558,11 @@ fn paint_wind_hand(painter: &Painter, center: Pos2, r: f32, wind: crate::weather
     let perp = Vec2::new(-dir.y, dir.x);
     let reach = 0.58 * r;
     let tip = center + dir * reach;
-    let width = 0.005 * r;
-    painter.line_segment([center, tip], Stroke::new(width + 2.2, WIND_EDGE));
-    painter.line_segment([center, tip], Stroke::new(width.max(1.2), WIND_YELLOW));
+    // Just under the minute hand (0.01 of the radius). The barb strokes match.
+    let width = 0.009 * r;
+    let outline = width * 0.42;
+    painter.line_segment([center, tip], Stroke::new(width + outline * 2.0, WIND_EDGE));
+    painter.line_segment([center, tip], Stroke::new(width, WIND_YELLOW));
 
     let full_len = 0.11 * r;
     let step = 0.040 * r;
@@ -570,7 +581,7 @@ fn paint_wind_hand(painter: &Painter, center: Pos2, r: f32, wind: crate::weather
         painter.add(Shape::convex_polygon(
             vec![outer, inner, point],
             WIND_YELLOW,
-            Stroke::new(1.3, WIND_EDGE),
+            Stroke::new(outline.max(1.2), WIND_EDGE),
         ));
         along -= 0.062 * r;
     }
@@ -581,8 +592,8 @@ fn paint_wind_hand(painter: &Painter, center: Pos2, r: f32, wind: crate::weather
             }
             let attach = center + dir * along;
             let end = barb(attach, len);
-            painter.line_segment([attach, end], Stroke::new(width + 2.2, WIND_EDGE));
-            painter.line_segment([attach, end], Stroke::new(width.max(1.2), WIND_YELLOW));
+            painter.line_segment([attach, end], Stroke::new(width + outline * 2.0, WIND_EDGE));
+            painter.line_segment([attach, end], Stroke::new(width, WIND_YELLOW));
             along -= step;
         }
     }
