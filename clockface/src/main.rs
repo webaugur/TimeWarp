@@ -15,8 +15,9 @@ use clap::Parser;
 use clockface::{
     example_events, fetch_almanac, fetch_weather, gather_status, install_fonts, load_cache,
     load_cached_sun, load_settings, load_sun, now_unix, paint_kiosk, render_rgba_with,
-    repaint_delay, screenshot_time, store_cache, write_png, Almanac, AlmanacSlot, KioskModel,
-    Place, Settings, SettingsOverride, StatusLine, Units, WeatherReport, SUN_REFRESH_SECS,
+    repaint_delay, screenshot_time, start_audio, store_cache, write_png, Almanac, AlmanacSlot,
+    KioskModel, Place, Settings, SettingsOverride, SoundFault, StatusLine, Units, WeatherReport,
+    SUN_REFRESH_SECS,
 };
 
 #[derive(Parser, Debug)]
@@ -85,6 +86,10 @@ struct Cli {
     /// imperial (°F, mph) or metric (°C, km/h). Default imperial.
     #[arg(long, value_parser = ["imperial", "metric"])]
     units: Option<String>,
+
+    /// Do not play ticking or chimes.
+    #[arg(long)]
+    no_audio: bool,
 }
 
 fn main() {
@@ -118,6 +123,7 @@ fn run() -> Result<(), String> {
             latitude: cli.lat,
             longitude: cli.lon,
             units,
+            audio_enabled: if cli.no_audio { Some(false) } else { None },
         },
     )?;
 
@@ -185,15 +191,18 @@ struct ClockApp {
     fetching: Arc<AtomicBool>,
     fetching_sun: Arc<AtomicBool>,
     fetching_almanac: Arc<AtomicBool>,
+    sound_fault: SoundFault,
 }
 
 impl ClockApp {
     fn new(settings: Settings) -> Self {
         let weather = load_cache(&settings.place)
             .unwrap_or_else(|| WeatherReport::unavailable(&settings.place));
+        let sound_fault = start_audio(&settings.audio, &settings.leds);
         let initial = Almanac::builtin(Local::now(), &settings.place, settings.events.as_deref());
         Self {
             settings,
+            sound_fault,
             weather: Arc::new(Mutex::new(weather)),
             sun: Arc::new(Mutex::new(load_cached_sun())),
             sun_at: Instant::now()
@@ -227,6 +236,15 @@ fn show_clock(ui: &mut egui::Ui, app: &mut ClockApp) {
     let held = app.almanac.lock().expect("almanac lock").almanac.clone();
     let mut status = app.status.clone();
     status.alert = join_faults(&weather.note, &held.fault);
+    if let Some(fault) = clockface::gauge_fault(&weather) {
+        status.alert = join_faults(&status.alert, fault);
+    }
+    if let Ok(sound) = app.sound_fault.lock() {
+        let sound = sound.trim();
+        if !sound.is_empty() {
+            status.alert = join_faults(&status.alert, sound);
+        }
+    }
     let events = if held.from_timewarp {
         held.events.clone()
     } else {
@@ -247,6 +265,7 @@ fn show_clock(ui: &mut egui::Ui, app: &mut ClockApp) {
         sky,
         status,
         sun,
+        barometer_hours: app.settings.barometer_hours,
     };
     paint_kiosk(ui.painter(), screen, center, diameter, &model);
 }

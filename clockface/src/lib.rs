@@ -5,12 +5,15 @@
 //! from the timeanddate.com script the MagicMirror kiosk used to embed.
 
 mod brass;
+mod chime;
 mod cycles;
 mod draw;
 mod events;
 mod fonts;
+mod gauges;
 mod kiosk;
 mod layout;
+mod leds;
 mod matrix;
 mod mural;
 mod ornament;
@@ -25,8 +28,10 @@ mod sun_image;
 mod timewarp;
 mod weather;
 
+pub use chime::{start as start_audio, SoundFault};
 pub use events::{examples as example_events, CalendarEvent};
 pub use fonts::install_fonts;
+pub use gauges::gauge_fault;
 pub use kiosk::{paint as paint_kiosk, repaint_delay, KioskModel};
 pub use raster::{render_rgba, render_rgba_with, write_png};
 pub use roman::{

@@ -509,22 +509,38 @@ mod tests {
             "upper quarter should be black, got {space:?}"
         );
 
-        let wedge = at_pos(&rgba, width, height, center + direction(225.0) * (1.15 * r));
+        let wedge = at_pos(&rgba, width, height, center + direction(225.0) * (1.40 * r));
         assert!(
-            lum(wedge) > 40,
-            "year wedge should show the season mural, got {wedge:?}"
+            wedge[0] < 12 && wedge[1] < 12 && wedge[2] < 12,
+            "lower corner outside the trough should be black, got {wedge:?}"
         );
-        // Just outside the dial, over the blue sky. A black pixel here is the
-        // ground showing through the gap between the dial and the wheel art.
+        let past_left = at_pos(
+            &rgba,
+            width,
+            height,
+            egui::Pos2::new(center.x - r - 4.0, center.y + 0.15 * r),
+        );
+        assert!(
+            past_left[0] < 12 && past_left[1] < 12 && past_left[2] < 12,
+            "the trough should not pass the dial's left edge, got {past_left:?}"
+        );
+        // The dial's amber meets the trough. Sky or a black ring in between is a gap.
+        let rim = at_pos(&rgba, width, height, center + direction(225.0) * (0.97 * r));
+        assert!(
+            rim[0] > 230 && rim[1] > 170 && rim[0] as i32 > rim[2] as i32 + 40,
+            "inside the dial should stay warm amber, got {rim:?}"
+        );
         let seam = at_pos(
             &rgba,
             width,
             height,
-            center + direction(225.0) * (1.012 * r),
+            center + direction(225.0) * (1.008 * r),
         );
+        let sky = seam[2] as i32 > seam[0] as i32 + 20 && seam[2] > 100;
+        let black = seam[0] < 20 && seam[1] < 20 && seam[2] < 20;
         assert!(
-            seam[2] > 100 && seam[2] as i32 > seam[0] as i32 + 20,
-            "the dial should meet the sky with no black ring, got {seam:?}"
+            !sky && !black,
+            "the dial should meet the trough with no gap, got {seam:?}"
         );
 
         let style = RomanClockStyle::default();

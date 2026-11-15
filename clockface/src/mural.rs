@@ -1,4 +1,5 @@
-//! Year and civil-day wheels, clipped to the squared windows beside the dial.
+//! Year and civil-day wheel art. The kiosk leaves those corners black; this module
+//! still rasterizes the discs so the sampling tests can check the old layout.
 //!
 //! Each wheel is an SVG disc (`scenes/wheels/year.svg`, `scenes/wheels/day.svg`)
 //! rasterized once and turned about the shaft. The dial covers the inside of the
@@ -20,6 +21,7 @@ const TEX_SIZE: u32 = 900;
 /// is repeated so the dial edge covers art instead of the black ground.
 const WHEEL_SOLID: f32 = 1.03;
 
+#[allow(dead_code)]
 pub fn paint(painter: &Painter, ctx: &Context, center: Pos2, radius: f32, year: f32, day: f32) {
     paint_wheel(
         painter,
@@ -43,6 +45,7 @@ pub fn paint(painter: &Painter, ctx: &Context, center: Pos2, radius: f32, year: 
     );
 }
 
+#[allow(dead_code)]
 fn paint_wheel(
     painter: &Painter,
     ctx: &Context,
@@ -109,6 +112,7 @@ fn uv_at(drawn_deg: f32, dist: f32) -> (f32, f32) {
     (0.5 + dir.x * s * 0.5, 0.5 + dir.y * s * 0.5)
 }
 
+#[allow(dead_code)]
 fn window_rect(center: Pos2, radius: f32, wedge: (f32, f32)) -> Rect {
     let side = if wedge.0 >= 180.0 { -1.0 } else { 1.0 };
     let left = if side < 0.0 {

@@ -14,8 +14,49 @@ windowed = false
 # $XDG_CACHE_HOME/clockface/weather.toml (or ~/.cache/clockface/weather.toml).
 refresh_minutes = 20
 
+# Hours ahead for the yellow tick on the barometer. 3 is the usual tendency window.
+# barometer_hours = 3
+
 # imperial: °F and mph. metric: °C and km/h.
 units = "imperial"
+
+# Ticking and chimes. The sounds are compiled into the binary. A file in
+# sounds_dir with the same stem (.flac or .wav) replaces that one sound.
+# Quarter and half both play clock-hour, which is what the old cron jobs did.
+# Set them to clock-quarter and clock-half to use those recordings instead.
+# tick is 10db, 15db, 20db, or 25db. /tmp/mute containing 1 silences ticking.
+# gpio_path is optional; 1 there also mutes. mute_chimes defaults to false.
+# [audio]
+# enabled = true
+# tick = "15db"
+# mute_path = "/tmp/mute"
+# gpio_path = "/sys/class/gpio/gpio5/value"
+# mute_chimes = false
+# sounds_dir = "/home/pi/.local/share/clockface/sounds"
+# hour = "clock-hour"
+# quarter = "clock-hour"
+# half = "clock-hour"
+# bell = "clock-bell"
+
+# NeoPixel strip. none does not open a device. spi is the Pi strip and needs
+# the leds-spi feature (the kms build). serial is the future Arduino on a tty.
+# order gbr matches the old strip: logical (r, g, b) goes out as G, B, R.
+# freq_hz 400000 is what the Pi used (WS2812 is often 800000). symbol_bits is
+# 3 or 8 SPI symbols per LED bit. honor_mute turns the strip off when /tmp/mute
+# contains 1. debug draws the frame on the window and does not need hardware.
+# [leds]
+# backend = "none"
+# device = "/dev/spidev0.0"
+# count = 20
+# brightness = 192
+# order = "gbr"
+# freq_hz = 400000
+# symbol_bits = 3
+# serial_port = "/dev/ttyACM0"
+# serial_baud = 115200
+# honor_mute = true
+# mute_path = "/tmp/mute"
+# debug = false
 
 [place]
 name = "Indianapolis"

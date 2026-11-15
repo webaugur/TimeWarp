@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use egui::{Pos2, Vec2};
 use serde::Deserialize;
@@ -74,8 +74,12 @@ pub struct Settings {
     /// `None` means the file omitted events. Holidays from TimeWarp still show,
     /// and the built-in examples are used only when that list cannot be read.
     pub events: Option<Vec<CalendarEvent>>,
+    pub audio: crate::chime::AudioSettings,
+    pub leds: crate::leds::LedSettings,
     /// Overrides the `timewarp` found on `PATH`.
     pub timewarp_bin: Option<String>,
+    /// Hours ahead for the barometer forecast tick. The default is 3.
+    pub barometer_hours: u32,
 }
 
 impl Default for Settings {
@@ -89,7 +93,10 @@ impl Default for Settings {
             place: Place::default(),
             refresh_minutes: DEFAULT_REFRESH_MINUTES,
             events: None,
+            audio: crate::chime::AudioSettings::default(),
+            leds: crate::leds::LedSettings::default(),
             timewarp_bin: None,
+            barometer_hours: 3,
         }
     }
 }
@@ -140,6 +147,7 @@ pub struct SettingsOverride {
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
     pub units: Option<Units>,
+    pub audio_enabled: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -164,7 +172,45 @@ struct FileConfig {
     #[serde(default)]
     events: Option<Vec<CalendarEvent>>,
     #[serde(default)]
+    audio: Option<AudioFile>,
+    #[serde(default)]
+    leds: Option<LedsFile>,
+    #[serde(default)]
     timewarp_bin: Option<String>,
+    #[serde(default)]
+    barometer_hours: Option<u32>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct LedsFile {
+    backend: Option<String>,
+    device: Option<String>,
+    count: Option<u16>,
+    brightness: Option<u8>,
+    order: Option<String>,
+    freq_hz: Option<u32>,
+    symbol_bits: Option<u8>,
+    serial_port: Option<String>,
+    serial_baud: Option<u32>,
+    honor_mute: Option<bool>,
+    mute_path: Option<String>,
+    debug: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct AudioFile {
+    enabled: Option<bool>,
+    tick: Option<String>,
+    mute_path: Option<String>,
+    gpio_path: Option<String>,
+    mute_chimes: Option<bool>,
+    sounds_dir: Option<String>,
+    hour: Option<String>,
+    quarter: Option<String>,
+    half: Option<String>,
+    bell: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -229,6 +275,8 @@ pub fn load_settings_with(
     if settings.diameter <= 0.0 {
         return Err("diameter must be greater than zero".into());
     }
+    settings.audio.validate()?;
+    settings.leds.validate()?;
     Ok(settings)
 }
 
@@ -268,7 +316,98 @@ fn apply_file(
     }
     settings.events = file.events;
     settings.timewarp_bin = file.timewarp_bin;
+    if let Some(hours) = file.barometer_hours {
+        settings.barometer_hours = hours.clamp(1, 48);
+    }
+    if let Some(audio) = file.audio {
+        apply_audio(&mut settings.audio, audio)?;
+    }
+    if let Some(leds) = file.leds {
+        apply_leds(&mut settings.leds, leds)?;
+    }
     Ok(layer)
+}
+
+fn apply_leds(leds: &mut crate::leds::LedSettings, file: LedsFile) -> Result<(), String> {
+    use crate::leds::{Backend, Order};
+    if let Some(backend) = file.backend {
+        leds.backend = Backend::parse(&backend)
+            .ok_or_else(|| format!("leds.backend must be none, spi, or serial, not {backend:?}"))?;
+    }
+    if let Some(device) = file.device {
+        leds.device = PathBuf::from(device);
+    }
+    if let Some(count) = file.count {
+        leds.count = count as usize;
+    }
+    if let Some(brightness) = file.brightness {
+        leds.brightness = brightness;
+    }
+    if let Some(order) = file.order {
+        leds.order = Order::parse(&order)
+            .ok_or_else(|| format!("leds.order must be a channel permutation, not {order:?}"))?;
+    }
+    if let Some(freq) = file.freq_hz {
+        leds.freq_hz = freq;
+    }
+    if let Some(bits) = file.symbol_bits {
+        leds.symbol_bits = bits;
+    }
+    if let Some(port) = file.serial_port {
+        leds.serial_port = PathBuf::from(port);
+    }
+    if let Some(baud) = file.serial_baud {
+        leds.serial_baud = baud;
+    }
+    if let Some(honor) = file.honor_mute {
+        leds.honor_mute = honor;
+    }
+    if let Some(path) = file.mute_path {
+        leds.mute_path = PathBuf::from(path);
+    }
+    if let Some(debug) = file.debug {
+        leds.debug = debug;
+    }
+    Ok(())
+}
+
+fn apply_audio(audio: &mut crate::chime::AudioSettings, file: AudioFile) -> Result<(), String> {
+    if let Some(enabled) = file.enabled {
+        audio.enabled = enabled;
+    }
+    if let Some(tick) = file.tick {
+        audio.tick = tick;
+    }
+    if let Some(path) = file.mute_path {
+        audio.mute_path = PathBuf::from(path);
+    }
+    if let Some(path) = file.gpio_path {
+        let path = path.trim();
+        audio.gpio_path = if path.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(path))
+        };
+    }
+    if let Some(mute_chimes) = file.mute_chimes {
+        audio.mute_chimes = mute_chimes;
+    }
+    if let Some(dir) = file.sounds_dir {
+        audio.sounds_dir = PathBuf::from(dir);
+    }
+    if let Some(hour) = file.hour {
+        audio.hour = hour;
+    }
+    if let Some(quarter) = file.quarter {
+        audio.quarter = quarter;
+    }
+    if let Some(half) = file.half {
+        audio.half = half;
+    }
+    if let Some(bell) = file.bell {
+        audio.bell = bell;
+    }
+    Ok(())
 }
 
 fn apply_override(settings: &mut Settings, over: &SettingsOverride) -> Result<(), String> {
@@ -293,6 +432,9 @@ fn apply_override(settings: &mut Settings, over: &SettingsOverride) -> Result<()
     }
     if let Some(units) = over.units {
         settings.place.units = units;
+    }
+    if let Some(enabled) = over.audio_enabled {
+        settings.audio.enabled = enabled;
     }
     Ok(())
 }
@@ -338,7 +480,10 @@ mod tests {
             units: None,
             refresh_minutes: None,
             events: None,
+            audio: None,
+            leds: None,
             timewarp_bin: None,
+            barometer_hours: None,
         };
         let mut settings = Settings::default();
         apply_file(&mut settings, file).unwrap();

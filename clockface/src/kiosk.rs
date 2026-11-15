@@ -4,11 +4,9 @@
 //! the discs they overlap. Every region is placed from the clock center and the face radius,
 //! so moving or resizing the face moves the complications with it.
 //!
-//! The year wheel (lower left) turns once per tropical year. The sky wheel (lower right)
-//! turns once per local civil day. Each window is the square corner outside the dial: the
-//! arc, the side tangent, and the bottom tangent. Sampling is
-//! `shown = content + (angle - wedge_center) / 360`, so the middle of each window shows the
-//! current season or time of day and the mural eases instead of snapping.
+//! The two lower corners, outside the dial and below the 9–3 line, stay the black
+//! screen. The trough and the gauges are the only paint there. The sun and moon
+//! quarters above the 9–3 line are a separate layer and still fill the upper half.
 
 use std::time::Duration;
 
@@ -19,7 +17,6 @@ use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Vec2};
 use crate::events::{self, CalendarEvent};
 use crate::layout::{KioskLayout, APERTURE_R};
 use crate::matrix;
-use crate::mural;
 use crate::quarters;
 use crate::roman::{self, direction};
 use crate::scene;
@@ -39,6 +36,8 @@ pub struct KioskModel {
     pub status: StatusLine,
     /// Latest GOES SUVI frame, when one has been fetched. None draws a plain sun.
     pub sun: Option<std::sync::Arc<SunImage>>,
+    /// Hours ahead for the barometer's forecast tick. Three is the tendency window.
+    pub barometer_hours: u32,
 }
 
 impl KioskModel {
@@ -54,6 +53,7 @@ impl KioskModel {
             sky: DaySky::builtin(now, place),
             status,
             sun: None,
+            barometer_hours: 3,
         }
     }
 }
@@ -63,14 +63,6 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
     let layout = KioskLayout::new(screen, center, diameter);
     let radius = layout.radius;
 
-    mural::paint(
-        painter,
-        painter.ctx(),
-        center,
-        radius,
-        sky::year_fraction(model.now),
-        sky::day_fraction(model.now),
-    );
     let aperture = APERTURE_R * radius;
     // Lower half: the landscape, sky on the 9–3 line and ground toward 6.
     scene::paint_horizon(
@@ -93,6 +85,8 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
     );
     paint_weather_caption(painter, center, radius, &model.weather);
 
+    // Under the dial, so the chrome meets the cream and the boards cover the rest.
+    crate::gauges::paint_trough(painter, center, radius, &model.weather);
     // Same dial mesh the window and the screenshot both fill.
     roman::paint_brass(painter, center, radius, aperture);
     roman::paint_markings_and_hands(
@@ -103,9 +97,18 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
         &roman::RomanClockStyle::default(),
         model.weather.wind_hand(),
     );
+    crate::gauges::paint(
+        painter,
+        center,
+        radius,
+        model.now,
+        &model.weather,
+        model.barometer_hours,
+    );
 
     paint_boxes(painter, &layout, model);
     paint_status(painter, &layout, model);
+    crate::leds::paint_debug(painter, screen);
 }
 
 fn paint_weather_caption(painter: &Painter, center: Pos2, radius: f32, weather: &WeatherReport) {

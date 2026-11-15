@@ -57,6 +57,20 @@ pub struct WeatherReport {
     /// Gust in the same unit as [`Self::wind`]. Missing on an old cache.
     #[serde(default)]
     pub wind_gusts_10m: Option<f32>,
+    /// Feels-like temperature, same unit as [`Self::temperature`].
+    #[serde(default)]
+    pub apparent_temperature: Option<f32>,
+    /// Dew point, same unit as [`Self::temperature`].
+    #[serde(default)]
+    pub dew_point: Option<f32>,
+    /// Mean-sea-level pressure in hectopascals. Open-Meteo always returns hPa.
+    #[serde(default)]
+    pub pressure_hpa: Option<f32>,
+    /// Local timestamps from `timezone=auto`, paired with [`Self::hourly_pressure_hpa`].
+    #[serde(default)]
+    pub hourly_time: Vec<String>,
+    #[serde(default)]
+    pub hourly_pressure_hpa: Vec<f32>,
     #[serde(skip)]
     pub night: bool,
 }
@@ -77,6 +91,11 @@ impl WeatherReport {
             cloud_cover: None,
             wind_direction_10m: None,
             wind_gusts_10m: None,
+            apparent_temperature: None,
+            dew_point: None,
+            pressure_hpa: None,
+            hourly_time: Vec::new(),
+            hourly_pressure_hpa: Vec::new(),
             night: false,
         }
     }
@@ -162,6 +181,28 @@ pub fn fixture_january() -> WeatherReport {
         ],
         note: String::new(),
         cloud_cover: Some(92),
+        // 19°F dew point, 22°F feels-like, and a falling barometer around 30 inHg.
+        apparent_temperature: Some(22.0),
+        dew_point: Some(19.0),
+        pressure_hpa: Some(1018.5),
+        hourly_time: vec![
+            "2026-01-14T22:00".into(),
+            "2026-01-15T00:00".into(),
+            "2026-01-15T03:00".into(),
+            "2026-01-15T06:00".into(),
+            "2026-01-15T09:00".into(),
+            "2026-01-15T10:00".into(),
+            "2026-01-15T12:00".into(),
+            "2026-01-15T13:00".into(),
+            "2026-01-15T15:00".into(),
+            "2026-01-15T18:00".into(),
+            "2026-01-15T21:00".into(),
+            "2026-01-16T00:00".into(),
+        ],
+        hourly_pressure_hpa: vec![
+            1028.0, 1016.0, 1018.0, 1022.0, 1020.0, 1019.0, 1016.0, 1014.0, 1012.0, 1010.0, 1008.0,
+            1006.0,
+        ],
         night: false,
     }
 }
@@ -277,7 +318,8 @@ pub fn fetch(place: &Place) -> Result<WeatherReport, String> {
     };
     let url = format!(
         "https://api.open-meteo.com/v1/forecast?latitude={lat:.4}&longitude={lon:.4}\
-         &current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,cloud_cover\
+         &current=temperature_2m,apparent_temperature,dew_point_2m,pressure_msl,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,cloud_cover\
+         &hourly=pressure_msl\
          &daily=weather_code,temperature_2m_max,temperature_2m_min\
          &temperature_unit={unit_temp}&wind_speed_unit={unit_wind}&timezone=auto&forecast_days=5",
         lat = place.latitude,
@@ -344,8 +386,35 @@ pub fn parse_open_meteo(body: &str, place: &Place) -> Result<WeatherReport, Stri
             .map(|v| v.clamp(0.0, 100.0) as u8),
         wind_direction_10m,
         wind_gusts_10m,
+        apparent_temperature: current["apparent_temperature"].as_f64().map(|v| v as f32),
+        dew_point: current["dew_point_2m"].as_f64().map(|v| v as f32),
+        pressure_hpa: current["pressure_msl"].as_f64().map(|v| v as f32),
+        hourly_time: hourly_times(&value),
+        hourly_pressure_hpa: hourly_pressures(&value),
         night: false,
     })
+}
+
+fn hourly_times(value: &serde_json::Value) -> Vec<String> {
+    value["hourly"]["time"]
+        .as_array()
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| row.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn hourly_pressures(value: &serde_json::Value) -> Vec<f32> {
+    value["hourly"]["pressure_msl"]
+        .as_array()
+        .map(|rows| {
+            rows.iter()
+                .map(|row| row.as_f64().map(|v| v as f32).unwrap_or(f32::NAN))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Statute miles per hour to knots, and kilometres per hour to knots.
@@ -471,6 +540,43 @@ mod tests {
         assert!(cached.wind_direction_10m.is_none());
         assert!(cached.wind_gusts_10m.is_none());
         assert!(cached.wind_hand().is_none());
+        assert!(cached.pressure_hpa.is_none());
+        assert!(cached.hourly_pressure_hpa.is_empty());
+        assert_eq!(
+            crate::gauges::gauge_fault(&cached),
+            Some("weather gauge incomplete")
+        );
+    }
+
+    #[test]
+    fn parses_dew_point_pressure_and_hourly_slots() {
+        let body = r#"{
+            "current": {
+                "temperature_2m": 28.0,
+                "apparent_temperature": 22.0,
+                "dew_point_2m": 19.0,
+                "pressure_msl": 1018.5,
+                "weather_code": 71,
+                "wind_speed_10m": 25.0
+            },
+            "hourly": {
+                "time": ["2026-01-15T10:00", "2026-01-15T13:00"],
+                "pressure_msl": [1019.0, 1014.0]
+            },
+            "daily": {
+                "time": ["2026-01-15"],
+                "weather_code": [71],
+                "temperature_2m_max": [31.0],
+                "temperature_2m_min": [22.0]
+            }
+        }"#;
+        let report = parse_open_meteo(body, &Place::indianapolis()).unwrap();
+        assert_eq!(report.apparent_temperature, Some(22.0));
+        assert_eq!(report.dew_point, Some(19.0));
+        assert_eq!(report.pressure_hpa, Some(1018.5));
+        assert_eq!(report.hourly_time.len(), 2);
+        assert_eq!(report.hourly_pressure_hpa, vec![1019.0, 1014.0]);
+        assert!(crate::gauges::gauge_fault(&report).is_none());
     }
 
     #[test]

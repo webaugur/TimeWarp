@@ -25,8 +25,8 @@ Each plate is a CC0 1.0 dedication ([Creative Commons Zero](https://creativecomm
 | `partly.jpg` | Partly cloudy | [Clouds-17.jpg](https://commons.wikimedia.org/wiki/File:Clouds-17.jpg), ViajeroExtraviado, own work, 9 April 2021 |
 | `over.jpg` | Overcast, rain, snow, storm, and fog | [Overcast or Cloudy Sky 01.jpg](https://commons.wikimedia.org/wiki/File:Overcast_or_Cloudy_Sky_01.jpg), PagesAndPathsPH, own work, 10 July 2023 |
 | `night.jpg` | Night | [Cévennes France night sky with stars 01.jpg](https://commons.wikimedia.org/wiki/File:C%C3%A9vennes_France_night_sky_with_stars_01.jpg), Arnaud Vergnet, own work, 4 July 2020 |
-- **Year wheel** (lower left). The window is the square corner outside the dial, between the 9 o'clock tangent and the 6 o'clock tangent. The mural is a disc on the shaft (`scenes/wheels/year.svg`) and turns once per tropical year. Winter, spring, summer, and autumn are drawn large in that outer band, so the corner shows a season rather than a wash of color. January is winter: snow, pines, a small cabin.
-- **Day wheel** (lower right). The mirror corner, between 3 o'clock and 6. The disc is `scenes/wheels/day.svg` and turns once per local civil day. Night, dawn, day, and dusk are separate scenes. Mid-morning shows a high sun, blue sky, and trees.
+- **Year wheel** (lower left). The square corner outside the dial, between the 9 o'clock tangent and the 6 o'clock tangent, is plain black. The season disc (`scenes/wheels/year.svg`) is not drawn there. A glass thermometer follows the dial, sitting in a chrome half-circle trough that meets the dial and runs from 9 o'clock through 6 to 3. The trough stops at the dial's left and right edges, and the boards cover it below the face. The numerals and the tick icons stay inside that rim, on the outer side of the tube. The bulb is toward 6 and the scale rises toward 9. The red fluid column is the current temperature, and the bulb at the low end is the same red. A red tick is today's expected high, a green tick is the dew point, and a yellow tick is the feels-like temperature. Each tick carries a mark in its own color, centered on the ray just past the marker: an up-triangle for the high, a droplet for the dew point, and a figure for feels-like. The scale is a 40°F span snapped to 10°F, widened when the readings need more room. Metric reports are converted, so the gauge stays in °F.
+- **Day wheel** (lower right). The mirror corner, between 3 o'clock and 6, is the same black. The day disc (`scenes/wheels/day.svg`) is not drawn there. The same glass form, mirrored, is a barometer in inches of mercury, in the same half-circle trough. The bulb is toward 6 and the scale rises toward 3. The red fluid is the current mean-sea-level pressure. A red tick is the highest hourly pressure on today's local date, and a yellow tick is the hourly pressure `barometer_hours` ahead (3 by default, the usual tendency window). The high carries an up-triangle and the forecast an arrow pointing up the scale, both in the tick's color, on the ray just past the marker. The window is about 1.0 to 1.5 inHg, snapped to 0.1, and stays near 28.5–31.0 unless a reading would otherwise fall off the scale. A missing field hides that tick, or the whole gauge when its fluid reading is missing. One status fault, `weather gauge incomplete`, covers a report that is otherwise usable but short a gauge field.
 - **Calendar and forecast.** Two untitled boards under the wheels, together exactly as wide as the face, on a near-black field with a visible grid of unlit lamps. Letters and numbers are an original 5×7 amber dot matrix (about 16 px tall on the 643-pixel face). The lines are left-aligned, so each TimeWarp mark leads the line and is drawn in that same amber, not as a color emoji. The left board leads with the local time (a clock mark, then HH:MM:SS and the Cycles of Life color name, for example `10:08:37 RED`), then the calendar: a calendar or holiday mark, the event, and the date or clock time indented under it. Those rows are the public holidays and the equinoxes and solstices from `timewarp`, with any `[events]` in the clockface file merged in. The right board leads with the local date (a calendar mark, then a line such as THU JAN 15 2026). A single row of lit lamps sits under each of those headings. One dark lamp row stays above the rule, and a full character cell of unlit lamps sits below it, then sunrise and sunset (⬆️ and ⬇️, the same marks TimeWarp uses), the season, the moon phase, and moonrise and moonset when that local day has them, then the five-day forecast. A wrapped line, on either board, continues two character cells in from the left. Rise, set, phase, and season boundaries come from `timewarp` (`sun`, `moon`, `rise`, `seasons`, each with `--json`). The NOAA and Schlyter math in this crate is the fallback. Times are the machine's local civil clock.
 - **Status bar.** The same dark lamp field, with lamps a little smaller than the boards. On the left: the hostname, the networked-computers mark (amber, like the frame marks), the IPv4 address of the interface that holds the default route, and a real fault when there is one. A missing `timewarp` binary, or a command that fails, adds one fault (`timewarp unavailable` or `timewarp failed`) and the clock keeps the built-in place, holidays, and sky. The crate version (`v` plus the package version) sits at the right edge. A long fault is cut with `...` so it does not run into the version. Loopback, docker, bridges, and tunnels are not listed, and neither is IPv6. A synced clock adds nothing. A missing address is an em dash. Nothing is invented.
 
@@ -71,7 +71,7 @@ This is `cargo build --release` with no extra features. The window is fullscreen
 
 ```bash
 sudo apt update
-sudo apt install build-essential pkg-config \
+sudo apt install build-essential pkg-config libasound2-dev \
   libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
   libxkbcommon-dev libgl1-mesa-dev libegl1-mesa-dev libwayland-dev
 cd clockface
@@ -91,7 +91,7 @@ eboard's default `auto` backend tries DRM/KMS + GBM + EGL first, then the softwa
 The KMS path needs Mesa's GBM and GLES headers and libraries:
 
 ```bash
-sudo apt install build-essential pkg-config libgbm-dev libegl1-mesa-dev libgles2-mesa-dev
+sudo apt install build-essential pkg-config libasound2-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev
 ```
 
 Runtime packages are `libgbm1`, `libegl1`, and `libgles2`. To leave eframe and the X11 libraries out of the binary entirely, build with `--no-default-features --features kms`. `--features kms` on top of the default features still *starts* eboard; it just also links the desktop backend.
@@ -132,9 +132,30 @@ The same values can live in a TOML file. See `clockface.example.toml`. Flags win
 ./target/release/clockface --config clockface.example.toml
 ```
 
-Weather defaults to Indianapolis (39.7684, −86.1581), imperial units, refreshed about every 20 minutes from Open-Meteo. No API key. Override the place with `--city` (`indianapolis`, `chicago`, `new york`, `london`, `denver`), or with `--lat` and `--lon`. `--units imperial` or `--units metric`. `--lat` and `--lon` win over `--city`.
+Weather defaults to Indianapolis (39.7684, −86.1581), imperial units, refreshed about every 20 minutes from Open-Meteo. No API key. The same request also asks for the current feels-like temperature, dew point, and sea-level pressure, and for hourly sea-level pressure. `forecast_days=5` already covers today, and `timezone=auto` makes those hourly stamps the place's local clock. The gauges treat that clock as the machine's local clock. Override the place with `--city` (`indianapolis`, `chicago`, `new york`, `london`, `denver`), or with `--lat` and `--lon`. `--units imperial` or `--units metric`. `--lat` and `--lon` win over `--city`. `barometer_hours` in the TOML sets how far ahead the yellow barometer tick looks.
 
 If the network is down, the last cached forecast is kept and the status line appends the fetch error. With no cache, the weather scene says unavailable instead of going blank.
+
+## Ticking and chimes
+
+The recordings in `sounds/` come from David's original Raspberry Pi grandfather clock (owner-supplied). They are lossless FLAC conversions of the WAVs that clock used. On that Pi, pm2 ran MagicMirror (`mm`) and `ticktock.sh` (`ticking`). clockface replaces both: the face is the window, and ticking is a background thread. The cron chimes moved into the same thread.
+
+Ticking plays `ticktock-15db.flac` (about 59.1 seconds). At each `:00` it starts from the beginning of the file. If ticking starts in the middle of a minute (launch, unmute, or the audio device coming back), playback seeks to the current seconds and fraction so the recorded tick lines up with the second hand. Past the end of the file it waits for the next `:00`. `10db`, `20db`, and `25db` are the other attenuations. A file `/tmp/mute` that contains `1` skips ticking for that minute; an optional GPIO value file does the same when it contains `1` (the old script read `/sys/class/gpio/gpio5/value`). Chimes do not check mute unless `mute_chimes` is set.
+
+Chimes follow the old crontab: hour at `:00`, quarter at `:15` and `:45`, half at `:30`. The quarter and half scripts on the Pi both played `clock-hour.wav`, not `clock-quarter.wav` or `clock-half.wav`. Those two files are included and unused until you point `audio.quarter` or `audio.half` at them. The hour plays the melody, waits 20.5 seconds (four rainbow passes on the old 20-LED strip), strikes `clock-bell` once per hour on a 12-hour clock (midnight and noon strike 12; 13:00 strikes once) about 1.7 seconds apart, waits 2 seconds, and clears. Quarter and half play the melody, wait the same 20.5 seconds plus 2, and do not strike. The same moments drive the LED strip, on its own thread, so the animation does not pace the audio. `[leds] backend` is `none` (the default), `spi`, or `serial`. SPI is the old 20-pixel WS281x strip on `/dev/spidev0.0` (GPIO 10, SPI MOSI), 400 kHz, brightness 192, channel order `gbr`, not inverted. The bitstream is 3 SPI bits per LED bit (`100` for 0, `110` for 1) at `3 * freq_hz`, or 8 bits (`0xC0` / `0xFC`) when `symbol_bits` is 8. A reset latch of low bytes follows each frame. The `leds-spi` feature, which the `kms` build turns on, is required for the SPI writer. If the device cannot be opened, clockface logs the error and leaves the strip dark.
+
+`/tmp/mute` containing `1` also turns the strip off when `honor_mute` is true. Rainbow is four passes of the Adafruit wheel, 20 ms a frame. Each bell is a white theater chase (10 iterations, every third pixel, 50 ms) plus a 10 ms black wipe, about 1.7 seconds, and the scheduler still spaces the bells. The hour clears the strip as the bells begin; quarter and half clear two seconds after the rainbows. `sky` and `sun` are the old unused experiments (`Color(200,160,80)`, and sunshine `Color(255,100,255)` at a pixel and its mirror) and are not part of the chime.
+
+`serial` is a placeholder for a USB Arduino on the Tower (for example `/dev/ttyACM0` at 115200, disabled until `backend = "serial"`). Each frame is `LED1`, version `1`, a little-endian pixel count, the order byte (`2` = gbr), the pixels in that order with brightness already applied, and one xor byte. A sketch reads that into a buffer and clocks it out:
+
+```cpp
+// Wait for 'L','E','D','1', then version, count, order, count*3 bytes, xor.
+// Clock the RGB payload to the strip in the order byte's permutation.
+```
+
+`debug = true` draws the latest frame along the bottom of the window.
+
+The sounds are compiled into the binary, so `~/.local/bin/clockface` does not need the files beside it. A file of the same stem in `~/.local/share/clockface/sounds/` (`.flac` or `.wav`) replaces that sound. A missing sound logs one status-line fault, such as `sound missing: clock-bell.wav`, and the clock keeps running. `--no-audio` or `audio.enabled = false` turns the thread off. Playback uses rodio and needs `libasound2-dev` at build time.
 
 ## Screenshot
 
