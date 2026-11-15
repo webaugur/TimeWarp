@@ -176,6 +176,32 @@ class TomlTest(unittest.TestCase):
         self.assertIn('mute_path = "/tmp/mute"', with_audio)
         self.assertNotIn("gpio_path =", with_audio.split("[audio]", 1)[1])
 
+    def test_timewarp_bin_is_top_level(self) -> None:
+        import tomllib
+
+        example = Path(__file__).resolve().parents[2].joinpath(
+            "clockface", "clockface.example.toml"
+        ).read_text(encoding="utf-8")
+        text = render_clockface_toml(
+            example, audio=True, timewarp_bin="/usr/local/bin/timewarp", leds="spi"
+        )
+        data = tomllib.loads(text)
+        self.assertEqual(data["timewarp_bin"], "/usr/local/bin/timewarp")
+        self.assertNotIn("timewarp_bin", data["place"])
+        self.assertEqual(data["audio"]["tick"], "15db")
+        leds = data["leds"]
+        self.assertEqual(leds["backend"], "spi")
+        self.assertEqual(leds["device"], "/dev/spidev0.0")
+        self.assertEqual(leds["count"], 20)
+        self.assertEqual(leds["brightness"], 192)
+        self.assertEqual(leds["order"], "gbr")
+        self.assertTrue(leds["honor_mute"])
+        self.assertEqual(text.count("[leds]"), 1)
+        plain = tomllib.loads(
+            render_clockface_toml(example, audio=False, timewarp_bin=None)
+        )
+        self.assertNotIn("leds", plain)
+
 
 if __name__ == "__main__":
     unittest.main()

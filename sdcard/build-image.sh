@@ -264,6 +264,8 @@ fi
 if [[ "${timewarp_bin:-no}" == "yes" ]]; then
   TW_FLAG=(--timewarp-bin /usr/local/bin/timewarp)
 fi
+# A features file from before the LED work has no leds= line: leave [leds] out.
+LEDS_FLAG="${leds:-omit}"
 EXAMPLE_TOML="${SDCARD}/out/clockface.example.toml"
 if [[ ! -f "$EXAMPLE_TOML" ]]; then
   EXAMPLE_TOML="${REPO}/clockface/clockface.example.toml"
@@ -382,6 +384,7 @@ tar -C "$REPO" \
 python3 "${SDCARD}/lib/boot_config.py" clockface-toml \
   --example "$EXAMPLE_TOML" \
   --audio "$AUDIO_FLAG" \
+  --leds "$LEDS_FLAG" \
   "${TW_FLAG[@]}" \
   > "${ROOT_MNT}/opt/clock/clockface.toml"
 python3 "${SDCARD}/lib/boot_config.py" cache-json > "${ROOT_MNT}/opt/clock/cache.json"
@@ -401,6 +404,7 @@ CLOCK_WIFI_COUNTRY=${CLOCK_WIFI_COUNTRY}
 CLOCK_INSTANCE=${INSTANCE}
 CLOCKFACE_GIT=${GIT_REV}
 CLOCKFACE_AUDIO=${AUDIO_FLAG}
+CLOCKFACE_LEDS=${LEDS_FLAG}
 PI_OS_DATE=${PI_OS_DATE:-}
 EOF
 chmod 0644 "${ROOT_MNT}/opt/clock/manifest.env"

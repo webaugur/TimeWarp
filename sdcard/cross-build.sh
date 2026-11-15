@@ -7,9 +7,10 @@
 # sonames the Pi boots (libasound.so.2, libgbm.so.1, libEGL, libGLESv2).
 # qemu-user compilation is not used; it is slow and easy to OOM.
 #
-# libasound2-dev is always installed, including for a checkout that does not
-# link ALSA yet (chimes/ticking are PR #43). The script builds whatever
-# clockface revision is checked out, or CLOCKFACE_REF when that is set.
+# libasound2-dev is always installed (rodio links ALSA for the tick and
+# chimes). The kms feature turns on leds-spi, the WS281x writer for the
+# 20-pixel strip on /dev/spidev0.0. The script builds whatever clockface
+# revision is checked out, or CLOCKFACE_REF when that is set.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -111,9 +112,19 @@ fi
 if [[ -f "${SRC}/clockface/src/settings.rs" ]] && grep -q 'timewarp_bin' "${SRC}/clockface/src/settings.rs"; then
   timewarp_bin="yes"
 fi
+# leds=spi only when the binary has the SPI writer (kms enables leds-spi).
+# A labwc/desktop binary gets backend "none"; an older tree omits [leds].
+leds="omit"
+if [[ -f "${SRC}/clockface/src/leds.rs" ]] && grep -q 'LedsFile' "${SRC}/clockface/src/settings.rs"; then
+  leds="none"
+  if [[ "$MODE" == "kms" ]] && grep -Eq '^kms = \[.*"leds-spi"' "${SRC}/clockface/Cargo.toml"; then
+    leds="spi"
+  fi
+fi
 
 echo "mode: ${MODE}"
 echo "audio libs: always (crate audio=${audio})"
+echo "leds: ${leds}"
 echo "cargo: cargo ${CARGO_ARGS[*]}"
 echo "image: ${IMAGE}"
 
@@ -161,6 +172,7 @@ target=aarch64-unknown-linux-gnu
 kiosk=${MODE}
 audio=${audio}
 timewarp_bin=${timewarp_bin}
+leds=${leds}
 git=${git_rev}
 EOF
 echo "wrote ${OUT}/clockface"

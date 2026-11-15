@@ -272,27 +272,40 @@ def supports_timewarp_bin(clockface_dir: Path) -> bool:
     return "timewarp_bin" in settings.read_text(encoding="utf-8")
 
 
+def supports_leds(clockface_dir: Path) -> bool:
+    settings = clockface_dir / "src" / "settings.rs"
+    return (clockface_dir / "src" / "leds.rs").is_file() and (
+        settings.is_file() and "LedsFile" in settings.read_text(encoding="utf-8")
+    )
+
+
 def render_clockface_toml(
     example: str,
     *,
     audio: bool,
     timewarp_bin: str | None,
+    leds: str | None = None,
 ) -> str:
     """Start from clockface.example.toml and pin the shop clock's settings.
 
-    Audio keys are added only when this revision accepts them. The current
-    parser uses deny_unknown_fields, so a `[audio]` table on a build without
-    chimes prevents the kiosk from starting.
+    The parser uses deny_unknown_fields on every table, so `[audio]` and
+    `[leds]` are written only for a revision that has them (`audio` and
+    `leds` are decided from the source by the caller). `leds` is the
+    backend name: "spi" for the kms build (leds-spi feature), "none" for a
+    build that cannot drive the strip, or None to leave the table out.
     """
     text = example
     if not text.endswith("\n"):
         text += "\n"
     text = _drop_commented_table(text, "audio")
+    text = _drop_commented_table(text, "leds")
     text = _replace_top_level(text, "units", '"imperial"')
     if timewarp_bin:
         text = _replace_or_insert_timewarp_bin(text, timewarp_bin)
     if audio:
         text = _upsert_audio(text)
+    if leds:
+        text = _upsert_leds(text, leds)
     return text
 
 
@@ -332,21 +345,25 @@ def _replace_top_level(text: str, key: str, toml_value: str) -> str:
 
 
 def _replace_or_insert_timewarp_bin(text: str, path: str) -> str:
-    line = f'timewarp_bin = "{path}"'
-    commented = re.compile(r"^#\s*timewarp_bin\s*=.*$", re.MULTILINE)
-    active = re.compile(r"^timewarp_bin\s*=.*$", re.MULTILINE)
-    if active.search(text):
-        return active.sub(line, text, count=1)
-    if commented.search(text):
-        return commented.sub(line, text, count=1)
-    return text + "\n" + line + "\n"
+    """Set the top-level `timewarp_bin`.
+
+    The example documents the key below `[place]`, so substituting the
+    commented line in place would make it `place.timewarp_bin`, which the
+    parser rejects. The key goes before the first table header instead.
+    """
+    line = f'timewarp_bin = "{path}"\n'
+    text = re.sub(r"(?m)^#?\s*timewarp_bin\s*=.*\n", "", text)
+    header = re.search(r"(?m)^\[", text)
+    if header is None:
+        return text + line
+    return text[: header.start()] + line + "\n" + text[header.start() :]
 
 
 def _upsert_audio(text: str) -> str:
     block = (
         "\n"
-        "# Ticking. Present only when this clockface revision understands it\n"
-        "# (PR #43 / rodio). /tmp/mute containing 1 silences the tick.\n"
+        "# Ticking and chimes (sounds are compiled into the binary).\n"
+        "# /tmp/mute containing 1 silences the tick.\n"
         "# gpio_path stays unset: Trixie deprecated sysfs GPIO, so a GPIO5\n"
         "# mute switch needs libgpiod and is not wired by these scripts.\n"
         "[audio]\n"
@@ -361,6 +378,29 @@ def _upsert_audio(text: str) -> str:
         )
         return text
     return text + block
+
+
+def _upsert_leds(text: str, backend: str) -> str:
+    """The 20-pixel strip on SPI0 MOSI, configured the way the old clock was."""
+    if backend not in ("spi", "none"):
+        raise ValueError(f"leds backend must be spi or none (got {backend!r})")
+    text = re.sub(r"(?ms)^\[leds\]\s*\n(?:[^\[\n][^\n]*\n|\n)*", "", text)
+    if not text.endswith("\n"):
+        text += "\n"
+    return text + (
+        "\n"
+        "# NeoPixel strip on /dev/spidev0.0 (GPIO10 MOSI). gbr and 400 kHz match\n"
+        "# the old Pi scripts. /tmp/mute containing 1 also turns the strip off.\n"
+        "[leds]\n"
+        f'backend = "{backend}"\n'
+        'device = "/dev/spidev0.0"\n'
+        "count = 20\n"
+        "brightness = 192\n"
+        'order = "gbr"\n'
+        "freq_hz = 400000\n"
+        "honor_mute = true\n"
+        'mute_path = "/tmp/mute"\n'
+    )
 
 
 def render_cache_json() -> str:
@@ -424,6 +464,12 @@ def main(argv: list[str]) -> int:
     toml_cmd.add_argument("--clockface-dir", default="")
     toml_cmd.add_argument("--timewarp-bin", default="/usr/local/bin/timewarp")
     toml_cmd.add_argument("--audio", choices=("auto", "yes", "no"), default="auto")
+    toml_cmd.add_argument(
+        "--leds",
+        choices=("auto", "spi", "none", "omit"),
+        default="auto",
+        help="auto: spi when the source has [leds], else omit the table",
+    )
     toml_cmd.add_argument(
         "--no-timewarp-bin",
         action="store_true",
@@ -492,11 +538,20 @@ def main(argv: list[str]) -> int:
             bin_path = None
         else:
             bin_path = args.timewarp_bin
+        if args.leds == "auto":
+            if clockface is None:
+                raise ValueError("--leds auto needs --clockface-dir")
+            leds = "spi" if supports_leds(clockface) else None
+        elif args.leds == "omit":
+            leds = None
+        else:
+            leds = args.leds
         sys.stdout.write(
             render_clockface_toml(
                 example,
                 audio=audio,
                 timewarp_bin=bin_path,
+                leds=leds,
             )
         )
     elif args.cmd == "cache-json":

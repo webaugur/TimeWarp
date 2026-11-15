@@ -19,4 +19,4 @@ sudo --preserve-env=CLOCK_PASSWORD,CLOCK_WIFI_PSK \
   sdcard/build-image.sh --config sdcard/config.env
 ```
 
-`CLOCKFACE_REF` empty means the checkout you have. Audio keys (`tick = "15db"`, `mute_path = "/tmp/mute"`) are written only when that revision accepts them. The parser on `main` rejects unknown tables, so a `[audio]` block would stop the kiosk until the chime work in PR #43 is what you build.
+`CLOCKFACE_REF` empty means the checkout you have. The card's `clockface.toml` gets `[audio]` (`tick = "15db"`, `mute_path = "/tmp/mute"`) and `[leds]` (`backend = "spi"`, `/dev/spidev0.0`, 20 pixels, brightness 192, `gbr`, 400 kHz, `honor_mute`) for a revision that has them; the parser rejects unknown tables, so an older `CLOCKFACE_REF` gets neither. A `--labwc` binary has no SPI writer and gets `backend = "none"`. The chime and tick FLACs are compiled into the binary; nothing is copied to `sounds_dir`.
