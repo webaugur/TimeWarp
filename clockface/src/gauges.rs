@@ -825,17 +825,16 @@ fn angle_of(spec: &ArcSpec, lo: f64, hi: f64, value: f64) -> f32 {
 }
 
 fn wedge_rect(center: Pos2, radius: f32, left: bool) -> Rect {
-    let pad = radius * 0.10;
     let bottom = center.y + radius * 1.28;
     if left {
         Rect::from_min_max(
-            Pos2::new(center.x - radius - pad, center.y),
+            Pos2::new(center.x - radius, center.y),
             Pos2::new(center.x, bottom),
         )
     } else {
         Rect::from_min_max(
             Pos2::new(center.x, center.y),
-            Pos2::new(center.x + radius + pad, bottom),
+            Pos2::new(center.x + radius, bottom),
         )
     }
 }
@@ -850,6 +849,13 @@ pub fn paint_trough(painter: &Painter, center: Pos2, radius: f32, weather: &Weat
     if !show {
         return;
     }
+    // The half circle stays inside the dial's left and right edges. The boards
+    // cover whatever continues below the face.
+    let clip = Rect::from_min_max(
+        Pos2::new(center.x - radius, center.y - 3.0),
+        Pos2::new(center.x + radius, center.y + radius * 1.6),
+    );
+    let painter = painter.with_clip_rect(clip);
     let steps = 96u32;
     let bands = 10u32;
     let cols = bands + 1;
