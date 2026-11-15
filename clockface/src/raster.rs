@@ -471,8 +471,8 @@ mod tests {
         );
         let rim = at_pos(&rgba, width, height, center + direction(20.0) * (0.99 * r));
         assert!(
-            lum(rim) < 40,
-            "the outer rim should be clear, so the ground shows through, got {rim:?}"
+            rim[0] > 230 && rim[1] > 170 && rim[0] as i32 > rim[2] as i32 + 40,
+            "the outer rim should stay warm amber, got {rim:?}"
         );
 
         // Lower half is the overcast January sky, below the thin black fade.

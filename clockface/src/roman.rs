@@ -256,8 +256,8 @@ pub(crate) fn direction(degrees_clockwise_from_12: f32) -> Vec2 {
 
 /// Dial ring. `inner` is a hole radius in pixels (0 for a solid face).
 ///
-/// Cream at the center, amber at the rim, then a smooth fade to transparent
-/// over the outer 7% of the radius. The mesh stays fine so the rim does not band.
+/// Cream at the center, amber at the rim. The disc ends on the circle. The
+/// mesh stays fine so the wash does not band.
 pub(crate) fn paint_brass(painter: &Painter, center: Pos2, radius: f32, inner: f32) {
     let angular = 192u32;
     let radial = 48u32;
@@ -283,7 +283,7 @@ pub(crate) fn paint_brass(painter: &Painter, center: Pos2, radius: f32, inner: f
     painter.add(Shape::mesh(mesh));
 }
 
-/// `#ffffb2` at the center, `#ffcc7f` at the dial edge, transparent in the outer 7%.
+/// `#ffffb2` at the center, `#ffcc7f` at the dial edge. Opaque all the way out.
 fn dial_color(dist: f32, radius: f32) -> Color32 {
     let t = if radius > 0.0 {
         (dist / radius).clamp(0.0, 1.0)
@@ -293,15 +293,7 @@ fn dial_color(dist: f32, radius: f32) -> Color32 {
     let red: f32 = 255.0;
     let green = 255.0 + (204.0 - 255.0) * t;
     let blue = 178.0 + (127.0 - 178.0) * t;
-    let fade = ((t - 0.93) / 0.07).clamp(0.0, 1.0);
-    let fade = fade * fade * (3.0 - 2.0 * fade);
-    let alpha = ((1.0 - fade) * 255.0).round().clamp(0.0, 255.0) as u8;
-    Color32::from_rgba_unmultiplied(
-        red.round() as u8,
-        green.round() as u8,
-        blue.round() as u8,
-        alpha,
-    )
+    Color32::from_rgb(red.round() as u8, green.round() as u8, blue.round() as u8)
 }
 
 fn paint_inner_ring(painter: &Painter, center: Pos2, r: f32, style: &RomanClockStyle) {
@@ -667,13 +659,12 @@ mod tests {
     }
 
     #[test]
-    fn dial_edge_fades_out_instead_of_to_black() {
+    fn dial_edge_is_opaque_amber() {
         let center = dial_color(0.0, 100.0);
-        assert_eq!(center.a(), 255);
-        assert!(center.r() > 250 && center.g() > 250 && center.b() > 160);
-        assert_eq!(dial_color(100.0, 100.0).a(), 0);
-        let mid = dial_color(96.5, 100.0);
-        assert!(mid.a() > 20 && mid.a() < 235, "mid fade alpha {}", mid.a());
+        assert_eq!(center, Color32::from_rgb(255, 255, 178));
+        let edge = dial_color(100.0, 100.0);
+        assert_eq!(edge, Color32::from_rgb(255, 204, 127));
+        assert_eq!(edge.a(), 255);
     }
 
     #[test]
