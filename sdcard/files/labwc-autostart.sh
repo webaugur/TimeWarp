@@ -7,9 +7,13 @@ source /opt/clock/manifest.env
 
 swaybg -c '#000000' >/dev/null 2>&1 &
 
+# CLOCK_ROTATION is clockwise. wl_output transforms count counter-clockwise
+# (like the kernel's rotate=), so 90 clockwise is --transform 270.
 case "${CLOCK_ROTATION}" in
   0) transform=normal ;;
-  90 | 180 | 270) transform="${CLOCK_ROTATION}" ;;
+  90) transform=270 ;;
+  180) transform=180 ;;
+  270) transform=90 ;;
   *) echo "clock labwc: bad rotation ${CLOCK_ROTATION}" >&2; exit 1 ;;
 esac
 
