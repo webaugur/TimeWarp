@@ -14,9 +14,9 @@ use clap::Parser;
 
 use clockface::{
     example_events, fetch_weather, gather_status, install_fonts, load_cache, load_cached_sun,
-    load_settings, load_sun, now_unix, paint_kiosk, render_rgba_with, repaint_delay, store_cache,
-    write_png, KioskModel, Place, Settings, SettingsOverride, StatusLine, Units, WeatherReport,
-    SUN_REFRESH_SECS,
+    load_settings, load_sun, now_unix, paint_kiosk, render_rgba_with, repaint_delay, start_audio,
+    store_cache, write_png, KioskModel, Place, Settings, SettingsOverride, SoundFault, StatusLine,
+    Units, WeatherReport, SUN_REFRESH_SECS,
 };
 
 #[derive(Parser, Debug)]
@@ -85,6 +85,10 @@ struct Cli {
     /// imperial (°F, mph) or metric (°C, km/h). Default imperial.
     #[arg(long, value_parser = ["imperial", "metric"])]
     units: Option<String>,
+
+    /// Do not play ticking or chimes.
+    #[arg(long)]
+    no_audio: bool,
 }
 
 fn main() {
@@ -118,6 +122,7 @@ fn run() -> Result<(), String> {
             latitude: cli.lat,
             longitude: cli.lon,
             units,
+            audio_enabled: if cli.no_audio { Some(false) } else { None },
         },
     )?;
 
@@ -180,14 +185,17 @@ struct ClockApp {
     status_at: Instant,
     fetching: Arc<AtomicBool>,
     fetching_sun: Arc<AtomicBool>,
+    sound_fault: SoundFault,
 }
 
 impl ClockApp {
     fn new(settings: Settings) -> Self {
         let weather = load_cache(&settings.place)
             .unwrap_or_else(|| WeatherReport::unavailable(&settings.place));
+        let sound_fault = start_audio(&settings.audio);
         Self {
             settings,
+            sound_fault,
             weather: Arc::new(Mutex::new(weather)),
             sun: Arc::new(Mutex::new(load_cached_sun())),
             sun_at: Instant::now()
@@ -215,6 +223,16 @@ fn show_clock(ui: &mut egui::Ui, app: &mut ClockApp) {
     let mut status = app.status.clone();
     if !weather.note.is_empty() {
         status.alert = weather.note.clone();
+    }
+    if let Ok(sound) = app.sound_fault.lock() {
+        let sound = sound.trim();
+        if !sound.is_empty() {
+            if status.alert.is_empty() {
+                status.alert = sound.to_string();
+            } else {
+                status.alert = format!("{}  {sound}", status.alert);
+            }
+        }
     }
     let events = app.settings.events.clone().unwrap_or_else(example_events);
     let screen = ui.ctx().viewport_rect();

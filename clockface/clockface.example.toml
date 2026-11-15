@@ -17,6 +17,24 @@ refresh_minutes = 20
 # imperial: °F and mph. metric: °C and km/h.
 units = "imperial"
 
+# Ticking and chimes. The sounds are compiled into the binary. A file in
+# sounds_dir with the same stem (.flac or .wav) replaces that one sound.
+# Quarter and half both play clock-hour, which is what the old cron jobs did.
+# Set them to clock-quarter and clock-half to use those recordings instead.
+# tick is 10db, 15db, 20db, or 25db. /tmp/mute containing 1 silences ticking.
+# gpio_path is optional; 1 there also mutes. mute_chimes defaults to false.
+# [audio]
+# enabled = true
+# tick = "15db"
+# mute_path = "/tmp/mute"
+# gpio_path = "/sys/class/gpio/gpio5/value"
+# mute_chimes = false
+# sounds_dir = "/home/pi/.local/share/clockface/sounds"
+# hour = "clock-hour"
+# quarter = "clock-hour"
+# half = "clock-hour"
+# bell = "clock-bell"
+
 [place]
 name = "Indianapolis"
 latitude = 39.7684

@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use egui::{Pos2, Vec2};
 use serde::Deserialize;
@@ -70,6 +70,7 @@ pub struct Settings {
     pub refresh_minutes: u32,
     /// `None` means the file omitted events, so the built-in examples are used.
     pub events: Option<Vec<CalendarEvent>>,
+    pub audio: crate::chime::AudioSettings,
 }
 
 impl Default for Settings {
@@ -83,6 +84,7 @@ impl Default for Settings {
             place: Place::default(),
             refresh_minutes: DEFAULT_REFRESH_MINUTES,
             events: None,
+            audio: crate::chime::AudioSettings::default(),
         }
     }
 }
@@ -133,6 +135,7 @@ pub struct SettingsOverride {
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
     pub units: Option<Units>,
+    pub audio_enabled: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -155,6 +158,23 @@ struct FileConfig {
     /// Absent key stays `None` (use examples). Present, even if empty, is kept.
     #[serde(default)]
     events: Option<Vec<CalendarEvent>>,
+    #[serde(default)]
+    audio: Option<AudioFile>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct AudioFile {
+    enabled: Option<bool>,
+    tick: Option<String>,
+    mute_path: Option<String>,
+    gpio_path: Option<String>,
+    mute_chimes: Option<bool>,
+    sounds_dir: Option<String>,
+    hour: Option<String>,
+    quarter: Option<String>,
+    half: Option<String>,
+    bell: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -225,6 +245,48 @@ fn apply_file(settings: &mut Settings, file: FileConfig) -> Result<(), String> {
         }
     }
     settings.events = file.events;
+    if let Some(audio) = file.audio {
+        apply_audio(&mut settings.audio, audio)?;
+    }
+    settings.audio.validate()
+}
+
+fn apply_audio(audio: &mut crate::chime::AudioSettings, file: AudioFile) -> Result<(), String> {
+    if let Some(enabled) = file.enabled {
+        audio.enabled = enabled;
+    }
+    if let Some(tick) = file.tick {
+        audio.tick = tick;
+    }
+    if let Some(path) = file.mute_path {
+        audio.mute_path = PathBuf::from(path);
+    }
+    if let Some(path) = file.gpio_path {
+        let path = path.trim();
+        audio.gpio_path = if path.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(path))
+        };
+    }
+    if let Some(mute_chimes) = file.mute_chimes {
+        audio.mute_chimes = mute_chimes;
+    }
+    if let Some(dir) = file.sounds_dir {
+        audio.sounds_dir = PathBuf::from(dir);
+    }
+    if let Some(hour) = file.hour {
+        audio.hour = hour;
+    }
+    if let Some(quarter) = file.quarter {
+        audio.quarter = quarter;
+    }
+    if let Some(half) = file.half {
+        audio.half = half;
+    }
+    if let Some(bell) = file.bell {
+        audio.bell = bell;
+    }
     Ok(())
 }
 
@@ -253,6 +315,9 @@ fn apply_override(settings: &mut Settings, over: &SettingsOverride) -> Result<()
     }
     if let Some(units) = over.units {
         settings.place.units = units;
+    }
+    if let Some(enabled) = over.audio_enabled {
+        settings.audio.enabled = enabled;
     }
     Ok(())
 }
@@ -318,6 +383,7 @@ mod tests {
             units: None,
             refresh_minutes: None,
             events: None,
+            audio: None,
         };
         let mut settings = Settings::default();
         apply_file(&mut settings, file).unwrap();
