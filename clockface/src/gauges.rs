@@ -268,6 +268,7 @@ fn paint_thermometer(
             hi as f64,
             value as f64,
             RED,
+            Mark::High,
         );
     }
     if let Some(value) = dew {
@@ -280,6 +281,7 @@ fn paint_thermometer(
             hi as f64,
             value as f64,
             GREEN,
+            Mark::Dew,
         );
     }
     if let Some(value) = feels {
@@ -292,6 +294,7 @@ fn paint_thermometer(
             hi as f64,
             value as f64,
             YELLOW,
+            Mark::Feels,
         );
     }
 }
@@ -339,10 +342,30 @@ fn paint_barometer(
     let painter = painter.with_clip_rect(clip);
     paint_arc(&painter, center, radius, &spec, lo, hi, current);
     if let Some(value) = peak {
-        marker(&painter, center, radius, &spec, lo, hi, value, RED);
+        marker(
+            &painter,
+            center,
+            radius,
+            &spec,
+            lo,
+            hi,
+            value,
+            RED,
+            Mark::High,
+        );
     }
     if let Some(value) = ahead {
-        marker(&painter, center, radius, &spec, lo, hi, value, YELLOW);
+        marker(
+            &painter,
+            center,
+            radius,
+            &spec,
+            lo,
+            hi,
+            value,
+            YELLOW,
+            Mark::Forecast,
+        );
     }
 }
 
@@ -407,7 +430,7 @@ fn paint_arc(
         }
     }
     let mid = (spec.start + spec.end) * 0.5;
-    let unit_at = polar(center, radius, mid, PLATE_OUT + 0.030);
+    let unit_at = polar(center, radius, mid, PLATE_OUT + 0.062);
     let unit_font = FontId::new(0.030 * radius, FontFamily::Proportional);
     for (dx, dy) in [(-1.2, 0.0), (1.2, 0.0), (0.0, -1.2), (0.0, 1.2)] {
         painter.text(
@@ -482,6 +505,15 @@ fn extended(spec: &ArcSpec) -> (f32, f32) {
     (spec.start - sign * 3.5, spec.end + sign * 2.5)
 }
 
+/// What a colored tick is marking. These gauges have no minimum tick; a later
+/// one would use [`triangle`] with the point down.
+enum Mark {
+    High,
+    Dew,
+    Feels,
+    Forecast,
+}
+
 fn marker(
     painter: &Painter,
     center: Pos2,
@@ -491,6 +523,7 @@ fn marker(
     hi: f64,
     value: f64,
     color: Color32,
+    kind: Mark,
 ) {
     let ang = angle_of(spec, lo, hi, value);
     radial_line(
@@ -514,6 +547,147 @@ fn marker(
     let tip = polar(center, radius, ang, PLATE_OUT + 0.010);
     painter.circle_filled(tip, 3.3, EDGE);
     painter.circle_filled(tip, 2.3, color);
+    mark_icon(painter, center, radius, ang, color, kind, spec);
+}
+
+/// A small vector glyph just outside the marker dot, in the tick's color.
+fn mark_icon(
+    painter: &Painter,
+    center: Pos2,
+    radius: f32,
+    angle: f32,
+    color: Color32,
+    kind: Mark,
+    spec: &ArcSpec,
+) {
+    let s = (0.030 * radius).clamp(7.0, 12.0);
+    let out = PLATE_OUT + 0.010 + (3.6 + s * 0.62) / radius;
+    let origin = polar(center, radius, angle, out);
+    match kind {
+        Mark::High => triangle(painter, origin, s, color, true),
+        Mark::Dew => droplet(painter, origin, s, color),
+        Mark::Feels => figure(painter, origin, s, color),
+        Mark::Forecast => ahead_arrow(painter, origin, s, color, angle, spec),
+    }
+}
+
+fn triangle(painter: &Painter, origin: Pos2, s: f32, color: Color32, up: bool) {
+    let h = s * 0.92;
+    let w = s * 0.84;
+    let (y_tip, y_base) = if up {
+        (-h * 0.5, h * 0.5)
+    } else {
+        (h * 0.5, -h * 0.5)
+    };
+    let pts = [
+        origin + Vec2::new(0.0, y_tip),
+        origin + Vec2::new(-w * 0.5, y_base),
+        origin + Vec2::new(w * 0.5, y_base),
+    ];
+    fill_poly(painter, &pts, color);
+}
+
+fn droplet(painter: &Painter, origin: Pos2, s: f32, color: Color32) {
+    let bowl = origin + Vec2::new(0.0, s * 0.08);
+    let rad = s * 0.32;
+    painter.circle_filled(bowl, rad + 0.9, EDGE);
+    painter.circle_filled(bowl, rad, color);
+    let tip = origin + Vec2::new(0.0, -s * 0.50);
+    let left = bowl + Vec2::new(-rad * 0.62, -rad * 0.45);
+    let right = bowl + Vec2::new(rad * 0.62, -rad * 0.45);
+    fill_poly(painter, &[tip, left, right], color);
+}
+
+fn figure(painter: &Painter, origin: Pos2, s: f32, color: Color32) {
+    let head = origin + Vec2::new(0.0, -s * 0.24);
+    let hr = s * 0.18;
+    painter.circle_stroke(head, hr, Stroke::new(2.1, EDGE));
+    painter.circle_stroke(head, hr, Stroke::new(1.25, color));
+    let neck = head + Vec2::new(0.0, hr + 0.4);
+    let hip = origin + Vec2::new(0.0, s * 0.46);
+    let arm = neck.y + s * 0.08;
+    stroke(painter, neck, hip, 2.4, EDGE);
+    stroke(painter, neck, hip, 1.35, color);
+    stroke(
+        painter,
+        Pos2::new(origin.x - s * 0.36, arm),
+        Pos2::new(origin.x + s * 0.36, arm),
+        2.4,
+        EDGE,
+    );
+    stroke(
+        painter,
+        Pos2::new(origin.x - s * 0.36, arm),
+        Pos2::new(origin.x + s * 0.36, arm),
+        1.35,
+        color,
+    );
+}
+
+fn ahead_arrow(
+    painter: &Painter,
+    origin: Pos2,
+    s: f32,
+    color: Color32,
+    angle: f32,
+    spec: &ArcSpec,
+) {
+    let dir = ahead_tangent(angle, spec);
+    let tail = origin - dir * (s * 0.42);
+    let head = origin + dir * (s * 0.46);
+    stroke(painter, tail, head, 2.5, EDGE);
+    stroke(painter, tail, head, 1.45, color);
+    let side = Vec2::new(-dir.y, dir.x) * (s * 0.30);
+    let back = head - dir * (s * 0.40);
+    fill_poly(painter, &[head, back + side, back - side], color);
+}
+
+fn ahead_tangent(angle: f32, spec: &ArcSpec) -> Vec2 {
+    let rad = angle.to_radians();
+    let clockwise = Vec2::new(rad.cos(), rad.sin());
+    if spec.end >= spec.start {
+        clockwise
+    } else {
+        -clockwise
+    }
+}
+
+fn fill_poly(painter: &Painter, pts: &[Pos2], color: Color32) {
+    if pts.len() < 3 {
+        return;
+    }
+    let n = pts.len() as f32;
+    let sum = pts.iter().fold(Vec2::ZERO, |acc, p| acc + p.to_vec2());
+    let center = Pos2::new(sum.x / n, sum.y / n);
+    let mut mesh = Mesh::default();
+    mesh.vertices.push(Vertex {
+        pos: center,
+        uv: WHITE_UV,
+        color,
+    });
+    for p in pts {
+        mesh.vertices.push(Vertex {
+            pos: *p,
+            uv: WHITE_UV,
+            color,
+        });
+    }
+    for i in 0..pts.len() {
+        let next = if i + 1 == pts.len() {
+            1
+        } else {
+            (i as u32) + 2
+        };
+        mesh.add_triangle(0, (i as u32) + 1, next);
+    }
+    painter.add(Shape::mesh(mesh));
+    let mut edge = pts.to_vec();
+    edge.push(pts[0]);
+    painter.line(edge, Stroke::new(1.35, EDGE));
+}
+
+fn stroke(painter: &Painter, a: Pos2, b: Pos2, width: f32, color: Color32) {
+    painter.line(vec![a, b], Stroke::new(width, color));
 }
 
 /// Reservoir at the low end. Diameter is about 2.5 tube-widths, so the radius
