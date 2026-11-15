@@ -13,6 +13,7 @@ mod kiosk;
 mod layout;
 mod matrix;
 mod mural;
+mod ornament;
 mod quarters;
 mod raster;
 mod roman;

@@ -16,6 +16,9 @@ use crate::roman::direction;
 const YEAR_SVG: &str = include_str!("../scenes/wheels/year.svg");
 const DAY_SVG: &str = include_str!("../scenes/wheels/day.svg");
 const TEX_SIZE: u32 = 900;
+/// Face radius where both wheel drawings are opaque. Inside this, the paint
+/// is repeated so the dial edge covers art instead of the black ground.
+const WHEEL_SOLID: f32 = 1.03;
 
 pub fn paint(painter: &Painter, ctx: &Context, center: Pos2, radius: f32, year: f32, day: f32) {
     paint_wheel(
@@ -71,7 +74,10 @@ fn paint_wheel(
             let dist = rel.length();
             let screen_deg = rel.x.atan2(-rel.y).to_degrees();
             let drawn = screen_deg + content * 360.0;
-            let (u, v) = uv_at(drawn, dist);
+            // The wheel drawings start just outside the dial, so the black
+            // ground showed as a ring between the cream and the sky. Sample
+            // the first solid paint inward, under the dial, and the two meet.
+            let (u, v) = uv_at(drawn, dist.max(WHEEL_SOLID));
             mesh.vertices.push(Vertex {
                 pos: p,
                 uv: Pos2::new(u, v),
