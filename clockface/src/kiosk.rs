@@ -10,7 +10,7 @@
 //! `shown = content + (angle - wedge_center) / 360`, so the middle of each window shows the
 //! current season or time of day and the mural eases instead of snapping.
 
-use chrono::{DateTime, Datelike, Local};
+use chrono::{DateTime, Datelike, Local, Timelike};
 
 use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Stroke, Vec2};
 
@@ -247,27 +247,40 @@ fn paint_boxes(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
 }
 
 fn paint_calendar(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, model: &KioskModel) {
+    let mut y = origin.y;
+    if line_fits(y, pitch, panel) {
+        let clock = format!("\u{1F55B} {}", board_hm(model.now));
+        y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, &clock, 2);
+        y += pitch;
+    }
     let today = model.now.date_naive();
     let rows = events::upcoming(&model.events, today, 4);
-    let mut y = origin.y;
     if rows.is_empty() {
-        matrix::paint_text(
-            painter,
-            panel,
-            Pos2::new(origin.x, y),
-            pitch,
-            "\u{1F4C5} Nothing on the calendar",
-            2,
-        );
+        if line_fits(y, pitch, panel) {
+            matrix::paint_text(
+                painter,
+                panel,
+                Pos2::new(origin.x, y),
+                pitch,
+                "\u{1F4C5} Nothing on the calendar",
+                2,
+            );
+        }
         return;
     }
     for event in rows.iter().take(4) {
+        if !line_fits(y, pitch, panel) {
+            break;
+        }
         let title = format!(
             "{} {}",
             events::event_mark(&event.title, &event.time),
             event.title
         );
         y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, &title, 2);
+        if !line_fits(y, pitch, panel) {
+            break;
+        }
         let when = if event.time.is_empty() || event.time.eq_ignore_ascii_case("all day") {
             events::short_when(event)
         } else {
@@ -288,6 +301,11 @@ fn paint_calendar(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, mode
 
 fn paint_forecast(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, model: &KioskModel) {
     let mut y = origin.y;
+    if line_fits(y, pitch, panel) {
+        let today = format!("\u{1F4C5} {}", board_date(model.now));
+        y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, &today, 2);
+        y += pitch;
+    }
     let date = model.now.date_naive();
     let mut sky_lines = Vec::new();
     if let Some(times) = sky::sun_times(date, model.place.latitude, model.place.longitude) {
@@ -426,6 +444,30 @@ fn serif() -> FontFamily {
     FontFamily::Name("serif".into())
 }
 
+/// Local civil time as HH:MM, the same 24-hour form as sunrise and sunset.
+fn board_hm(now: DateTime<Local>) -> String {
+    format!("{:02}:{:02}", now.hour(), now.minute())
+}
+
+/// Local civil date in the board's short style, for example `THU JAN 15 2026`.
+fn board_date(now: DateTime<Local>) -> String {
+    const DAYS: [&str; 7] = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+    const MONTHS: [&str; 13] = [
+        "", "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+    ];
+    format!(
+        "{} {} {} {}",
+        DAYS[now.weekday().num_days_from_sunday() as usize],
+        MONTHS[now.month() as usize],
+        now.day(),
+        now.year()
+    )
+}
+
+fn line_fits(y: f32, pitch: f32, panel: Rect) -> bool {
+    y + pitch * 7.0 <= panel.bottom()
+}
+
 fn weekday_name(index: u32) -> &'static str {
     [
         "Monday",
@@ -436,6 +478,54 @@ fn weekday_name(index: u32) -> &'static str {
         "Saturday",
         "Sunday",
     ][index as usize]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::roman::screenshot_time;
+    use crate::settings::Settings;
+    use chrono::TimeZone;
+    use egui::Vec2;
+
+    #[test]
+    fn the_board_clock_is_24_hour_and_the_date_is_the_short_form() {
+        let now = screenshot_time();
+        assert_eq!(board_hm(now), "10:08");
+        assert_eq!(board_date(now), "THU JAN 15 2026");
+        let sunday = match Local.with_ymd_and_hms(2026, 11, 15, 9, 5, 0) {
+            chrono::LocalResult::Single(time) => time,
+            chrono::LocalResult::Ambiguous(earliest, _) => earliest,
+            chrono::LocalResult::None => panic!("2026-11-15 09:05 is not a local time"),
+        };
+        assert_eq!(board_hm(sunday), "09:05");
+        assert_eq!(board_date(sunday), "SUN NOV 15 2026");
+    }
+
+    #[test]
+    fn time_and_date_leave_room_for_the_rest_of_each_board() {
+        for viewport in [Vec2::new(1920.0, 1080.0), Vec2::new(1200.0, 800.0)] {
+            let (center, diameter) = Settings::default().placement(viewport);
+            let screen = Rect::from_min_size(Pos2::ZERO, viewport);
+            let layout = KioskLayout::new(screen, center, diameter);
+            let pitch = matrix::frame_pitch(layout.radius);
+            let line = pitch * 9.0;
+            let left = layout.boxes[0];
+            // Time, a gap, four events of title plus when, one extra wrap, and the gaps.
+            let left_used = line + pitch + 4.0 * (2.0 * line + pitch) + line;
+            assert!(
+                left.top() + pitch + left_used <= left.bottom() + 0.5,
+                "left board overflows on {viewport:?}"
+            );
+            let right = layout.boxes[1];
+            // Date, a gap, six sky lines, a gap, and five forecast days.
+            let right_used = line + pitch + 6.0 * line + pitch + 5.0 * line;
+            assert!(
+                right.top() + pitch + right_used <= right.bottom() + 0.5,
+                "right board overflows on {viewport:?}"
+            );
+        }
+    }
 }
 
 fn month_name(month: u32) -> &'static str {
