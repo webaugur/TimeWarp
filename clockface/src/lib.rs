@@ -23,7 +23,7 @@ mod weather;
 
 pub use events::{examples as example_events, CalendarEvent};
 pub use fonts::install_fonts;
-pub use kiosk::{paint as paint_kiosk, KioskModel};
+pub use kiosk::{paint as paint_kiosk, KioskModel, REPAINT_AFTER};
 pub use raster::{render_rgba, write_png};
 pub use roman::{
     hand_angles, milliseconds_since_midnight, paint, paint_with, screenshot_time, HandStyle,

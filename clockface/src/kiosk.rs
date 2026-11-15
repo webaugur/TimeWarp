@@ -10,7 +10,9 @@
 //! `shown = content + (angle - wedge_center) / 360`, so the middle of each window shows the
 //! current season or time of day and the mural eases instead of snapping.
 
-use chrono::{DateTime, Datelike, Local, Timelike};
+use std::time::Duration;
+
+use chrono::{DateTime, Datelike, Local, TimeZone, Timelike, Utc};
 
 use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Stroke, Vec2};
 
@@ -249,9 +251,8 @@ fn paint_boxes(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
 fn paint_calendar(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, model: &KioskModel) {
     let mut y = origin.y;
     if line_fits(y, pitch, panel) {
-        let clock = format!("\u{1F55B} {}", board_hm(model.now));
-        y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, &clock, 2);
-        y += pitch;
+        let clock = board_clock_line(&model.now);
+        y = paint_heading(painter, panel, origin, pitch, &clock);
     }
     let today = model.now.date_naive();
     let rows = events::upcoming(&model.events, today, 4);
@@ -303,8 +304,7 @@ fn paint_forecast(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, mode
     let mut y = origin.y;
     if line_fits(y, pitch, panel) {
         let today = format!("\u{1F4C5} {}", board_date(model.now));
-        y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, &today, 2);
-        y += pitch;
+        y = paint_heading(painter, panel, origin, pitch, &today);
     }
     let date = model.now.date_naive();
     let mut sky_lines = Vec::new();
@@ -444,9 +444,30 @@ fn serif() -> FontFamily {
     FontFamily::Name("serif".into())
 }
 
-/// Local civil time as HH:MM, the same 24-hour form as sunrise and sunset.
-fn board_hm(now: DateTime<Local>) -> String {
-    format!("{:02}:{:02}", now.hour(), now.minute())
+/// How soon the live window asks to paint again. At most one second, so the
+/// seconds digit on the departure board keeps moving.
+pub const REPAINT_AFTER: Duration = Duration::from_millis(16);
+
+/// Local civil time as HH:MM:SS, the same 24-hour form as sunrise and sunset.
+fn board_hms(now: &DateTime<Local>) -> String {
+    format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
+}
+
+/// Left-board clock: local `HH:MM:SS`, then Swatch beats, for example `10:08:37 @464`.
+fn board_clock_line(now: &DateTime<Local>) -> String {
+    format!("\u{1F55B} {} @{:03}", board_hms(now), swatch_beats(now))
+}
+
+/// Swatch Internet Time, `@000` through `@999`.
+///
+/// Biel Mean Time is UTC+1 and does not observe daylight saving.
+/// `floor(((utc seconds since midnight + 3600) mod 86400) / 86.4)`.
+fn swatch_beats(now: &DateTime<impl TimeZone>) -> u32 {
+    let utc = now.with_timezone(&Utc);
+    let secs = u64::from(utc.time().num_seconds_from_midnight());
+    let bmt = (secs + 3600) % 86_400;
+    // 86.4 = 864/10, so floor division stays exact in integers.
+    ((bmt * 10) / 864) as u32
 }
 
 /// Local civil date in the board's short style, for example `THU JAN 15 2026`.
@@ -466,6 +487,16 @@ fn board_date(now: DateTime<Local>) -> String {
 
 fn line_fits(y: f32, pitch: f32, panel: Rect) -> bool {
     y + pitch * 7.0 <= panel.bottom()
+}
+
+/// A heading, then one lit row in the gap before the next line.
+///
+/// The glyph occupies seven rows and the line advances nine, so one grid row
+/// stays dark above the rule. The extra pitch below leaves one dark row under it.
+fn paint_heading(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, text: &str) -> f32 {
+    let next = matrix::paint_text(painter, panel, origin, pitch, text, 2);
+    matrix::paint_rule(painter, panel, next - pitch, pitch);
+    next + pitch
 }
 
 fn weekday_name(index: u32) -> &'static str {
@@ -491,15 +522,54 @@ mod tests {
     #[test]
     fn the_board_clock_is_24_hour_and_the_date_is_the_short_form() {
         let now = screenshot_time();
-        assert_eq!(board_hm(now), "10:08");
+        assert_eq!(board_hms(&now), "10:08:37");
         assert_eq!(board_date(now), "THU JAN 15 2026");
+        assert!(board_clock_line(&now).contains("10:08:37 @"));
         let sunday = match Local.with_ymd_and_hms(2026, 11, 15, 9, 5, 0) {
             chrono::LocalResult::Single(time) => time,
             chrono::LocalResult::Ambiguous(earliest, _) => earliest,
             chrono::LocalResult::None => panic!("2026-11-15 09:05 is not a local time"),
         };
-        assert_eq!(board_hm(sunday), "09:05");
+        assert_eq!(board_hms(&sunday), "09:05:00");
         assert_eq!(board_date(sunday), "SUN NOV 15 2026");
+    }
+
+    #[test]
+    fn swatch_beats_follow_biel_mean_time() {
+        // 00:00 BMT is 23:00 UTC.
+        let midnight = Utc.with_ymd_and_hms(2026, 1, 14, 23, 0, 0).unwrap();
+        assert_eq!(swatch_beats(&midnight), 0);
+        // 12:00 BMT is 11:00 UTC, exactly @500.
+        let noon = Utc.with_ymd_and_hms(2026, 1, 15, 11, 0, 0).unwrap();
+        assert_eq!(swatch_beats(&noon), 500);
+        // The same civil clock in a UTC−5 zone is five hours later in Biel.
+        let west = chrono::FixedOffset::west_opt(5 * 3600).unwrap();
+        let local = west.with_ymd_and_hms(2026, 1, 15, 10, 8, 37).unwrap();
+        let as_utc = Utc.with_ymd_and_hms(2026, 1, 15, 15, 8, 37).unwrap();
+        let same_digits_in_utc = Utc.with_ymd_and_hms(2026, 1, 15, 10, 8, 37).unwrap();
+        assert_eq!(swatch_beats(&local), swatch_beats(&as_utc));
+        assert_eq!(swatch_beats(&local), 672);
+        assert_eq!(swatch_beats(&same_digits_in_utc), 464);
+        assert!(REPAINT_AFTER <= Duration::from_secs(1));
+    }
+
+    #[test]
+    fn the_clock_line_fits_on_one_row_of_the_board() {
+        let line = format!("\u{1F55B} 10:08:37 @347");
+        for viewport in [Vec2::new(1920.0, 1080.0), Vec2::new(1200.0, 800.0)] {
+            let (center, diameter) = Settings::default().placement(viewport);
+            let screen = Rect::from_min_size(Pos2::ZERO, viewport);
+            let layout = KioskLayout::new(screen, center, diameter);
+            let pitch = matrix::frame_pitch(layout.radius);
+            let panel = layout.boxes[0];
+            // Origin is one pitch in; paint wraps at the right edge minus a small inset.
+            let room = panel.width() - pitch - pitch * 0.4;
+            let width = matrix::text_width(&line, pitch, |_| pitch * 8.0);
+            assert!(
+                width <= room,
+                "clock line {width} exceeds {room} on {viewport:?}"
+            );
+        }
     }
 
     #[test]
@@ -511,8 +581,11 @@ mod tests {
             let pitch = matrix::frame_pitch(layout.radius);
             let line = pitch * 9.0;
             let left = layout.boxes[0];
-            // Time, a gap, four events of title plus when, one extra wrap, and the gaps.
+            // Time, the rule in that gap, four events of title plus when, one extra wrap.
             let left_used = line + pitch + 4.0 * (2.0 * line + pitch) + line;
+            let rule = line - pitch;
+            assert!(rule - pitch * 6.0 >= pitch - 0.01);
+            assert!(line + pitch - rule >= pitch - 0.01);
             assert!(
                 left.top() + pitch + left_used <= left.bottom() + 0.5,
                 "left board overflows on {viewport:?}"
