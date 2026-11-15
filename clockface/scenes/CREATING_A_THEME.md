@@ -44,7 +44,7 @@ The clock maps this box onto the lower aperture: the full width, and the height 
 name = "default"
 view_box = [0.0, 0.0, 1000.0, 500.0]
 
-always = ["land", "tree-trunk"]
+always = ["tree-trunk"]
 
 [sky]
 day = "sky-clear"
@@ -92,10 +92,10 @@ The same split is used for the rest of the scene:
 
 | Role | Default group ids | When it is on |
 | --- | --- | --- |
-| Always | `land`, `tree-trunk` | Every frame. Distant hills and the bare tree. |
+| Always | `tree-trunk` | Every frame. The bare tree. |
 | Sky | `sky-clear`, `sky-partly`, `sky-overcast`, `sky-night` | One photograph. Clear under about 20% cover, partly from there to about 75%, overcast above that and for rain, snow, storm, and fog. Night uses the night plate at every cover. |
 | Leaves | `leaves-spring`, `leaves-summer`, `leaves-autumn`, `leaves-winter` | One of them, from the local date. Winter is a few clinging leaves, not a second trunk. |
-| Ground | `ground-spring`, `ground-summer`, `ground-autumn`, `ground-winter` | One of them, same season as the leaves. |
+| Ground | `ground-spring`, `ground-summer`, `ground-autumn`, `ground-winter` | One of them, same season as the leaves. Each group is the field plus a low roll at the left end and the right end, a little darker than the field. The middle of the horizon stays the field line. |
 | Dawn, dusk | `tint-dawn`, `tint-dusk` | A translucent gradient over the daytime photograph. Not used at night. |
 | Rain | `rain` | Thin strokes over the overcast photograph. |
 | Snow | `snow`, `snow-cover` | `snow` is small flakes. `snow-cover` is the snow on the ground and on the branches. |
@@ -106,7 +106,7 @@ The default drawing has no sun. `[time]` `day` and `twilight` are empty. A theme
 
 Seasons follow the same dates as the sun box: winter from 21 December, spring from 20 March, summer from 21 June, autumn from 22 September. The time of day uses the local civil clock. Around the `--screenshot` instant (10:08) the band is day, not twilight.
 
-Draw later groups further down the file. resvg paints in document order. In the default file the photographs come first, then the dawn or dusk tint, then lightning, hills, seasonal ground, snow on the ground, trunk, leaves, rain, falling snow, and fog. The vector land covers the bottom of the photograph.
+Draw later groups further down the file. resvg paints in document order. In the default file the photographs come first, then the dawn or dusk tint, then lightning, seasonal ground, snow on the ground, trunk, leaves, rain, falling snow, and fog. The ground covers the bottom of the photograph. Dawn and dusk tints sit under that ground, the same way they sit under the field. Snow cover repeats the two end rolls in white.
 
 A `[photos]` table in `theme.toml` names those groups. Without it, the clock falls back to the `sky` gradient ids. Each plate is an `<image>` whose `href` is a file under `scenes/default/skies/`. The clock compiles those four JPEGs in, and an external theme can put its own images next to `scene.svg`. Use a public-domain or CC0 photograph, crop out any sun or moon, and keep it near 1600 pixels wide. Do not draw the clouds as turbulence filters. The clock still adds a little stable noise after the raster so a tint gradient does not band.
 

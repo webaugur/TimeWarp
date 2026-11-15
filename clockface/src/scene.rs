@@ -676,7 +676,6 @@ mod tests {
         let theme = Theme::from_parts(DEFAULT_SVG, DEFAULT_TOML).unwrap();
         let on = visible_layers(&theme, screenshot_time(), &fixture_january());
         for id in [
-            "land",
             "tree-trunk",
             "leaves-winter",
             "ground-winter",

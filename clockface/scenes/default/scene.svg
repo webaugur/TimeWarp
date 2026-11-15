@@ -26,14 +26,6 @@
       <stop offset="0.45" stop-color="#d5dcde" stop-opacity="0.25"/>
       <stop offset="1" stop-color="#eef1f2" stop-opacity="0.72"/>
     </linearGradient>
-    <linearGradient id="grad-hill-far" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#8ea4b4"/>
-      <stop offset="1" stop-color="#6d8494"/>
-    </linearGradient>
-    <linearGradient id="grad-hill-near" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#5e7380"/>
-      <stop offset="1" stop-color="#3e515c"/>
-    </linearGradient>
   </defs>
 
   <!-- Photographs sit under the vector land. One of these groups is shown. -->
@@ -60,12 +52,10 @@
     <polyline points="500,150 482,196 508,196 474,250" fill="none" stroke="#ffe7a0" stroke-width="1.4" stroke-linejoin="round" opacity="0.8"/>
   </g>
 
-  <g id="land">
-    <path fill="url(#grad-hill-far)" d="M 0 165 C 70 125 130 113 200 131 C 280 151 320 95 410 113 C 500 131 540 85 630 111 C 720 137 780 105 860 125 C 930 141 970 155 1000 151 L 1000 500 L 0 500 Z"/>
-    <path fill="url(#grad-hill-near)" d="M 0 205 C 90 175 150 187 230 183 C 320 177 360 155 450 173 C 540 191 600 165 690 181 C 780 197 860 175 940 189 C 970 195 990 201 1000 199 L 1000 500 L 0 500 Z"/>
-  </g>
-
   <g id="ground-spring">
+    <!-- Low rolls at the two ends, a little darker than the field. The middle stays the ground line. -->
+    <path fill="#5a7442" d="M 0 240 C 24 196 62 158 104 168 C 140 176 162 154 200 172 C 236 188 262 220 286 236 L 286 260 L 0 260 Z"/>
+    <path fill="#5a7442" d="M 714 236 C 748 210 778 168 820 156 C 858 146 896 164 930 188 C 962 210 984 228 1000 220 L 1000 260 L 714 260 Z"/>
     <path fill="#6f8f52" d="M 0 227 C 120 213 200 221 320 215 C 460 207 560 223 700 215 C 840 207 920 219 1000 213 L 1000 500 L 0 500 Z"/>
     <g fill="#8fbf62" opacity="0.85">
       <ellipse cx="80" cy="243" rx="16" ry="5"/>
@@ -77,6 +67,8 @@
     </g>
   </g>
   <g id="ground-summer">
+    <path fill="#2d4e24" d="M 0 240 C 24 196 62 158 104 168 C 140 176 162 154 200 172 C 236 188 262 220 286 236 L 286 260 L 0 260 Z"/>
+    <path fill="#2d4e24" d="M 714 236 C 748 210 778 168 820 156 C 858 146 896 164 930 188 C 962 210 984 228 1000 220 L 1000 260 L 714 260 Z"/>
     <path fill="#3f6a32" d="M 0 225 C 140 209 240 221 360 213 C 500 203 600 221 740 213 C 860 205 940 217 1000 211 L 1000 500 L 0 500 Z"/>
     <g fill="#2f7a3a" opacity="0.8">
       <ellipse cx="100" cy="245" rx="28" ry="6"/>
@@ -87,6 +79,8 @@
     </g>
   </g>
   <g id="ground-autumn">
+    <path fill="#6e542c" d="M 0 240 C 24 196 62 158 104 168 C 140 176 162 154 200 172 C 236 188 262 220 286 236 L 286 260 L 0 260 Z"/>
+    <path fill="#6e542c" d="M 714 236 C 748 210 778 168 820 156 C 858 146 896 164 930 188 C 962 210 984 228 1000 220 L 1000 260 L 714 260 Z"/>
     <path fill="#8a6a3a" d="M 0 227 C 130 213 220 223 340 217 C 480 209 580 225 720 217 C 840 209 930 221 1000 215 L 1000 500 L 0 500 Z"/>
     <g fill="#c47a32" opacity="0.75">
       <ellipse cx="90" cy="247" rx="10" ry="4"/>
@@ -97,6 +91,8 @@
     </g>
   </g>
   <g id="ground-winter">
+    <path fill="#564c3c" d="M 0 240 C 24 196 62 158 104 168 C 140 176 162 154 200 172 C 236 188 262 220 286 236 L 286 260 L 0 260 Z"/>
+    <path fill="#564c3c" d="M 714 236 C 748 210 778 168 820 156 C 858 146 896 164 930 188 C 962 210 984 228 1000 220 L 1000 260 L 714 260 Z"/>
     <path fill="#6e624f" d="M 0 229 C 140 217 230 225 360 221 C 500 215 600 229 740 221 C 860 215 940 223 1000 219 L 1000 500 L 0 500 Z"/>
     <g fill="#8a7b62" opacity="0.7">
       <path d="M 40 255 q 10 -14 4 -2 M 120 251 q 8 -12 3 -1 M 300 257 q 9 -13 3 -1 M 560 253 q 10 -14 4 -2 M 780 257 q 8 -12 3 -1 M 920 251 q 9 -13 4 -2" stroke="#8a7b62" stroke-width="1.2" fill="none"/>
@@ -104,6 +100,8 @@
   </g>
 
   <g id="snow-cover">
+    <path fill="#f4f7fb" d="M 0 240 C 24 196 62 158 104 168 C 140 176 162 154 200 172 C 236 188 262 220 286 236 L 286 260 L 0 260 Z"/>
+    <path fill="#f4f7fb" d="M 714 236 C 748 210 778 168 820 156 C 858 146 896 164 930 188 C 962 210 984 228 1000 220 L 1000 260 L 714 260 Z"/>
     <path fill="#f4f7fb" d="M 0 235 C 150 223 240 233 380 227 C 520 219 620 237 760 227 C 880 219 950 231 1000 225 L 1000 500 L 0 500 Z"/>
     <path fill="#ffffff" opacity="0.9" d="M 168 138 q 18 -6 28 4 q -8 8 -22 2 Z"/>
     <path fill="#ffffff" opacity="0.9" d="M 228 88 q 14 -4 20 3 q -6 6 -16 2 Z"/>
