@@ -443,6 +443,38 @@ fn apply_override(settings: &mut Settings, over: &SettingsOverride) -> Result<()
 mod tests {
     use super::*;
 
+    struct EnvRestore {
+        saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl EnvRestore {
+        fn set(pairs: &[(&'static str, Option<&str>)]) -> Self {
+            let saved = pairs
+                .iter()
+                .map(|(key, value)| {
+                    let prev = std::env::var_os(key);
+                    match value {
+                        Some(value) => std::env::set_var(key, value),
+                        None => std::env::remove_var(key),
+                    }
+                    (*key, prev)
+                })
+                .collect();
+            Self { saved }
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (key, prev) in self.saved.drain(..) {
+                match prev {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
     #[test]
     #[test]
     fn omitted_diameter_fits_a_1080p_frame_and_a_desktop_window() {
@@ -505,12 +537,36 @@ mod tests {
 
     #[test]
     fn empty_file_is_the_default() {
-        let dir = std::env::temp_dir();
-        let path = dir.join("clockface-empty-test.toml");
-        fs::write(&path, "").unwrap();
-        let settings = load_settings(Some(&path), &SettingsOverride::default()).unwrap();
-        assert_eq!(settings, Settings::default());
-        let _ = fs::remove_file(path);
+        crate::timewarp::with_env_lock(|| {
+            let dir = std::env::temp_dir().join(format!(
+                "clockface-empty-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            ));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(dir.join("config")).unwrap();
+            fs::create_dir_all(dir.join("cache")).unwrap();
+            let restore = EnvRestore::set(&[
+                ("HOME", Some(dir.to_str().unwrap())),
+                (
+                    "XDG_CONFIG_HOME",
+                    Some(dir.join("config").to_str().unwrap()),
+                ),
+                ("XDG_CACHE_HOME", Some(dir.join("cache").to_str().unwrap())),
+                ("TIMEWARP_CACHE", None),
+                ("APPDATA", Some(dir.join("config").to_str().unwrap())),
+            ]);
+            let path = dir.join("empty.toml");
+            fs::write(&path, "").unwrap();
+            let settings = load_settings(Some(&path), &SettingsOverride::default()).unwrap();
+            let expected = Settings::default();
+            drop(restore);
+            assert_eq!(settings, expected);
+            let _ = fs::remove_dir_all(&dir);
+        });
     }
 
     #[test]

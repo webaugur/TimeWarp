@@ -52,18 +52,23 @@ const TUBE_IN: f32 = 1.042;
 const TUBE_OUT: f32 = 1.074;
 const FLUID_IN: f32 = 1.050;
 const FLUID_OUT: f32 = 1.066;
-/// Numerals sit outside the tube and inside the outer chrome.
-const LABEL_R: f32 = 1.186;
+/// Numerals sit just outside the tube, still inside the outer chrome.
+const LABEL_R: f32 = 1.150;
+/// Glyphs must stay inside the dial's left and right edges, and above the boards.
+const DIAL_LIMIT: f32 = 0.988;
+const BOARD_LIMIT: f32 = 1.020;
 /// 9 o'clock, sweeping through 6 to 3 o'clock.
 const TROUGH_A0: f32 = 270.0;
 const TROUGH_A1: f32 = 90.0;
 
 /// Left wedge, bulb toward 6, values increasing toward 9.
-const LEFT_START: f32 = 212.0;
-const LEFT_END: f32 = 240.0;
+/// The span stops short of 9 and of the boards so the end numerals, the ticks,
+/// and the bulb stay inside the dial-width clip.
+const LEFT_START: f32 = 216.0;
+const LEFT_END: f32 = 234.0;
 /// Right wedge, mirrored: bulb toward 6, values increasing toward 3.
-const RIGHT_START: f32 = 148.0;
-const RIGHT_END: f32 = 120.0;
+const RIGHT_START: f32 = 144.0;
+const RIGHT_END: f32 = 126.0;
 
 struct ArcSpec {
     start: f32,
@@ -415,18 +420,33 @@ fn paint_arc(
         );
         if major {
             let label = format_tick(value, spec.decimals);
-            let pos = polar(center, radius, angle_of(spec, lo, hi, value), LABEL_R);
+            let angle = angle_of(spec, lo, hi, value);
+            let size = 0.040 * radius;
+            let (half_x, half_y) = text_half(painter, &label, size);
+            let pos = polar(
+                center,
+                radius,
+                angle,
+                label_face_r(angle, half_x / radius, half_y / radius),
+            );
             painter.text(
                 pos,
                 Align2::CENTER_CENTER,
                 label,
-                FontId::new(0.040 * radius, FontFamily::Proportional),
+                FontId::new(size, FontFamily::Proportional),
                 Color32::from_rgb(0x2a, 0x18, 0x08),
             );
         }
     }
     let mid = (spec.start + spec.end) * 0.5;
-    let unit_at = polar(center, radius, mid, LABEL_R);
+    let unit_size = 0.030 * radius;
+    let (unit_x, unit_y) = text_half(painter, spec.unit, unit_size);
+    let unit_at = polar(
+        center,
+        radius,
+        mid,
+        label_face_r(mid, unit_x / radius, unit_y / radius),
+    );
     painter.text(
         unit_at,
         Align2::CENTER_CENTER,
@@ -548,7 +568,8 @@ fn mark_icon(
 ) {
     let s = (0.028 * 1.4 * radius).clamp(9.5, 16.0);
     let tip_r = TUBE_OUT + 0.016;
-    let origin = polar(center, radius, angle, tip_r + (3.6 + s * 0.55) / radius);
+    // Just past the dot, a little closer to the tube than the numerals.
+    let origin = polar(center, radius, angle, tip_r + (1.2 + s * 0.42) / radius);
     match kind {
         Mark::High => triangle(painter, origin, s, color, true),
         Mark::Dew => droplet(painter, origin, s, color),
@@ -824,8 +845,42 @@ fn angle_of(spec: &ArcSpec, lo: f64, hi: f64, value: f64) -> f32 {
     value_to_angle(value, lo, hi, spec.start as f64, spec.end as f64) as f32
 }
 
+fn text_half(painter: &Painter, text: &str, size: f32) -> (f32, f32) {
+    let galley = painter.layout(
+        text.to_owned(),
+        FontId::new(size, FontFamily::Proportional),
+        Color32::PLACEHOLDER,
+        f32::INFINITY,
+    );
+    (galley.size().x * 0.5 + 1.5, galley.size().y * 0.5 + 1.0)
+}
+
+/// Preferred numeral radius, pulled in when the glyph would cross the dial edge
+/// or the top of the info boards.
+fn label_face_r(angle: f32, half_x: f32, half_y: f32) -> f32 {
+    let rad = angle.to_radians();
+    let outward = rad.sin().abs();
+    let down = (-rad.cos()).max(0.0);
+    let mut face_r = LABEL_R;
+    if outward > 1e-3 {
+        face_r = face_r.min((DIAL_LIMIT - half_x) / outward);
+    }
+    if down > 1e-3 {
+        face_r = face_r.min((BOARD_LIMIT - half_y) / down);
+    }
+    face_r.max(TUBE_OUT + 0.028)
+}
+
+fn glyph_inside(angle: f32, face_r: f32, half_x: f32, half_y: f32) -> bool {
+    let rad = angle.to_radians();
+    let x = rad.sin().abs() * face_r + half_x;
+    let y = (-rad.cos()).max(0.0) * face_r + half_y;
+    x <= DIAL_LIMIT + 1e-4 && y <= BOARD_LIMIT + 1e-4
+}
+
 fn wedge_rect(center: Pos2, radius: f32, left: bool) -> Rect {
-    let bottom = center.y + radius * 1.28;
+    // Stop at the board line so a numeral cannot draw underneath the lamps.
+    let bottom = center.y + radius * BOARD_LIMIT;
     if left {
         Rect::from_min_max(
             Pos2::new(center.x - radius, center.y),
@@ -1113,6 +1168,45 @@ mod tests {
         }
         let wide = barometer_scale(&[29.0, 30.8]).unwrap();
         assert!(wide.0 <= 29.0 && 30.8 <= wide.1);
+    }
+
+    #[test]
+    fn scale_ends_stay_inside_the_dial_and_above_the_boards() {
+        // "30.5" is the wide end numeral. Half-extents are in face radii.
+        let wide = (0.062, 0.026);
+        let narrow = (0.030, 0.026);
+        for (angle, half) in [
+            (LEFT_END, wide),
+            (RIGHT_END, wide),
+            (LEFT_START, narrow),
+            (RIGHT_START, wide),
+        ] {
+            let face_r = label_face_r(angle, half.0, half.1);
+            assert!(
+                face_r >= TUBE_OUT + 0.028,
+                "label at {angle} collapsed onto the tube ({face_r})"
+            );
+            assert!(
+                glyph_inside(angle, face_r, half.0, half.1),
+                "label at {angle} r={face_r} leaves the dial or the boards"
+            );
+        }
+        let bulb_r = (TUBE_IN + TUBE_OUT) * 0.5 - 0.008;
+        let bulb_half = (TUBE_OUT - TUBE_IN) * 0.5 * 2.5;
+        for (start, end) in [(LEFT_START, LEFT_END), (RIGHT_START, RIGHT_END)] {
+            let sign = if end >= start { 1.0 } else { -1.0 };
+            let angle = start - sign * 2.0;
+            assert!(
+                glyph_inside(angle, bulb_r, bulb_half, bulb_half),
+                "bulb at {angle} is clipped"
+            );
+            let cap = end + sign * 2.5;
+            let cap_half = (TUBE_OUT - TUBE_IN) * 0.5;
+            assert!(
+                glyph_inside(cap, (TUBE_IN + TUBE_OUT) * 0.5, cap_half, cap_half),
+                "tube cap at {cap} is clipped"
+            );
+        }
     }
 
     #[test]
