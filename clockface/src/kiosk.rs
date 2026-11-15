@@ -12,12 +12,10 @@
 
 use std::time::Duration;
 
-use chrono::{DateTime, Datelike, Local, TimeZone, Timelike, Utc};
+use chrono::{DateTime, Datelike, Local, Timelike};
 
 use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Vec2};
 
-use crate::brass::shade_bezel;
-use crate::draw::stroke_arc;
 use crate::events::{self, CalendarEvent};
 use crate::layout::{KioskLayout, APERTURE_R};
 use crate::matrix;
@@ -92,9 +90,8 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
     );
     paint_weather_caption(painter, center, radius, &model.weather);
 
-    // Same brass mesh the window and the screenshot both fill.
+    // Same dial mesh the window and the screenshot both fill.
     roman::paint_brass(painter, center, radius, aperture);
-    paint_aperture_rims(painter, center, radius);
     roman::paint_markings_and_hands(
         painter,
         center,
@@ -146,20 +143,6 @@ fn paint_shadowed(painter: &Painter, pos: Pos2, text: &str, size: f32, color: Co
         );
     }
     painter.text(pos, Align2::CENTER_CENTER, text, font, color);
-}
-
-fn paint_aperture_rims(painter: &Painter, center: Pos2, radius: f32) {
-    let brass = shade_bezel(Vec2::new(-0.4, -0.6), 0.35);
-    let width = (0.012 * radius).max(1.5);
-    stroke_arc(
-        painter,
-        center,
-        APERTURE_R * radius,
-        0.0,
-        360.0,
-        width,
-        brass,
-    );
 }
 
 fn paint_boxes(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
@@ -372,7 +355,7 @@ fn serif() -> FontFamily {
 
 /// How long to wait before painting again.
 ///
-/// The seconds digit, the Swatch beat, and the hands change on the whole second.
+/// The seconds digit and the hands change on the whole second.
 /// During the second hand's bounce the face still paints often enough to show it.
 /// After that it waits for the next second.
 pub fn repaint_delay(now: DateTime<Local>) -> Duration {
@@ -393,26 +376,13 @@ fn board_hms(now: &DateTime<Local>) -> String {
     format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
 }
 
-/// Left-board clock: local `HH:MM:SS`, then Swatch beats, for example `10:08:37 @464`.
+/// Left-board clock: local `HH:MM:SS` and the Cycles color, for example `10:08:37 RED`.
 fn board_clock_line(now: &DateTime<Local>) -> String {
     format!(
-        "\u{1F55B} {} @{:03} {}",
+        "\u{1F55B} {} {}",
         board_hms(now),
-        swatch_beats(now),
         crate::cycles::period_color_name(*now)
     )
-}
-
-/// Swatch Internet Time, `@000` through `@999`.
-///
-/// Biel Mean Time is UTC+1 and does not observe daylight saving.
-/// `floor(((utc seconds since midnight + 3600) mod 86400) / 86.4)`.
-fn swatch_beats(now: &DateTime<impl TimeZone>) -> u32 {
-    let utc = now.with_timezone(&Utc);
-    let secs = u64::from(utc.time().num_seconds_from_midnight());
-    let bmt = (secs + 3600) % 86_400;
-    // 86.4 = 864/10, so floor division stays exact in integers.
-    ((bmt * 10) / 864) as u32
 }
 
 /// Local civil date in the board's short style, for example `THU JAN 15 2026`.
@@ -459,8 +429,7 @@ mod tests {
         let now = screenshot_time();
         assert_eq!(board_hms(&now), "10:08:37");
         assert_eq!(board_date(now), "THU JAN 15 2026");
-        assert!(board_clock_line(&now).starts_with("\u{1F55B} 10:08:37 @"));
-        assert!(board_clock_line(&now).ends_with(" RED"));
+        assert_eq!(board_clock_line(&now), "\u{1F55B} 10:08:37 RED");
         let sunday = match Local.with_ymd_and_hms(2026, 11, 15, 9, 5, 0) {
             chrono::LocalResult::Single(time) => time,
             chrono::LocalResult::Ambiguous(earliest, _) => earliest,
@@ -471,21 +440,7 @@ mod tests {
     }
 
     #[test]
-    fn swatch_beats_follow_biel_mean_time() {
-        // 00:00 BMT is 23:00 UTC.
-        let midnight = Utc.with_ymd_and_hms(2026, 1, 14, 23, 0, 0).unwrap();
-        assert_eq!(swatch_beats(&midnight), 0);
-        // 12:00 BMT is 11:00 UTC, exactly @500.
-        let noon = Utc.with_ymd_and_hms(2026, 1, 15, 11, 0, 0).unwrap();
-        assert_eq!(swatch_beats(&noon), 500);
-        // The same civil clock in a UTC−5 zone is five hours later in Biel.
-        let west = chrono::FixedOffset::west_opt(5 * 3600).unwrap();
-        let local = west.with_ymd_and_hms(2026, 1, 15, 10, 8, 37).unwrap();
-        let as_utc = Utc.with_ymd_and_hms(2026, 1, 15, 15, 8, 37).unwrap();
-        let same_digits_in_utc = Utc.with_ymd_and_hms(2026, 1, 15, 10, 8, 37).unwrap();
-        assert_eq!(swatch_beats(&local), swatch_beats(&as_utc));
-        assert_eq!(swatch_beats(&local), 672);
-        assert_eq!(swatch_beats(&same_digits_in_utc), 464);
+    fn repaint_waits_out_the_rest_of_the_second() {
         let at_tick = screenshot_time();
         assert_eq!(repaint_delay(at_tick), Duration::from_millis(16));
         let after_bounce = at_tick + chrono::Duration::milliseconds(400);
@@ -497,13 +452,11 @@ mod tests {
     fn the_clock_line_fits_on_one_row_of_the_board() {
         // Longest Heindel name. The 643-pixel face holds it on one line.
         assert!(clock_line_fits(
-            "\u{1F55B} 10:08:37 @347 ORANGE",
+            "\u{1F55B} 10:08:37 ORANGE",
             Vec2::new(1920.0, 1080.0)
         ));
-        // The screenshot's RED also fits the smaller window. A six-letter name
-        // there wraps, two cells in, rather than being abbreviated.
         assert!(clock_line_fits(
-            "\u{1F55B} 10:08:37 @464 RED",
+            "\u{1F55B} 10:08:37 RED",
             Vec2::new(1200.0, 800.0)
         ));
     }

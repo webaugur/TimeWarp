@@ -1,4 +1,4 @@
-use egui::{Color32, Mesh, Painter, Pos2, Shape, Stroke, Vec2};
+use egui::{Color32, Mesh, Painter, Pos2, Shape, Vec2};
 
 use crate::roman::direction;
 
@@ -97,26 +97,4 @@ pub fn paint_pie(
         mesh.add_triangle(c, 1 + i, 2 + i);
     }
     add_mesh(painter, mesh);
-}
-
-pub fn stroke_arc(
-    painter: &Painter,
-    center: Pos2,
-    radius: f32,
-    start_deg: f32,
-    end_deg: f32,
-    width: f32,
-    color: Color32,
-) {
-    let mut span = (end_deg - start_deg).rem_euclid(360.0);
-    if span < 0.05 {
-        span = 360.0;
-    }
-    let steps = (span / 4.0).ceil().max(8.0) as u32;
-    let mut points = Vec::with_capacity(steps as usize + 1);
-    for i in 0..=steps {
-        let deg = start_deg + span * (i as f32 / steps as f32);
-        points.push(center + direction(deg) * radius);
-    }
-    painter.add(Shape::line(points, Stroke::new(width, color)));
 }

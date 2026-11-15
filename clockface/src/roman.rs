@@ -3,7 +3,7 @@
 //! (`diameter / 2`), except the outline, which is a fraction of the diameter.
 
 use chrono::{DateTime, Local, TimeZone, Timelike};
-use egui::{Color32, FontFamily, FontId, Mesh, Painter, Pos2, Shape, Stroke, Vec2};
+use egui::{Color32, FontFamily, Mesh, Painter, Pos2, Shape, Stroke, Vec2};
 
 /// Teardrop tick. Distances and `width` are fractions of the radius.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -252,14 +252,13 @@ pub(crate) fn direction(degrees_clockwise_from_12: f32) -> Vec2 {
     Vec2::new(rad.sin(), -rad.cos())
 }
 
-/// Brass dish and bezel. `inner` is a hole radius in pixels (0 for a solid face).
+/// Dial ring. `inner` is a hole radius in pixels (0 for a solid face).
 ///
-/// The mesh is fine on purpose. Both the window and `--screenshot` fill these
-/// triangles, so a coarse fan would smear the specular into a different-looking
-/// gradient on each path.
+/// Cream at the center, amber at the rim, then a smooth darken to black over
+/// the outer 7% of the radius. The mesh stays fine so the rim does not band.
 pub(crate) fn paint_brass(painter: &Painter, center: Pos2, radius: f32, inner: f32) {
     let angular = 192u32;
-    let radial = 40u32;
+    let radial = 48u32;
     let cols = radial + 1;
     let mut mesh = Mesh::default();
     for i in 0..=angular {
@@ -269,7 +268,7 @@ pub(crate) fn paint_brass(painter: &Painter, center: Pos2, radius: f32, inner: f
             let u = j as f32 / radial as f32;
             let dist = inner + (radius - inner) * u;
             let p = center + dir * dist;
-            mesh.colored_vertex(p, crate::brass::shade_dial(center, p, radius, 1.0));
+            mesh.colored_vertex(p, dial_color(dist, radius));
         }
     }
     for i in 0..angular {
@@ -280,6 +279,26 @@ pub(crate) fn paint_brass(painter: &Painter, center: Pos2, radius: f32, inner: f
         }
     }
     painter.add(Shape::mesh(mesh));
+}
+
+/// `#ffffb2` at the center, `#ffcc7f` at the dial edge, black in the outer 7%.
+fn dial_color(dist: f32, radius: f32) -> Color32 {
+    let t = if radius > 0.0 {
+        (dist / radius).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let red = 255.0;
+    let green = 255.0 + (204.0 - 255.0) * t;
+    let blue = 178.0 + (127.0 - 178.0) * t;
+    let fade = ((t - 0.93) / 0.07).clamp(0.0, 1.0);
+    let fade = fade * fade * (3.0 - 2.0 * fade);
+    let keep = 1.0 - fade;
+    Color32::from_rgb(
+        (red * keep).round() as u8,
+        (green * keep).round() as u8,
+        (blue * keep).round() as u8,
+    )
 }
 
 fn paint_inner_ring(painter: &Painter, center: Pos2, r: f32, style: &RomanClockStyle) {
@@ -335,7 +354,8 @@ fn paint_teardrop(
     let right = hub - perp * radius;
     let tip = center + dir * (d - tick.inward * r);
     if let Some(gain) = metal {
-        paint_gold_pin(painter, hub, tip, perp, radius, gain);
+        paint_gold_pin(painter, hub, tip, perp, radius + 1.4, gain, true);
+        paint_gold_pin(painter, hub, tip, perp, radius, gain, false);
     } else {
         painter.circle_filled(hub, radius.max(0.0), tick.color);
         if tick.inward > 0.0 && width > 0.0 {
@@ -352,7 +372,15 @@ fn paint_teardrop(
 ///
 /// The point sits at `tip` and the dome at `hub`. Length comes only from those
 /// two points, so the window and the screenshot cannot grow a different spike.
-fn paint_gold_pin(painter: &Painter, hub: Pos2, tip: Pos2, perp: Vec2, radius: f32, gain: f32) {
+fn paint_gold_pin(
+    painter: &Painter,
+    hub: Pos2,
+    tip: Pos2,
+    perp: Vec2,
+    radius: f32,
+    gain: f32,
+    outline: bool,
+) {
     let light_bias = perp.dot(crate::brass::light_vec2());
     let stations = 12u32;
     let across = 4u32;
@@ -380,10 +408,12 @@ fn paint_gold_pin(painter: &Painter, hub: Pos2, tip: Pos2, perp: Vec2, radius: f
         for j in 0..=across {
             let cross = -1.0 + 2.0 * (j as f32 / across as f32);
             let p = axis + perp * (half * cross);
-            mesh.colored_vertex(
-                p,
-                crate::brass::shade_gold_pin(cross, along, light_bias, gain),
-            );
+            let color = if outline {
+                PIN_EDGE
+            } else {
+                crate::brass::shade_gold_pin(cross, along, light_bias, gain)
+            };
+            mesh.colored_vertex(p, color);
         }
     }
     for i in 0..stations {
@@ -396,23 +426,8 @@ fn paint_gold_pin(painter: &Painter, hub: Pos2, tip: Pos2, perp: Vec2, radius: f
     painter.add(Shape::mesh(mesh));
 }
 
-fn paint_numerals(painter: &Painter, center: Pos2, r: f32, style: &RomanClockStyle) {
-    const LABELS: [&str; 4] = ["XII", "III", "VI", "IX"];
-    let px = style.numeral_size * r;
-    if px <= 0.0 {
-        return;
-    }
-    let font = FontId::new(px, style.numeral_font.clone());
-    for (index, label) in LABELS.iter().enumerate() {
-        let anchor = center + direction(index as f32 * 90.0) * (style.numeral_radius * r);
-        painter.text(
-            anchor,
-            egui::Align2::CENTER_CENTER,
-            *label,
-            font.clone(),
-            style.numeral_color,
-        );
-    }
+fn paint_numerals(painter: &Painter, center: Pos2, r: f32, _style: &RomanClockStyle) {
+    crate::ornament::paint_numerals(painter, center, r);
 }
 
 fn paint_hand(
@@ -429,11 +444,17 @@ fn paint_hand(
     let width = hand.width * r;
     let cap = hand.cap_radius * r;
     let blur = shadow.blur * r;
-    paint_shadow(painter, tail, tip, center, width, cap, blur, shadow.color);
     if hand.color == Color32::BLACK {
-        paint_gold_hand(painter, tail, tip, width);
-    } else if width > 0.0 {
-        painter.line_segment([tail, tip], Stroke::new(width, hand.color));
+        if hand.length < 0.65 {
+            crate::ornament::paint_hour_hand(painter, center, r, degrees);
+        } else {
+            crate::ornament::paint_minute_hand(painter, center, r, degrees);
+        }
+    } else {
+        paint_shadow(painter, tail, tip, center, width, cap, blur, shadow.color);
+        if width > 0.0 {
+            painter.line_segment([tail, tip], Stroke::new(width, hand.color));
+        }
     }
     paint_hub(painter, center, r, hand);
 }
@@ -452,76 +473,8 @@ fn paint_hub(painter: &Painter, center: Pos2, r: f32, hand: &HandStyle) {
 }
 
 const GOLD_EDGE: Color32 = Color32::from_rgb(0x3a, 0x24, 0x08);
-
-fn paint_gold_hand(painter: &Painter, tail: Pos2, tip: Pos2, width: f32) {
-    let delta = tip - tail;
-    let len = delta.length();
-    if len > 1.0 && width > 0.0 {
-        let dir = delta / len;
-        let perp = Vec2::new(-dir.y, dir.x);
-        let light_bias = perp.dot(crate::brass::light_vec2());
-        let outline = 1.15;
-        paint_capsule(painter, tail, tip, dir, perp, width * 0.5 + outline, |_| {
-            GOLD_EDGE
-        });
-        paint_capsule(painter, tail, tip, dir, perp, width * 0.5, |cross| {
-            crate::brass::shade_gold_pin(cross, 0.72, light_bias, 1.0)
-        });
-    }
-}
-
-fn paint_capsule(
-    painter: &Painter,
-    tail: Pos2,
-    tip: Pos2,
-    dir: Vec2,
-    perp: Vec2,
-    radius: f32,
-    color_at: impl Fn(f32) -> Color32,
-) {
-    let steps = 8u32;
-    let mut mesh = Mesh::default();
-    for i in 0..=steps {
-        let cross = -1.0 + 2.0 * (i as f32 / steps as f32);
-        let off = perp * (radius * cross);
-        let color = color_at(cross);
-        mesh.colored_vertex(tail + off, color);
-        mesh.colored_vertex(tip + off, color);
-    }
-    for i in 0..steps {
-        let a = i * 2;
-        mesh.add_triangle(a, a + 1, a + 2);
-        mesh.add_triangle(a + 1, a + 3, a + 2);
-    }
-    painter.add(Shape::mesh(mesh));
-    paint_round_end(painter, tail, -dir, perp, radius, &color_at);
-    paint_round_end(painter, tip, dir, perp, radius, &color_at);
-}
-
-fn paint_round_end(
-    painter: &Painter,
-    origin: Pos2,
-    outward: Vec2,
-    perp: Vec2,
-    radius: f32,
-    color_at: &impl Fn(f32) -> Color32,
-) {
-    let segs = 8u32;
-    let mut mesh = Mesh::default();
-    mesh.colored_vertex(origin, color_at(0.0));
-    for i in 0..=segs {
-        let cross = -1.0 + 2.0 * (i as f32 / segs as f32);
-        let along = (1.0 - cross * cross).max(0.0).sqrt();
-        mesh.colored_vertex(
-            origin + perp * (radius * cross) + outward * (radius * along),
-            color_at(cross),
-        );
-    }
-    for i in 0..segs {
-        mesh.add_triangle(0, i + 1, i + 2);
-    }
-    painter.add(Shape::mesh(mesh));
-}
+/// Darker gold so the pins still read on the cream dial.
+const PIN_EDGE: Color32 = Color32::from_rgb(0x5c, 0x3a, 0x0c);
 
 fn paint_gold_hub(painter: &Painter, center: Pos2, radius: f32) {
     let light = crate::brass::light_vec2();

@@ -457,34 +457,22 @@ mod tests {
             "background should be black, got {corner:?}"
         );
 
-        // Brass annulus, clear of ticks (hour marks end near 0.75 R) and the bezel (0.95 R).
-        let lit = at_pos(&rgba, width, height, center + direction(315.0) * (0.80 * r));
-        let shade = at_pos(&rgba, width, height, center + direction(135.0) * (0.80 * r));
+        // Cream-to-amber dial, clear of the aperture (0.64 R) and the numeral band.
+        let dial_a = at_pos(&rgba, width, height, center + direction(315.0) * (0.67 * r));
+        let dial_b = at_pos(&rgba, width, height, center + direction(135.0) * (0.67 * r));
         let lum = |px: [u8; 4]| px[0] as i32 + px[1] as i32 + px[2] as i32;
         assert!(
-            lum(lit) > lum(shade) + 12,
-            "upper-left brass {lit:?} should be brighter than lower-right {shade:?}"
+            (lum(dial_a) - lum(dial_b)).abs() < 12,
+            "the dial is radial, not a lit brass dish: {dial_a:?} vs {dial_b:?}"
         );
         assert!(
-            lit[0] as i32 > lit[2] as i32 + 20,
-            "brass should be warm, got {lit:?}"
+            dial_a[0] > 230 && dial_a[1] > 190 && dial_a[0] as i32 > dial_a[2] as i32 + 40,
+            "dial should be warm cream, got {dial_a:?}"
         );
-
-        let bezel_lit = at_pos(
-            &rgba,
-            width,
-            height,
-            center + direction(315.0) * (0.975 * r),
-        );
-        let bezel_dark = at_pos(
-            &rgba,
-            width,
-            height,
-            center + direction(135.0) * (0.975 * r),
-        );
+        let rim = at_pos(&rgba, width, height, center + direction(20.0) * (0.99 * r));
         assert!(
-            lum(bezel_lit) > lum(bezel_dark) + 8,
-            "bezel highlight {bezel_lit:?} vs shade {bezel_dark:?}"
+            lum(rim) < 40,
+            "the outer rim should fade to black, got {rim:?}"
         );
 
         // Lower half is the overcast January sky, below the thin black fade.
