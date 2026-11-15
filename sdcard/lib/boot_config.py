@@ -74,12 +74,25 @@ def check_kiosk(kiosk: str) -> None:
         raise ValueError(f"kiosk must be kms or labwc (got {kiosk!r})")
 
 
+def kernel_rotate(rotation: int) -> int:
+    """DRM/Wayland degrees for a clockwise `rotation`.
+
+    CLOCK_ROTATION is how far the picture turns clockwise on the panel. The
+    kernel's `video=...,rotate=` value (DRM_MODE_ROTATE_*) and wlr-randr's
+    `--transform` (wl_output.transform) both count counter-clockwise, so 90
+    clockwise is 270 there. Writing rotate=90 showed the clock upside down
+    on the portrait Dell.
+    """
+    check_rotation(rotation)
+    return (360 - rotation) % 360
+
+
 def video_token(rotation: int, kiosk: str) -> str:
     check_rotation(rotation)
     check_kiosk(kiosk)
     if kiosk == "labwc":
         return f"video={HDMI_CONNECTOR}:{PANEL_MODE}"
-    return f"video={HDMI_CONNECTOR}:{PANEL_MODE},rotate={rotation}"
+    return f"video={HDMI_CONNECTOR}:{PANEL_MODE},rotate={kernel_rotate(rotation)}"
 
 
 def merge_cmdline(
@@ -456,6 +469,9 @@ def main(argv: list[str]) -> int:
     cmd.add_argument("--wifi-country", default="")
     cmd.add_argument("--input", required=True, help="existing cmdline.txt")
 
+    krot = sub.add_parser("kernel-rotate")
+    krot.add_argument("--rotation", type=int, required=True)
+
     cfg = sub.add_parser("config-txt")
     cfg.add_argument("--input", required=True)
 
@@ -520,6 +536,8 @@ def main(argv: list[str]) -> int:
                 wifi_country=args.wifi_country,
             )
         )
+    elif args.cmd == "kernel-rotate":
+        sys.stdout.write(f"{kernel_rotate(args.rotation)}\n")
     elif args.cmd == "config-txt":
         existing = Path(args.input).read_text(encoding="utf-8")
         sys.stdout.write(merge_config_txt(existing))

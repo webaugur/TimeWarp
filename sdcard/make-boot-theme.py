@@ -9,7 +9,8 @@ script fetch ``Themes/boot/overlay/wizard.png`` from the public GitHub repo.
 Frames are composed for the framebuffer the splash will actually see:
 
 * ``--kiosk kms`` (default): the kernel ``video=...,rotate=`` setting has
-  already turned the console, so frames are upright. Rotation 90 or 270 is a
+  already turned the console (``rotate=270`` for a clockwise ``--rotation``
+  of 90; the kernel counts counter-clockwise), so frames are upright. Rotation 90 or 270 is a
   1024x1280 portrait canvas. Rotation 0 or 180 is 1280x1024.
 * ``--kiosk labwc``: Plymouth runs before ``wlr-randr``, on the panel's native
   1280x1024 scanout. The upright scene is pre-rotated clockwise by

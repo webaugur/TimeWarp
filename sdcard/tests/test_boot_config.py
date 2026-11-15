@@ -26,7 +26,28 @@ class GeometryTest(unittest.TestCase):
         self.assertEqual(viewer_size(90), (1024, 1280))
         self.assertEqual(output_size(90, "kms"), (1024, 1280))
         self.assertEqual(pre_rotate_cw(90, "kms"), 0)
-        self.assertEqual(video_token(90, "kms"), "video=HDMI-A-1:1280x1024@60,rotate=90")
+        self.assertEqual(video_token(90, "kms"), "video=HDMI-A-1:1280x1024@60,rotate=270")
+
+    def test_kernel_rotate_is_counter_clockwise(self) -> None:
+        from boot_config import kernel_rotate
+
+        self.assertEqual(
+            [kernel_rotate(r) for r in (0, 90, 180, 270)], [0, 270, 180, 90]
+        )
+        self.assertEqual(video_token(270, "kms"), "video=HDMI-A-1:1280x1024@60,rotate=90")
+
+    def test_labwc_transform_matches_the_kernel(self) -> None:
+        import re
+
+        from boot_config import kernel_rotate
+
+        script = (Path(__file__).resolve().parents[1] / "files" / "labwc-autostart.sh").read_text(
+            encoding="utf-8"
+        )
+        for rotation in (90, 180, 270):
+            match = re.search(rf"^\s*{rotation}\) transform=(\d+) ;;$", script, re.MULTILINE)
+            self.assertIsNotNone(match, rotation)
+            self.assertEqual(int(match.group(1)), kernel_rotate(rotation))
 
     def test_labwc_prerotates_onto_the_panel(self) -> None:
         self.assertEqual(output_size(90, "labwc"), (1280, 1024))
@@ -60,7 +81,7 @@ class CmdlineTest(unittest.TestCase):
         self.assertIn("consoleblank=0", merged)
         self.assertIn("cfg80211.ieee80211_regdom=US", merged)
         self.assertIn("ds=nocloud;i=clock-sdcard-1", merged)
-        self.assertIn("video=HDMI-A-1:1280x1024@60,rotate=90", merged)
+        self.assertIn("video=HDMI-A-1:1280x1024@60,rotate=270", merged)
         self.assertTrue(merged[0].startswith("console="))
 
     def test_rerun_replaces_video_and_instance(self) -> None:
@@ -201,6 +222,16 @@ class TomlTest(unittest.TestCase):
             render_clockface_toml(example, audio=False, timewarp_bin=None)
         )
         self.assertNotIn("leds", plain)
+
+
+class ProvisionTest(unittest.TestCase):
+    def test_timewarp_is_built_from_a_user_owned_copy(self) -> None:
+        script = (Path(__file__).resolve().parents[1] / "provision.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("pip\" install /opt/clock/timewarp", script)
+        self.assertIn('chown -R "$CLOCK_USER:$CLOCK_USER" "$tw_src"', script)
+        self.assertIn('install "$tw_src"', script)
 
 
 if __name__ == "__main__":

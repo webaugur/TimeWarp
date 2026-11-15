@@ -145,7 +145,13 @@ if [[ ! -x "${venv}/bin/pip" ]]; then
   sudo -u "$CLOCK_USER" python3 -m venv "$venv"
 fi
 retry sudo -u "$CLOCK_USER" "${venv}/bin/pip" install --upgrade pip
-retry sudo -u "$CLOCK_USER" "${venv}/bin/pip" install /opt/clock/timewarp
+# pip builds in the source tree (build/, *.egg-info). /opt/clock/timewarp is
+# root-owned, so install from a copy the kiosk user owns.
+tw_src="$(mktemp -d /var/tmp/clock-timewarp.XXXXXX)"
+cp -a /opt/clock/timewarp/. "$tw_src/"
+chown -R "$CLOCK_USER:$CLOCK_USER" "$tw_src"
+retry sudo -u "$CLOCK_USER" "${venv}/bin/pip" install "$tw_src"
+rm -rf "$tw_src"
 ln -sfn "${venv}/bin/timewarp" "${home}/.local/bin/timewarp"
 ln -sfn "${venv}/bin/timewarp" /usr/local/bin/timewarp
 chown -h "$CLOCK_USER:$CLOCK_USER" "${home}/.local/bin/timewarp" || true
