@@ -16,23 +16,6 @@ fn view_dir() -> [f32; 3] {
     [0.0, 0.0, 1.0]
 }
 
-pub fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
-    let t = t.clamp(0.0, 1.0);
-    let a = a.to_array();
-    let b = b.to_array();
-    Color32::from_rgb(
-        lerp_u8(a[0], b[0], t),
-        lerp_u8(a[1], b[1], t),
-        lerp_u8(a[2], b[2], t),
-    )
-}
-
-fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
-    (a as f32 + (b as f32 - a as f32) * t)
-        .round()
-        .clamp(0.0, 255.0) as u8
-}
-
 fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }

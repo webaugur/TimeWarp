@@ -16,17 +16,19 @@ use chrono::{DateTime, Datelike, Local, TimeZone, Timelike, Utc};
 
 use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Stroke, Vec2};
 
-use crate::brass::{mix, shade_bezel};
-use crate::draw::{paint_pie, stroke_arc};
+use crate::brass::shade_bezel;
+use crate::draw::stroke_arc;
 use crate::events::{self, CalendarEvent};
 use crate::layout::{KioskLayout, APERTURE_R, SKY_WEDGE, YEAR_WEDGE};
 use crate::matrix;
 use crate::mural;
+use crate::quarters;
 use crate::roman::{self, direction};
 use crate::scene;
 use crate::settings::Place;
 use crate::sky::{self, season_name};
 use crate::status::StatusLine;
+use crate::sun_image::SunImage;
 use crate::weather::{self, WeatherReport};
 
 #[derive(Clone, Debug)]
@@ -36,6 +38,8 @@ pub struct KioskModel {
     pub weather: WeatherReport,
     pub events: Vec<CalendarEvent>,
     pub status: StatusLine,
+    /// Latest GOES SUVI frame, when one has been fetched. None draws a plain sun.
+    pub sun: Option<std::sync::Arc<SunImage>>,
 }
 
 impl KioskModel {
@@ -49,6 +53,7 @@ impl KioskModel {
             weather: weather::fixture_january(),
             events: events::examples(),
             status,
+            sun: None,
         }
     }
 }
@@ -70,7 +75,7 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
     paint_wedge_rim(painter, center, radius, SKY_WEDGE);
 
     let aperture = APERTURE_R * radius;
-    // Upper half, horizon on the 9–3 line. The SVG theme fills that semicircle.
+    // Lower half: the landscape, sky on the 9–3 line and ground toward 6.
     scene::paint_horizon(
         painter,
         painter.ctx(),
@@ -79,15 +84,16 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
         model.now,
         &model.weather,
     );
-    paint_aperture(painter, center, aperture, 180.0, 270.0, |p| {
-        date_disc_color(center, aperture, p)
-    });
-    paint_aperture(painter, center, aperture, 90.0, 180.0, |p| {
-        date_disc_color(center, aperture, p)
-    });
-
-    paint_date_words(painter, center, radius, model.now);
-    paint_condition_words(painter, center, radius, &model.weather, model.now);
+    // Upper quarters: sun on the left (9 to 12), moon on the right (12 to 3).
+    quarters::paint(
+        painter,
+        painter.ctx(),
+        center,
+        aperture,
+        sky::moon_phase(model.now),
+        model.sun.as_deref(),
+    );
+    paint_weather_caption(painter, center, radius, &model.weather);
 
     // Same brass mesh the window and the screenshot both fill.
     roman::paint_brass(painter, center, radius, aperture);
@@ -116,97 +122,44 @@ fn paint_wedge_rim(painter: &Painter, center: Pos2, radius: f32, wedge: (f32, f3
     painter.line_segment([corner, six], Stroke::new(width, brass));
 }
 
-fn paint_aperture(
-    painter: &Painter,
-    center: Pos2,
-    radius: f32,
-    start: f32,
-    end: f32,
-    color_at: impl FnMut(Pos2) -> Color32,
-) {
-    paint_pie(painter, center, radius, start, end, 36, color_at);
-}
-
-fn date_disc_color(center: Pos2, radius: f32, point: Pos2) -> Color32 {
-    let rel = (point - center) / radius.max(1.0);
-    let dist = rel.length();
-    mix(
-        Color32::from_rgb(0xf4, 0xe6, 0xcc),
-        Color32::from_rgb(0xd9, 0xc2, 0x98),
-        (dist * 0.75).clamp(0.0, 1.0),
-    )
-}
-
-fn quarter_clip(center: Pos2, radius: f32, left: bool) -> Rect {
+fn paint_weather_caption(painter: &Painter, center: Pos2, radius: f32, weather: &WeatherReport) {
     let aperture = APERTURE_R * radius;
-    let (x0, x1) = if left {
-        (center.x - aperture, center.x)
-    } else {
-        (center.x, center.x + aperture)
-    };
-    Rect::from_min_max(Pos2::new(x0, center.y), Pos2::new(x1, center.y + aperture))
-}
-
-fn paint_date_words(painter: &Painter, center: Pos2, radius: f32, now: DateTime<Local>) {
-    let painter = painter.with_clip_rect(quarter_clip(center, radius, true));
-    let origin = center + direction(225.0) * (0.36 * radius);
-    let color = Color32::from_rgb(0x3a, 0x28, 0x16);
-    let weekday = weekday_name(now.weekday().num_days_from_monday());
-    let month = month_name(now.month());
-    painter.text(
-        origin + Vec2::new(0.0, -0.055 * radius),
-        Align2::CENTER_CENTER,
-        weekday,
-        FontId::new(0.042 * radius, serif()),
+    let clip = Rect::from_min_max(
+        Pos2::new(center.x - aperture, center.y),
+        Pos2::new(center.x + aperture, center.y + aperture),
+    );
+    let painter = painter.with_clip_rect(clip);
+    let origin = center + direction(180.0) * (0.46 * radius);
+    let color = Color32::from_rgb(0xff, 0xf6, 0xe8);
+    paint_shadowed(
+        &painter,
+        origin + Vec2::new(0.0, -0.028 * radius),
+        &weather.temperature_text(),
+        0.055 * radius,
         color,
     );
-    painter.text(
-        origin,
-        Align2::CENTER_CENTER,
-        month,
-        FontId::new(0.04 * radius, serif()),
-        color,
-    );
-    painter.text(
-        origin + Vec2::new(0.0, 0.06 * radius),
-        Align2::CENTER_CENTER,
-        format!("\u{1F4C5} {}", now.day()),
-        FontId::new(0.07 * radius, serif()),
+    paint_shadowed(
+        &painter,
+        origin + Vec2::new(0.0, 0.028 * radius),
+        &weather.condition,
+        0.032 * radius,
         color,
     );
 }
 
-fn paint_condition_words(
-    painter: &Painter,
-    center: Pos2,
-    radius: f32,
-    weather: &WeatherReport,
-    _now: DateTime<Local>,
-) {
-    let painter = painter.with_clip_rect(quarter_clip(center, radius, false));
-    let origin = center + direction(135.0) * (0.36 * radius);
-    let color = Color32::from_rgb(0x3a, 0x28, 0x16);
-    painter.text(
-        origin + Vec2::new(0.0, -0.02 * radius),
-        Align2::CENTER_CENTER,
-        weather.temperature_text(),
-        FontId::new(0.055 * radius, serif()),
-        color,
-    );
-    painter.text(
-        origin + Vec2::new(0.0, 0.045 * radius),
-        Align2::CENTER_CENTER,
-        {
-            let mark = weather::condition_mark(weather.code.unwrap_or(-1));
-            if mark.is_empty() {
-                weather.condition.clone()
-            } else {
-                format!("{mark} {}", weather.condition)
-            }
-        },
-        FontId::new(0.034 * radius, serif()),
-        color,
-    );
+fn paint_shadowed(painter: &Painter, pos: Pos2, text: &str, size: f32, color: Color32) {
+    let font = FontId::new(size, serif());
+    let shadow = Color32::from_rgba_unmultiplied(0, 0, 0, 170);
+    for (dx, dy) in [(-1.3, 0.0), (1.3, 0.0), (0.0, -1.3), (0.0, 1.3)] {
+        painter.text(
+            pos + Vec2::new(dx, dy),
+            Align2::CENTER_CENTER,
+            text,
+            font.clone(),
+            shadow,
+        );
+    }
+    painter.text(pos, Align2::CENTER_CENTER, text, font, color);
 }
 
 fn paint_aperture_rims(painter: &Painter, center: Pos2, radius: f32) {
@@ -222,7 +175,7 @@ fn paint_aperture_rims(painter: &Painter, center: Pos2, radius: f32) {
         brass,
     );
     let aperture = APERTURE_R * radius;
-    // Horizon across the 9–3 line, and the divider between the two lower quarters.
+    // Horizon across the 9–3 line, and the divider between the two upper quarters.
     painter.line_segment(
         [
             Pos2::new(center.x - aperture, center.y),
@@ -231,7 +184,7 @@ fn paint_aperture_rims(painter: &Painter, center: Pos2, radius: f32) {
         Stroke::new(width, brass),
     );
     painter.line_segment(
-        [center, center + direction(180.0) * aperture],
+        [center, center + direction(0.0) * aperture],
         Stroke::new(width, brass),
     );
 }
@@ -520,18 +473,6 @@ fn paint_heading(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, text:
     rule_y + pitch * 7.0
 }
 
-fn weekday_name(index: u32) -> &'static str {
-    [
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-        "Sunday",
-    ][index as usize]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -632,22 +573,4 @@ mod tests {
             );
         }
     }
-}
-
-fn month_name(month: u32) -> &'static str {
-    [
-        "",
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    ][month as usize]
 }

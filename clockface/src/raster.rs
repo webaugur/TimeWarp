@@ -27,6 +27,18 @@ pub fn render_rgba(
     now: DateTime<Local>,
     place: &Place,
 ) -> Result<Vec<u8>, String> {
+    render_rgba_with(width, height, center, diameter, now, place, None)
+}
+
+pub fn render_rgba_with(
+    width: u32,
+    height: u32,
+    center: Pos2,
+    diameter: f32,
+    now: DateTime<Local>,
+    place: &Place,
+    sun: Option<std::sync::Arc<crate::sun_image::SunImage>>,
+) -> Result<Vec<u8>, String> {
     if width == 0 || height == 0 || width > 8192 || height > 8192 {
         return Err(format!("screenshot size {width}x{height} is out of range"));
     }
@@ -52,7 +64,8 @@ pub fn render_rgba(
         },
     );
 
-    let model = KioskModel::for_screenshot(now, place);
+    let mut model = KioskModel::for_screenshot(now, place);
+    model.sun = sun;
     let output = ctx.run_pass(input, |ctx| {
         let painter = ctx.layer_painter(egui::LayerId::background());
         kiosk::paint(&painter, screen, center, diameter, &model);
@@ -474,17 +487,21 @@ mod tests {
             "bezel highlight {bezel_lit:?} vs shade {bezel_dark:?}"
         );
 
-        // Upper half is the daytime sky at 10:08 (light snow), not the cream date disc.
-        let sky = at_pos(&rgba, width, height, center + direction(0.0) * (0.42 * r));
+        // Lower half is the landscape. Near the 9–3 line the theme's sky is blue.
+        let sky = at_pos(&rgba, width, height, center + direction(180.0) * (0.12 * r));
         assert!(
-            sky[2] > 100 && sky[2] as i32 + 10 > sky[0] as i32,
-            "upper half should be sky, got {sky:?}"
+            sky[2] > 80 && sky[2] as i32 + 8 > sky[0] as i32,
+            "lower half should be sky, got {sky:?}"
         );
-        // Lower-left quarter, off the red second hand (222°) and off the date glyphs.
-        let date = at_pos(&rgba, width, height, center + direction(250.0) * (0.28 * r));
+        // Upper-left quarter is the space gradient, not the old cream date disc.
+        let space = at_pos(&rgba, width, height, center + direction(300.0) * (0.10 * r));
         assert!(
-            date[0] > 180 && date[0] as i32 > date[2] as i32 + 30,
-            "lower-left quarter should be the cream date disc, got {date:?}"
+            space[2] as i32 + 15 > space[0] as i32,
+            "upper-left quarter should fade from sky blue, got {space:?}"
+        );
+        assert!(
+            space[0] < 180,
+            "upper-left quarter should not be the cream disc, got {space:?}"
         );
 
         let wedge = at_pos(&rgba, width, height, center + direction(225.0) * (1.15 * r));

@@ -13,9 +13,10 @@ use chrono::Local;
 use clap::Parser;
 
 use clockface::{
-    example_events, fetch_weather, gather_status, install_fonts, load_cache, load_settings,
-    now_unix, paint_kiosk, render_rgba, repaint_delay, store_cache, write_png, KioskModel, Place,
-    Settings, SettingsOverride, StatusLine, Units, WeatherReport,
+    example_events, fetch_weather, gather_status, install_fonts, load_cache, load_cached_sun,
+    load_settings, load_sun, now_unix, paint_kiosk, render_rgba_with, repaint_delay, store_cache,
+    write_png, KioskModel, Place, Settings, SettingsOverride, StatusLine, Units, WeatherReport,
+    SUN_REFRESH_SECS,
 };
 
 #[derive(Parser, Debug)]
@@ -125,13 +126,15 @@ fn run() -> Result<(), String> {
         let height = cli.height.unwrap_or(1080);
         let viewport = egui::vec2(width as f32, height as f32);
         let (center, diameter) = settings.placement(viewport);
-        let rgba = render_rgba(
+        let sun = load_sun();
+        let rgba = render_rgba_with(
             width,
             height,
             center,
             diameter,
             clockface::screenshot_time(),
             &settings.place,
+            sun,
         )?;
         write_png(path, width, height, &rgba)?;
         println!(
@@ -171,9 +174,12 @@ fn run() -> Result<(), String> {
 struct ClockApp {
     settings: Settings,
     weather: Arc<Mutex<WeatherReport>>,
+    sun: Arc<Mutex<Option<std::sync::Arc<clockface::SunImage>>>>,
+    sun_at: Instant,
     status: StatusLine,
     status_at: Instant,
     fetching: Arc<AtomicBool>,
+    fetching_sun: Arc<AtomicBool>,
 }
 
 impl ClockApp {
@@ -183,9 +189,14 @@ impl ClockApp {
         Self {
             settings,
             weather: Arc::new(Mutex::new(weather)),
+            sun: Arc::new(Mutex::new(load_cached_sun())),
+            sun_at: Instant::now()
+                .checked_sub(Duration::from_secs(SUN_REFRESH_SECS))
+                .unwrap_or_else(Instant::now),
             status: gather_status(),
             status_at: Instant::now(),
             fetching: Arc::new(AtomicBool::new(false)),
+            fetching_sun: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -198,7 +209,9 @@ fn show_clock(ui: &mut egui::Ui, app: &mut ClockApp) {
         app.status_at = Instant::now();
     }
     refresh_weather_if_stale(app);
+    refresh_sun_if_stale(app);
     let weather = app.weather.lock().expect("weather lock").clone();
+    let sun = app.sun.lock().expect("sun lock").clone();
     let mut status = app.status.clone();
     if !weather.note.is_empty() {
         status.alert = weather.note.clone();
@@ -212,8 +225,27 @@ fn show_clock(ui: &mut egui::Ui, app: &mut ClockApp) {
         weather,
         events,
         status,
+        sun,
     };
     paint_kiosk(ui.painter(), screen, center, diameter, &model);
+}
+
+fn refresh_sun_if_stale(app: &mut ClockApp) {
+    if app.sun_at.elapsed() < Duration::from_secs(SUN_REFRESH_SECS) {
+        return;
+    }
+    if app.fetching_sun.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    app.sun_at = Instant::now();
+    let slot = Arc::clone(&app.sun);
+    let flag = Arc::clone(&app.fetching_sun);
+    std::thread::spawn(move || {
+        if let Some(image) = load_sun() {
+            *slot.lock().expect("sun lock") = Some(image);
+        }
+        flag.store(false, Ordering::SeqCst);
+    });
 }
 
 fn refresh_weather_if_stale(app: &ClockApp) {

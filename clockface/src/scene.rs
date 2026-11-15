@@ -1,10 +1,10 @@
-//! Layered SVG horizon for the upper half of the dial.
+//! Layered SVG horizon for the lower half of the dial.
 //!
 //! The shipped theme is `scenes/default/`. `CLOCKFACE_SCENE` may point at another
 //! folder with the same `scene.svg` and `theme.toml`. Layers are groups in the SVG.
 //! This module turns them on or off by rewriting `display` on those groups, then
-//! rasterizes with resvg. The moon is not a layer: it is shaded here so the phase
-//! stays correct. See `scenes/CREATING_A_THEME.md`.
+//! rasterizes with resvg. The moon is not drawn here; it has its own quarter.
+//! See `scenes/CREATING_A_THEME.md`.
 
 use std::collections::BTreeSet;
 use std::hash::{Hash, Hasher};
@@ -12,7 +12,8 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use chrono::{DateTime, Local};
-use egui::{Color32, Context, Id, Mesh, Painter, Pos2, Rect, TextureOptions, Vec2};
+use egui::epaint::Vertex;
+use egui::{Color32, Context, Id, Mesh, Painter, Pos2, TextureOptions};
 
 use crate::roman::direction;
 use crate::sky::{self, season_name};
@@ -362,8 +363,10 @@ fn cached_rgba(
     Ok(rgba)
 }
 
-/// Rasterize the theme into the upper-half aperture. The brass ring covers the
-/// square corners outside the circle.
+/// Rasterize the theme into the lower-half aperture.
+///
+/// The bitmap's top (sky) sits on the 9–3 line and the ground runs toward 6,
+/// so the landscape stays upright. The mesh is the semicircle, not the square.
 pub fn paint_horizon(
     painter: &Painter,
     ctx: &Context,
@@ -376,84 +379,65 @@ pub fn paint_horizon(
     let visible = visible_layers(&theme, now, weather);
     let width = (aperture * 2.0).round().clamp(64.0, 1200.0) as u32;
     let height = (width / 2).max(32);
-    let rect = Rect::from_min_size(
-        Pos2::new(center.x - aperture, center.y - aperture),
-        Vec2::new(aperture * 2.0, aperture),
-    );
-    let clip = Rect::from_min_max(
-        Pos2::new(center.x - aperture, center.y - aperture),
-        Pos2::new(center.x + aperture, center.y + 1.0),
-    );
-    let painter = painter.with_clip_rect(clip);
     match cached_rgba(&theme, &visible, width, height) {
         Ok(rgba) => {
             let image =
                 egui::ColorImage::from_rgba_premultiplied([width as usize, height as usize], &rgba);
             let texture = ctx.load_texture_cached(
                 "clockface-horizon",
-                Id::unique("clockface-horizon"),
+                Id::unique(("clockface-horizon", width, height)),
                 image,
                 TextureOptions::LINEAR,
             );
-            painter.image(
-                texture.id(),
-                rect,
-                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                Color32::WHITE,
-            );
+            paint_lower_half(painter, center, aperture, texture.id());
         }
         Err(err) => {
             eprintln!("clockface: scenery render: {err}");
         }
     }
-    paint_moon(
-        &painter,
-        center,
-        aperture / crate::layout::APERTURE_R,
-        sky::moon_phase(now),
-    );
 }
 
-/// Shaded moon at the historical spot: 45° from 12, 0.36 of the face radius out.
-///
-/// The lit limb is the bright surface. The rest of the disc is a darkened moon,
-/// opaque day and night, so the sky does not show through the unlit side.
-pub fn paint_moon(painter: &Painter, center: Pos2, face_radius: f32, phase: f64) {
-    let origin = center + direction(45.0) * (0.36 * face_radius);
-    let moon_r = 0.11 * face_radius;
-    if moon_r < 1.0 {
-        return;
+fn paint_lower_half(painter: &Painter, center: Pos2, aperture: f32, texture: egui::TextureId) {
+    let mut mesh = Mesh::with_texture(texture);
+    let center_i = mesh.vertices.len() as u32;
+    mesh.vertices.push(Vertex {
+        pos: center,
+        uv: Pos2::new(0.5, 0.0),
+        color: Color32::WHITE,
+    });
+    let segs = 48u32;
+    for i in 0..=segs {
+        let deg = 90.0 + 180.0 * (i as f32 / segs as f32);
+        let pos = center + direction(deg) * aperture;
+        let uv = Pos2::new(
+            (pos.x - (center.x - aperture)) / (aperture * 2.0),
+            (pos.y - center.y) / aperture,
+        );
+        mesh.vertices.push(Vertex {
+            pos,
+            uv,
+            color: Color32::WHITE,
+        });
     }
-    let rings = 28u32;
-    let segs = 56u32;
-    let mut mesh = Mesh::default();
-    for ring in 0..=rings {
-        let t = ring as f32 / rings as f32;
-        for seg in 0..=segs {
-            let ang = seg as f32 / segs as f32 * std::f32::consts::TAU;
-            let nx = ang.cos() * t;
-            let ny = ang.sin() * t;
-            let p = origin + Vec2::new(nx, ny) * moon_r;
-            let color = moon_color(nx, ny, t, phase);
-            mesh.colored_vertex(p, color);
-        }
-    }
-    let stride = segs + 1;
-    for ring in 0..rings {
-        for seg in 0..segs {
-            let a = ring * stride + seg;
-            let b = a + 1;
-            let c = a + stride;
-            let d = c + 1;
-            mesh.add_triangle(a, b, c);
-            mesh.add_triangle(b, d, c);
-        }
+    for i in 0..segs {
+        mesh.add_triangle(center_i, center_i + 1 + i, center_i + 2 + i);
     }
     if mesh.indices.len() >= 3 {
         painter.add(egui::Shape::mesh(mesh));
     }
 }
 
+/// How much of a surface point faces the Sun. `nx` is right, `ny` is down.
+/// Northern hemisphere: waxing lights the right side, waning the left.
+pub fn moon_illumination(nx: f32, ny: f32, phase: f64) -> f32 {
+    let s = (1.0 - ny * ny).max(0.0).sqrt();
+    let edge = (phase * std::f64::consts::TAU).cos() as f32 * s;
+    let waxing = (phase * std::f64::consts::TAU).sin() >= 0.0;
+    let signed = if waxing { nx - edge } else { -nx - edge };
+    smoothstep(-0.04, 0.06, signed)
+}
+
+#[cfg(test)]
 fn moon_color(nx: f32, ny: f32, radius: f32, phase: f64) -> Color32 {
     if radius > 1.0 {
         return Color32::TRANSPARENT;
@@ -461,11 +445,7 @@ fn moon_color(nx: f32, ny: f32, radius: f32, phase: f64) -> Color32 {
     let alb = moon_albedo(nx, ny);
     let mu = (1.0 - radius * radius).max(0.0).sqrt();
     let limb = 0.38 + 0.62 * mu.powf(0.5);
-    let s = (1.0 - ny * ny).max(0.0).sqrt();
-    let edge = (phase * std::f64::consts::TAU).cos() as f32 * s;
-    let waxing = (phase * std::f64::consts::TAU).sin() >= 0.0;
-    let signed = if waxing { nx - edge } else { -nx - edge };
-    let lit = smoothstep(-0.04, 0.06, signed);
+    let lit = moon_illumination(nx, ny, phase);
     let shade = alb * limb;
     let lit_r = 236.0 * shade;
     let lit_g = 226.0 * shade;
@@ -483,6 +463,7 @@ fn moon_color(nx: f32, ny: f32, radius: f32, phase: f64) -> Color32 {
     )
 }
 
+#[cfg(test)]
 fn moon_albedo(nx: f32, ny: f32) -> f32 {
     let mut a = 0.86;
     a *= mare(nx, ny, -0.18, -0.22, 0.42, 0.30, 0.52);
@@ -497,6 +478,7 @@ fn moon_albedo(nx: f32, ny: f32) -> f32 {
     a
 }
 
+#[cfg(test)]
 fn mare(nx: f32, ny: f32, cx: f32, cy: f32, rx: f32, ry: f32, dark: f32) -> f32 {
     let e = ((nx - cx) / rx).powi(2) + ((ny - cy) / ry).powi(2);
     if e < 1.0 {
@@ -507,6 +489,7 @@ fn mare(nx: f32, ny: f32, cx: f32, cy: f32, rx: f32, ry: f32, dark: f32) -> f32 
     }
 }
 
+#[cfg(test)]
 fn crater(albedo: f32, nx: f32, ny: f32, cx: f32, cy: f32, radius: f32) -> f32 {
     let d = ((nx - cx).powi(2) + (ny - cy).powi(2)).sqrt();
     if (d - radius).abs() < radius * 0.18 {

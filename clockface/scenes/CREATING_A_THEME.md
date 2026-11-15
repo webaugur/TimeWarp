@@ -32,9 +32,9 @@ The default SVG declares this view box, and `theme.toml` repeats it so a reader 
 view_box = [0.0, 0.0, 1000.0, 500.0]
 ```
 
-That box is the upper half of a circle. The circle's center is the middle of the bottom edge, `(500, 500)`, and the radius is `500`. The horizon is that bottom edge. Anything in the top-left and top-right corners, outside the circle, is covered later by the brass ring, so keep the drawing inside the semicircle.
+That box is a semicircle. The circle's center is the middle of the bottom edge, `(500, 500)`, and the radius is `500`. Draw the sky toward the top of the box and the ground toward the bottom edge. The clock places the top of the box on the 9–3 line and the bottom edge toward 6 o'clock, so the landscape sits in the lower half and stays upright. Anything outside the semicircle is not drawn.
 
-The clock maps this box onto the aperture: the full width of the upper half, and the height from the horizon up to 12 o'clock. It does not stretch a square bitmap.
+The clock maps this box onto the lower aperture: the full width, and the height from the 9–3 line down to 6 o'clock. It does not stretch a square bitmap.
 
 ## What the manifest means
 
@@ -114,7 +114,7 @@ Face radius 1 is 353.6 px from the center of the 1000×1000 view. The dial cover
 
 ## The moon
 
-Do not paint the moon in the SVG. The app draws it after the theme, at a fixed place in the aperture, so a theme cannot move it by editing the file. The phase is the mean age since the new moon of 2000-01-06 18:14 UTC (synodic month 29.530588853 days): 0 is new, 0.25 is first quarter with the right side lit, 0.5 is full, 0.75 is last quarter with the left side lit. The disc is shaded (maria, crater rims, limb darkening, and a soft terminator), not a flat two-color circle. The unlit side is a darkened moon surface, day and night, so the whole round stays solid against the sky.
+Do not paint the moon in the SVG. The moon is the upper-right quarter, a photograph shaded to the phase, not part of the landscape.
 
 A group whose id is `moon` is forced to `display="none"` so a copied illustration does not sit under the real disc.
 
@@ -147,4 +147,4 @@ The live window uses the same painter. Weather from Open-Meteo selects the weath
 - Put the horizon glow in the sky gradients, and the soil or grass in the ground groups, so a snow cover can sit on top of dormant grass instead of replacing the whole landscape.
 - Stay inside the semicircle. The corners of the view box are hidden by brass, but a tree that crosses the horizon into the lower half is clipped.
 - Keep the file hand-editable: one group per layer, gradients in `<defs>`, no flattened export from a bitmap tracer. A traced photograph is a single path with no groups to switch.
-- After a change, run the screenshot and look at the upper half only. The lower quarters, the frames, and the status line are not the theme.
+- After a change, run the screenshot and look at the lower half only. The upper quarters, the frames, and the status line are not the theme.
