@@ -21,7 +21,7 @@ const DISC_DISTANCE: f32 = 0.52;
 /// Disc radius, in aperture radii. Stays inside the arc and off the diameters.
 const DISC_RADIUS: f32 = 0.34;
 /// The sun's corona makes the same radius look larger, so the moon is smaller.
-const MOON_RADIUS: f32 = DISC_RADIUS * 0.9;
+const MOON_RADIUS: f32 = DISC_RADIUS * 0.75;
 /// Unlit moon, as a fraction of the photograph. Faint, still a surface.
 const EARTHSHINE: f32 = 0.28;
 
