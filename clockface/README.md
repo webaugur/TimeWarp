@@ -109,6 +109,8 @@ On a Raspberry Pi 4 or 5 the GPU and the display controller can be separate DRM 
 
 Force a backend with `EBOARD_BACKEND=kms` or `EBOARD_BACKEND=linuxfb`.
 
+The Pi's vc4 planes cannot rotate 90° or 270°, and `video=…,rotate=` only turns fbcon and Plymouth. The kms build rotates itself. `[display] rotation` is clockwise degrees (`0`, `90`, `180`, `270`, default `0`). `--rotation` overrides it, then `CLOCKFACE_ROTATION`, then `EBOARD_ROTATION`. egui lays out at the swapped size (a 1280×1024 panel at 90° is a 1024×1280 portrait) and eboard blits one GLES 2 textured quad onto the native scanout. Touch and the mouse are remapped inside eboard before they reach egui. The desktop window stays unrotated so the same TOML is valid on both builds.
+
 `--windowed` is ignored on this build. eboard is always fullscreen on the display. `--help` says so.
 
 ## Run

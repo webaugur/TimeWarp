@@ -80,6 +80,8 @@ pub struct Settings {
     pub timewarp_bin: Option<String>,
     /// Hours ahead for the barometer forecast tick. The default is 3.
     pub barometer_hours: u32,
+    /// Clockwise turn applied by the kms build. The desktop window ignores it.
+    pub rotation: crate::display::DisplayRotation,
 }
 
 impl Default for Settings {
@@ -97,6 +99,7 @@ impl Default for Settings {
             leds: crate::leds::LedSettings::default(),
             timewarp_bin: None,
             barometer_hours: 3,
+            rotation: crate::display::DisplayRotation::Deg0,
         }
     }
 }
@@ -148,6 +151,7 @@ pub struct SettingsOverride {
     pub longitude: Option<f64>,
     pub units: Option<Units>,
     pub audio_enabled: Option<bool>,
+    pub rotation: Option<crate::display::DisplayRotation>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -179,6 +183,15 @@ struct FileConfig {
     timewarp_bin: Option<String>,
     #[serde(default)]
     barometer_hours: Option<u32>,
+    /// Clockwise kms rotation. Absent means leave the default (0°).
+    #[serde(default)]
+    display: Option<DisplayFile>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct DisplayFile {
+    rotation: Option<i32>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -319,6 +332,14 @@ fn apply_file(
     if let Some(hours) = file.barometer_hours {
         settings.barometer_hours = hours.clamp(1, 48);
     }
+    if let Some(display) = file.display {
+        if let Some(degrees) = display.rotation {
+            settings.rotation =
+                crate::display::DisplayRotation::from_degrees(degrees).ok_or_else(|| {
+                    format!("display.rotation must be 0, 90, 180, or 270, not {degrees}")
+                })?;
+        }
+    }
     if let Some(audio) = file.audio {
         apply_audio(&mut settings.audio, audio)?;
     }
@@ -436,7 +457,35 @@ fn apply_override(settings: &mut Settings, over: &SettingsOverride) -> Result<()
     if let Some(enabled) = over.audio_enabled {
         settings.audio.enabled = enabled;
     }
+    if let Some(rotation) = over.rotation {
+        settings.rotation = rotation;
+    }
     Ok(())
+}
+
+/// `CLOCKFACE_ROTATION`. Empty or unset is `None`.
+///
+/// `EBOARD_ROTATION` is left for eboard, which applies it after `Options` and
+/// so overrides the config file. `--rotation` and this variable are written
+/// back into `EBOARD_ROTATION` before `eboard::run` so they stay in front.
+pub fn rotation_from_env() -> Result<Option<crate::display::DisplayRotation>, String> {
+    read_rotation_var("CLOCKFACE_ROTATION")
+}
+
+fn read_rotation_var(key: &str) -> Result<Option<crate::display::DisplayRotation>, String> {
+    let Ok(raw) = std::env::var(key) else {
+        return Ok(None);
+    };
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    let degrees: i32 = raw
+        .parse()
+        .map_err(|_| format!("{key} must be 0, 90, 180, or 270, not {raw:?}"))?;
+    crate::display::DisplayRotation::from_degrees(degrees)
+        .map(Some)
+        .ok_or_else(|| format!("{key} must be 0, 90, 180, or 270, not {raw:?}"))
 }
 
 #[cfg(test)]
@@ -516,6 +565,7 @@ mod tests {
             leds: None,
             timewarp_bin: None,
             barometer_hours: None,
+            display: None,
         };
         let mut settings = Settings::default();
         apply_file(&mut settings, file).unwrap();
@@ -596,5 +646,45 @@ mod tests {
         assert_eq!(settings.place.name, "London");
         assert!((settings.place.latitude - 40.0).abs() < 1e-6);
         assert!((settings.place.longitude - -0.1278).abs() < 1e-6);
+    }
+
+    #[test]
+    fn display_rotation_is_clockwise_and_overridable() {
+        let file: FileConfig = toml::from_str("[display]\nrotation = 90\n").unwrap();
+        let mut settings = Settings::default();
+        apply_file(&mut settings, file).unwrap();
+        assert_eq!(settings.rotation, crate::display::DisplayRotation::Deg90);
+        apply_override(
+            &mut settings,
+            &SettingsOverride {
+                rotation: Some(crate::display::DisplayRotation::Deg180),
+                ..SettingsOverride::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(settings.rotation, crate::display::DisplayRotation::Deg180);
+    }
+
+    #[test]
+    fn display_rotation_rejects_other_angles_and_unknown_keys() {
+        let file: FileConfig = toml::from_str("[display]\nrotation = 45\n").unwrap();
+        let err = apply_file(&mut Settings::default(), file).unwrap_err();
+        assert!(err.contains("0, 90, 180, or 270"), "{err}");
+        let err = toml::from_str::<FileConfig>("[display]\nspin = 1\n").unwrap_err();
+        assert!(err.to_string().contains("spin"), "{err}");
+    }
+
+    #[test]
+    fn clockface_rotation_reads_the_env() {
+        crate::timewarp::with_env_lock(|| {
+            let restore = EnvRestore::set(&[("CLOCKFACE_ROTATION", Some("270"))]);
+            let rotation = rotation_from_env().unwrap();
+            drop(restore);
+            assert_eq!(rotation, Some(crate::display::DisplayRotation::Deg270));
+            let restore = EnvRestore::set(&[("CLOCKFACE_ROTATION", Some("15"))]);
+            let err = rotation_from_env().unwrap_err();
+            drop(restore);
+            assert!(err.contains("0, 90, 180, or 270"), "{err}");
+        });
     }
 }

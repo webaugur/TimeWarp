@@ -7,6 +7,7 @@
 mod brass;
 mod chime;
 mod cycles;
+mod display;
 mod draw;
 mod events;
 mod fonts;
@@ -29,6 +30,7 @@ mod timewarp;
 mod weather;
 
 pub use chime::{start as start_audio, SoundFault};
+pub use display::{scanout_from_logical, view_mounted_panel, DisplayRotation};
 pub use events::{examples as example_events, CalendarEvent};
 pub use fonts::install_fonts;
 pub use gauges::gauge_fault;
@@ -38,7 +40,7 @@ pub use roman::{
     hand_angles, milliseconds_since_midnight, paint, paint_with, screenshot_time, HandStyle,
     RomanClockStyle, SecondBounce, ShadowStyle, TickStyle,
 };
-pub use settings::{load_settings, Place, Settings, SettingsOverride, Units};
+pub use settings::{load_settings, rotation_from_env, Place, Settings, SettingsOverride, Units};
 pub use sky::DaySky;
 pub use status::{gather as gather_status, StatusLine};
 pub use sun_image::{

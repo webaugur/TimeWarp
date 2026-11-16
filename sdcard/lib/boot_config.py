@@ -298,6 +298,7 @@ def render_clockface_toml(
     audio: bool,
     timewarp_bin: str | None,
     leds: str | None = None,
+    rotation: int | None = None,
 ) -> str:
     """Start from clockface.example.toml and pin the shop clock's settings.
 
@@ -306,6 +307,8 @@ def render_clockface_toml(
     `leds` are decided from the source by the caller). `leds` is the
     backend name: "spi" for the kms build (leds-spi feature), "none" for a
     build that cannot drive the strip, or None to leave the table out.
+    `rotation` is clockwise degrees (0, 90, 180, 270). None leaves `[display]`
+    out, for a checkout whose parser does not accept the table.
     """
     text = example
     if not text.endswith("\n"):
@@ -319,6 +322,9 @@ def render_clockface_toml(
         text = _upsert_audio(text)
     if leds:
         text = _upsert_leds(text, leds)
+    if rotation is not None:
+        check_rotation(rotation)
+        text = _upsert_display(text, rotation)
     return text
 
 
@@ -416,6 +422,20 @@ def _upsert_leds(text: str, backend: str) -> str:
     )
 
 
+def _upsert_display(text: str, rotation: int) -> str:
+    text = _drop_commented_table(text, "display")
+    text = re.sub(r"(?ms)^\[display\]\s*\n(?:[^\[\n][^\n]*\n|\n)*", "", text)
+    if not text.endswith("\n"):
+        text += "\n"
+    return text + (
+        "\n"
+        "# Clockwise degrees. The kms build lays the face out at the swapped\n"
+        "# size and eboard blits it onto the panel. vc4 cannot rotate 90/270.\n"
+        "[display]\n"
+        f"rotation = {rotation}\n"
+    )
+
+
 def render_cache_json() -> str:
     return json.dumps({"city": "Indianapolis"}, indent=2) + "\n"
 
@@ -490,6 +510,12 @@ def main(argv: list[str]) -> int:
         "--no-timewarp-bin",
         action="store_true",
         help="omit timewarp_bin (this revision rejects the key)",
+    )
+    toml_cmd.add_argument(
+        "--rotation",
+        type=int,
+        default=None,
+        help="clockwise [display] rotation; omit the table when absent",
     )
 
     sub.add_parser("cache-json")
@@ -570,6 +596,7 @@ def main(argv: list[str]) -> int:
                 audio=audio,
                 timewarp_bin=bin_path,
                 leds=leds,
+                rotation=args.rotation,
             )
         )
     elif args.cmd == "cache-json":
