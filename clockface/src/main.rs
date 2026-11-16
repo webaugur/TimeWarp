@@ -13,8 +13,8 @@ use chrono::Local;
 use clap::Parser;
 
 use clockface::{
-    example_events, fetch_almanac, fetch_weather, gather_status, install_fonts, load_cache,
-    load_cached_sun, load_settings, load_sun, now_unix, paint_kiosk, render_rgba_with,
+    cached_almanac, example_events, fetch_almanac, fetch_weather, gather_status, install_fonts,
+    load_cache, load_cached_sun, load_settings, load_sun, now_unix, paint_kiosk, render_rgba_with,
     repaint_delay, rotation_from_env, scanout_from_logical, screenshot_time, start_audio,
     store_cache, view_mounted_panel, write_png, Almanac, AlmanacSlot, DisplayRotation, KioskModel,
     Place, Settings, SettingsOverride, SoundFault, StatusLine, Units, WeatherReport,
@@ -234,7 +234,10 @@ impl ClockApp {
         let weather = load_cache(&settings.place)
             .unwrap_or_else(|| WeatherReport::unavailable(&settings.place));
         let sound_fault = start_audio(&settings.audio, &settings.leds);
-        let initial = Almanac::builtin(Local::now(), &settings.place, settings.events.as_deref());
+        let today = Local::now();
+        let initial = cached_almanac(&settings.place, today.date_naive()).unwrap_or_else(|| {
+            Almanac::builtin(today, &settings.place, settings.events.as_deref())
+        });
         Self {
             settings,
             sound_fault,
@@ -301,6 +304,11 @@ fn show_clock(ui: &mut egui::Ui, app: &mut ClockApp) {
         status,
         sun,
         barometer_hours: app.settings.barometer_hours,
+        cycles: if held.from_timewarp {
+            held.cycles.clone()
+        } else {
+            None
+        },
     };
     paint_kiosk(ui.painter(), screen, center, diameter, &model);
 }

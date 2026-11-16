@@ -71,6 +71,7 @@ pub fn render_rgba_with(
         if almanac.from_timewarp {
             model.events = almanac.events.clone();
             model.sky = almanac.sky.clone();
+            model.cycles = almanac.cycles.clone();
         }
         if !almanac.fault.is_empty() {
             model.status.alert = almanac.fault.clone();

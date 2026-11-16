@@ -21,7 +21,11 @@ use crate::events::{self, CalendarEvent};
 use crate::settings::{Place, Settings};
 use crate::sky::DaySky;
 
-const TIMEOUT: Duration = Duration::from_secs(4);
+/// A Pi 3 can spend longer than a few seconds starting CPython. Four seconds
+/// was timing out every `timewarp` call on clock@10.0.0.186, so the face kept
+/// the built-in sky. Thirty seconds covers that startup. The fetch stays off
+/// the UI thread, and a cached day is painted until the new one arrives.
+const TIMEOUT: Duration = Duration::from_secs(30);
 const SYNODIC_DAYS: f64 = 29.530588853;
 /// How long a failed fetch waits before it tries again. A good fetch lasts until midnight.
 const RETRY_AFTER: Duration = Duration::from_secs(15 * 60);
@@ -191,6 +195,8 @@ pub struct Almanac {
     pub civil_date: NaiveDate,
     pub events: Vec<CalendarEvent>,
     pub sky: DaySky,
+    /// Chart E for yesterday, today, and tomorrow. None when `timewarp cycle` did not answer.
+    pub cycles: Option<crate::cycles::CycleTable>,
     pub fault: String,
     pub from_timewarp: bool,
 }
@@ -203,6 +209,7 @@ impl Almanac {
                 .map(|rows| rows.to_vec())
                 .unwrap_or_else(events::examples),
             sky: DaySky::builtin(now, place),
+            cycles: None,
             fault: String::new(),
             from_timewarp: false,
         }
@@ -317,8 +324,9 @@ pub fn fetch_almanac(settings: &Settings, now: DateTime<Local>) -> Almanac {
     moon_args.extend(place_args.iter().cloned());
     match run(&bin, &moon_args) {
         Ok(text) => {
-            if let Some(phase) = parse_moon_phase(&text) {
+            if let Some((phase, name)) = parse_moon_phase(&text) {
                 almanac.sky.moon_phase = phase;
+                almanac.sky.moon_name = name;
                 almanac.from_timewarp = true;
             }
         }
@@ -330,9 +338,9 @@ pub fn fetch_almanac(settings: &Settings, now: DateTime<Local>) -> Almanac {
         "--json".into(),
         "--no-color".into(),
         "moon".into(),
-        date,
+        date.clone(),
     ];
-    rise_args.extend(place_args);
+    rise_args.extend(place_args.iter().cloned());
     match run(&bin, &rise_args) {
         Ok(text) => {
             if let Some((rise, set)) = parse_rise(&text) {
@@ -341,6 +349,24 @@ pub fn fetch_almanac(settings: &Settings, now: DateTime<Local>) -> Almanac {
                 almanac.from_timewarp = true;
             }
         }
+        Err(err) => remember(&mut fault, &err),
+    }
+
+    let mut cycle_args = vec![
+        "cycle".into(),
+        "--json".into(),
+        "--no-color".into(),
+        date.clone(),
+    ];
+    cycle_args.extend(place_args.iter().cloned());
+    match run(&bin, &cycle_args) {
+        Ok(text) => match parse_cycle_table(&text) {
+            Ok(table) => {
+                almanac.cycles = Some(table);
+                almanac.from_timewarp = true;
+            }
+            Err(err) => remember(&mut fault, &err),
+        },
         Err(err) => remember(&mut fault, &err),
     }
 
@@ -509,10 +535,99 @@ pub fn parse_sun(text: &str) -> Option<(Option<f64>, Option<f64>)> {
     ))
 }
 
-pub fn parse_moon_phase(text: &str) -> Option<f64> {
+pub fn parse_moon_phase(text: &str) -> Option<(f64, String)> {
     let value: serde_json::Value = serde_json::from_str(text).ok()?;
     let age = value.get("age_days")?.as_f64()?;
-    Some((age / SYNODIC_DAYS).rem_euclid(1.0))
+    let phase = (age / SYNODIC_DAYS).rem_euclid(1.0);
+    let name = value
+        .get("phase")
+        .and_then(|v| v.as_str())
+        .map(|text| text.to_ascii_lowercase())
+        .unwrap_or_else(|| crate::sky::phase_name(phase).to_owned());
+    Some((phase, name))
+}
+
+pub fn parse_cycle_table(text: &str) -> Result<crate::cycles::CycleTable, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(text).map_err(|err| format!("timewarp cycle: {err}"))?;
+    let rows = value
+        .get("period_days")
+        .and_then(|rows| rows.as_array())
+        .ok_or_else(|| "timewarp cycle: missing period_days".to_owned())?;
+    let mut days = Vec::new();
+    for row in rows {
+        let date = row
+            .get("date")
+            .and_then(|v| v.as_str())
+            .and_then(events::parse_date)
+            .ok_or_else(|| "timewarp cycle: missing date".to_owned())?;
+        let dst = row
+            .get("dst_advance_seconds")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let periods = row
+            .get("periods")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| "timewarp cycle: missing periods".to_owned())?;
+        let mut parsed = Vec::new();
+        for period in periods {
+            let letter = period
+                .get("letter")
+                .and_then(|v| v.as_str())
+                .and_then(|text| text.chars().next())
+                .ok_or_else(|| "timewarp cycle: missing letter".to_owned())?;
+            let start = period
+                .get("start_sec")
+                .and_then(|v| v.as_f64())
+                .ok_or_else(|| "timewarp cycle: missing start".to_owned())?;
+            let end = period
+                .get("end_sec")
+                .and_then(|v| v.as_f64())
+                .ok_or_else(|| "timewarp cycle: missing end".to_owned())?;
+            let color = period
+                .get("color")
+                .and_then(|v| v.as_str())
+                .unwrap_or("red")
+                .to_owned();
+            let planet = period
+                .get("planet")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_owned();
+            let hex = parse_hex(
+                period
+                    .get("color_hex")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("#d02222"),
+            );
+            parsed.push(crate::cycles::CyclePeriod {
+                start_sec: start,
+                end_sec: end,
+                letter,
+                color,
+                hex,
+                planet,
+            });
+        }
+        days.push(crate::cycles::CycleDay {
+            date,
+            dst_advance_seconds: dst,
+            periods: parsed,
+        });
+    }
+    if days.is_empty() {
+        return Err("timewarp cycle: no days".into());
+    }
+    Ok(crate::cycles::CycleTable { days })
+}
+
+fn parse_hex(text: &str) -> [u8; 3] {
+    let digits = text.trim().trim_start_matches('#');
+    if digits.len() != 6 {
+        return [0xD0, 0x22, 0x22];
+    }
+    let byte = |index: usize| u8::from_str_radix(&digits[index..index + 2], 16).unwrap_or(0);
+    [byte(0), byte(2), byte(4)]
 }
 
 pub fn parse_rise(text: &str) -> Option<(Option<f64>, Option<f64>)> {
@@ -590,7 +705,7 @@ fn merge_events(
         rows.push(CalendarEvent {
             date: date.format("%Y-%m-%d").to_string(),
             title: name.clone(),
-            time: "all day".into(),
+            time: crate::sky::format_local_hm(*unix),
         });
     }
     if let Some(user) = user {
@@ -723,11 +838,13 @@ fn write_disk(place: &Place, almanac: &Almanac) -> Result<(), String> {
         "longitude": place.longitude,
         "season": almanac.sky.season,
         "moon_phase": almanac.sky.moon_phase,
+        "moon_name": almanac.sky.moon_name,
         "sunrise": almanac.sky.sunrise_unix,
         "sunset": almanac.sky.sunset_unix,
         "moonrise": almanac.sky.moonrise_unix,
         "moonset": almanac.sky.moonset_unix,
         "events": almanac.events,
+        "cycles": cycle_json(almanac.cycles.as_ref()),
     });
     fs::write(
         &path,
@@ -761,6 +878,11 @@ fn read_disk(place: &Place, today: NaiveDate) -> Option<Almanac> {
             .get("moon_phase")
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0),
+        moon_name: value
+            .get("moon_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("new moon")
+            .to_owned(),
         moonrise_unix: value.get("moonrise").and_then(|v| v.as_f64()),
         moonset_unix: value.get("moonset").and_then(|v| v.as_f64()),
     };
@@ -768,9 +890,47 @@ fn read_disk(place: &Place, today: NaiveDate) -> Option<Almanac> {
         civil_date: civil,
         events,
         sky,
+        cycles: value.get("cycles").and_then(cycle_from_json),
         fault: String::new(),
         from_timewarp: true,
     })
+}
+
+fn cycle_json(table: Option<&crate::cycles::CycleTable>) -> serde_json::Value {
+    let Some(table) = table else {
+        return serde_json::Value::Null;
+    };
+    serde_json::json!(table
+        .days
+        .iter()
+        .map(|day| {
+            serde_json::json!({
+                "date": day.date.format("%Y-%m-%d").to_string(),
+                "dst_advance_seconds": day.dst_advance_seconds,
+                "periods": day.periods.iter().map(|period| {
+                    serde_json::json!({
+                        "letter": period.letter.to_string(),
+                        "color": period.color,
+                        "color_hex": format!("#{:02x}{:02x}{:02x}", period.hex[0], period.hex[1], period.hex[2]),
+                        "planet": period.planet,
+                        "start_sec": period.start_sec,
+                        "end_sec": period.end_sec,
+                    })
+                }).collect::<Vec<_>>(),
+            })
+        })
+        .collect::<Vec<_>>())
+}
+
+fn cycle_from_json(value: &serde_json::Value) -> Option<crate::cycles::CycleTable> {
+    let rows = value.as_array()?;
+    let wrapped = serde_json::json!({ "period_days": rows });
+    parse_cycle_table(&wrapped.to_string()).ok()
+}
+
+/// Yesterday's good almanac for this place, if the disk still has it.
+pub fn cached_almanac(place: &Place, today: NaiveDate) -> Option<Almanac> {
+    read_disk(place, today)
 }
 
 /// City lookup used while resolving settings. One `sun --json` call, then the built-in table.
@@ -815,18 +975,22 @@ fn parse_city(text: &str) -> Option<ResolvedCity> {
 
 fn builtin_city(name: &str) -> Option<ResolvedCity> {
     let (label, lat, lon) = match name.trim().to_ascii_lowercase().as_str() {
-        "indianapolis" | "indy" => ("Indianapolis", 39.7684, -86.1581),
+        "indianapolis" | "indy" => ("Indianapolis", 39.768623, -86.162643),
         "chicago" => ("Chicago", 41.8781, -87.6298),
         "new york" | "nyc" | "newyork" => ("New York", 40.7128, -74.0060),
         "london" => ("London", 51.5074, -0.1278),
         "denver" => ("Denver", 39.7392, -104.9903),
         _ => return None,
     };
+    let tz = match label {
+        "Indianapolis" => Some("America/Indiana/Indianapolis".into()),
+        _ => None,
+    };
     Some(ResolvedCity {
         name: label.into(),
         lat,
         lon,
-        tz: None,
+        tz,
     })
 }
 
@@ -912,7 +1076,7 @@ mod tests {
         assert_eq!(upcoming[1].title, "Washington's Birthday");
         assert_eq!(upcoming[2].title, "March equinox");
         assert_eq!(
-            events::event_mark(&upcoming[2].title, &upcoming[2].time),
+            events::event_mark(&upcoming[2].title, &upcoming[2].time, &upcoming[2].date),
             "\u{1F31E}"
         );
     }
@@ -923,8 +1087,9 @@ mod tests {
         let (rise, set) = parse_sun(sun).unwrap();
         assert!(rise.unwrap() < set.unwrap());
         let moon = r#"{"age_days":26.581,"phase":"Waning Crescent"}"#;
-        let phase = parse_moon_phase(moon).unwrap();
+        let (phase, name) = parse_moon_phase(moon).unwrap();
         assert!(phase > 0.85 && phase < 0.95, "{phase}");
+        assert_eq!(name, "waning crescent");
         let rise_json = r#"{"body":"moon","rise":["2026-01-15T05:53:47-05:00"],"set":["2026-01-15T14:40:16-05:00"]}"#;
         let (moonrise, moonset) = parse_rise(rise_json).unwrap();
         assert!(moonrise.unwrap() < moonset.unwrap());

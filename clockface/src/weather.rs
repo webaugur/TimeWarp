@@ -162,8 +162,8 @@ impl WeatherReport {
 pub fn fixture_january() -> WeatherReport {
     WeatherReport {
         fetched_unix: 1_768_478_917,
-        latitude: 39.7684,
-        longitude: -86.1581,
+        latitude: 39.768623,
+        longitude: -86.162643,
         units: Units::Imperial,
         temperature: 28.0,
         code: Some(71),
