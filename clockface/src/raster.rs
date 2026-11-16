@@ -486,7 +486,8 @@ mod tests {
         );
 
         // Lower half is the overcast January sky, below the thin black fade.
-        let sky = at_pos(&rgba, width, height, center + direction(180.0) * (0.22 * r));
+        // Off the temperature caption, which sits on the vertical center.
+        let sky = at_pos(&rgba, width, height, center + direction(165.0) * (0.32 * r));
         let sky_lum = sky[0] as i32 + sky[1] as i32 + sky[2] as i32;
         assert!(
             sky_lum > 80 && (sky[2] as i32 - sky[0] as i32).abs() < 50,
