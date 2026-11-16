@@ -92,3 +92,10 @@ time = "all day"
 date = "2027-01-06"
 title = "Epiphany"
 time = "all day"
+
+# Clockwise degrees for the kms build: 0, 90, 180, or 270. The desktop window
+# ignores this. A 1280x1024 panel turned 90° clockwise (native right is the
+# physical top) uses 90: egui lays out at 1024x1280 and eboard blits that onto
+# the 1280x1024 scanout. The kernel video= rotate token does not turn KMS.
+# [display]
+# rotation = 90

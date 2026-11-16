@@ -15,8 +15,9 @@ use clap::Parser;
 use clockface::{
     example_events, fetch_almanac, fetch_weather, gather_status, install_fonts, load_cache,
     load_cached_sun, load_settings, load_sun, now_unix, paint_kiosk, render_rgba_with,
-    repaint_delay, screenshot_time, start_audio, store_cache, write_png, Almanac, AlmanacSlot,
-    KioskModel, Place, Settings, SettingsOverride, SoundFault, StatusLine, Units, WeatherReport,
+    repaint_delay, rotation_from_env, scanout_from_logical, screenshot_time, start_audio,
+    store_cache, view_mounted_panel, write_png, Almanac, AlmanacSlot, DisplayRotation, KioskModel,
+    Place, Settings, SettingsOverride, SoundFault, StatusLine, Units, WeatherReport,
     SUN_REFRESH_SECS,
 };
 
@@ -90,6 +91,24 @@ struct Cli {
     /// Do not play ticking or chimes.
     #[arg(long)]
     no_audio: bool,
+
+    /// Clockwise kms rotation in degrees: 0, 90, 180, or 270.
+    ///
+    /// Overrides `CLOCKFACE_ROTATION`, `EBOARD_ROTATION`, and `[display] rotation`.
+    /// The desktop window is not rotated. With `--screenshot`, width and height
+    /// are the native panel and the PNG is the picture on the turned panel.
+    #[arg(long, value_parser = parse_rotation_arg)]
+    rotation: Option<i32>,
+}
+
+fn parse_rotation_arg(text: &str) -> Result<i32, String> {
+    let degrees: i32 = text
+        .parse()
+        .map_err(|_| format!("rotation must be 0, 90, 180, or 270, not {text:?}"))?;
+    if DisplayRotation::from_degrees(degrees).is_none() {
+        return Err(format!("rotation must be 0, 90, 180, or 270, not {text:?}"));
+    }
+    Ok(degrees)
 }
 
 fn main() {
@@ -112,6 +131,12 @@ fn run() -> Result<(), String> {
         Some(text) => Some(Units::parse(text).ok_or_else(|| format!("unknown units {text:?}"))?),
         None => None,
     };
+    let rotation = match cli.rotation {
+        Some(degrees) => DisplayRotation::from_degrees(degrees),
+        None => rotation_from_env()?,
+    };
+    #[cfg(all(feature = "kms", target_os = "linux"))]
+    let pin_rotation = rotation.is_some();
     let settings = load_settings(
         cli.config.as_deref(),
         &SettingsOverride {
@@ -124,12 +149,14 @@ fn run() -> Result<(), String> {
             longitude: cli.lon,
             units,
             audio_enabled: if cli.no_audio { Some(false) } else { None },
+            rotation,
         },
     )?;
 
     if let Some(path) = cli.screenshot.as_deref() {
-        let width = cli.width.unwrap_or(1920);
-        let height = cli.height.unwrap_or(1080);
+        let native_w = cli.width.unwrap_or(1920);
+        let native_h = cli.height.unwrap_or(1080);
+        let (width, height) = settings.rotation.logical_size(native_w, native_h);
         let viewport = egui::vec2(width as f32, height as f32);
         let (center, diameter) = settings.placement(viewport);
         let now = screenshot_time();
@@ -145,12 +172,20 @@ fn run() -> Result<(), String> {
             sun,
             Some(&almanac),
         )?;
+        let (rgba, width, height) = if settings.rotation == DisplayRotation::Deg0 {
+            (rgba, width, height)
+        } else {
+            let (scanout, panel_w, panel_h) =
+                scanout_from_logical(&rgba, width, height, settings.rotation);
+            view_mounted_panel(&scanout, panel_w, panel_h, settings.rotation)
+        };
         write_png(path, width, height, &rgba)?;
         println!(
-            "wrote {} ({}x{}, diameter {:.1}, center {:.1},{:.1}, local 10:08:37)",
+            "wrote {} ({}x{}, rotation {}, diameter {:.1}, center {:.1},{:.1}, local 10:08:37)",
             path.display(),
             width,
             height,
+            settings.rotation.degrees(),
             diameter,
             center.x,
             center.y
@@ -160,7 +195,7 @@ fn run() -> Result<(), String> {
 
     #[cfg(all(feature = "kms", target_os = "linux"))]
     {
-        return run_kms(settings);
+        return run_kms(settings, pin_rotation);
     }
     #[cfg(all(feature = "desktop", not(all(feature = "kms", target_os = "linux"))))]
     {
@@ -349,6 +384,12 @@ fn refresh_weather_if_stale(app: &ClockApp) {
 
 #[cfg(all(feature = "desktop", not(all(feature = "kms", target_os = "linux"))))]
 fn run_desktop(settings: Settings, width: u32, height: u32) -> Result<(), String> {
+    if settings.rotation != DisplayRotation::Deg0 {
+        eprintln!(
+            "clockface: display rotation {} applies to the kms build; this window stays unrotated",
+            settings.rotation.degrees()
+        );
+    }
     let windowed = settings.windowed;
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -383,14 +424,26 @@ impl eframe::App for ClockApp {
 }
 
 #[cfg(all(feature = "kms", target_os = "linux"))]
-fn run_kms(settings: Settings) -> Result<(), String> {
+fn run_kms(settings: Settings, pin_rotation: bool) -> Result<(), String> {
     if settings.windowed {
         eprintln!("clockface: --windowed is ignored; the kms build is always fullscreen");
     }
-    let options = eboard::Options {
+    // eboard::run reads EBOARD_ROTATION after Options. Pin an explicit
+    // --rotation or CLOCKFACE_ROTATION so that variable cannot replace it.
+    // A file-only value stays in Options and still yields to EBOARD_ROTATION.
+    if pin_rotation {
+        std::env::set_var("EBOARD_ROTATION", settings.rotation.degrees().to_string());
+    }
+    let mut options = eboard::Options {
         backend: eboard::Backend::Auto,
         vsync: true,
         ..eboard::Options::default()
+    };
+    options.output.rotation = match settings.rotation {
+        DisplayRotation::Deg0 => eboard::Rotation::Deg0,
+        DisplayRotation::Deg90 => eboard::Rotation::Deg90,
+        DisplayRotation::Deg180 => eboard::Rotation::Deg180,
+        DisplayRotation::Deg270 => eboard::Rotation::Deg270,
     };
     eboard::run(options, move |cc| {
         install_fonts(&cc.egui_ctx);

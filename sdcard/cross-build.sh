@@ -115,6 +115,10 @@ fi
 # leds=spi only when the binary has the SPI writer (kms enables leds-spi).
 # A labwc/desktop binary gets backend "none"; an older tree omits [leds].
 leds="omit"
+display="no"
+if [[ -f "${SRC}/clockface/src/settings.rs" ]] && grep -q 'struct DisplayFile' "${SRC}/clockface/src/settings.rs"; then
+  display="yes"
+fi
 if [[ -f "${SRC}/clockface/src/leds.rs" ]] && grep -q 'LedsFile' "${SRC}/clockface/src/settings.rs"; then
   leds="none"
   if [[ "$MODE" == "kms" ]] && grep -Eq '^kms = \[.*"leds-spi"' "${SRC}/clockface/Cargo.toml"; then
@@ -125,6 +129,7 @@ fi
 echo "mode: ${MODE}"
 echo "audio libs: always (crate audio=${audio})"
 echo "leds: ${leds}"
+echo "display rotation: ${display}"
 echo "cargo: cargo ${CARGO_ARGS[*]}"
 echo "image: ${IMAGE}"
 
@@ -173,6 +178,7 @@ kiosk=${MODE}
 audio=${audio}
 timewarp_bin=${timewarp_bin}
 leds=${leds}
+display=${display}
 git=${git_rev}
 EOF
 echo "wrote ${OUT}/clockface"

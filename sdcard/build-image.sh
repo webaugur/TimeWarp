@@ -266,6 +266,11 @@ if [[ "${timewarp_bin:-no}" == "yes" ]]; then
 fi
 # A features file from before the LED work has no leds= line: leave [leds] out.
 LEDS_FLAG="${leds:-omit}"
+# display=yes when this checkout accepts [display]. Older features files omit it.
+ROTATION_ARGS=()
+if [[ "${display:-no}" == "yes" ]]; then
+  ROTATION_ARGS=(--rotation "$CLOCK_ROTATION")
+fi
 EXAMPLE_TOML="${SDCARD}/out/clockface.example.toml"
 if [[ ! -f "$EXAMPLE_TOML" ]]; then
   EXAMPLE_TOML="${REPO}/clockface/clockface.example.toml"
@@ -386,6 +391,7 @@ python3 "${SDCARD}/lib/boot_config.py" clockface-toml \
   --audio "$AUDIO_FLAG" \
   --leds "$LEDS_FLAG" \
   "${TW_FLAG[@]}" \
+  "${ROTATION_ARGS[@]}" \
   > "${ROOT_MNT}/opt/clock/clockface.toml"
 python3 "${SDCARD}/lib/boot_config.py" cache-json > "${ROOT_MNT}/opt/clock/cache.json"
 install -m 0644 "$EXAMPLE_TOML" "${ROOT_MNT}/opt/clock/clockface.example.toml"

@@ -410,7 +410,7 @@ sudo --preserve-env=CLOCK_PASSWORD,CLOCK_WIFI_PSK \
   sdcard/build-image.sh --config sdcard/config.env --device /dev/sdX
 ```
 
-`kms` (the default) starts the `kms` binary on tty1 from `clockface.service` (`Restart=always`) with the console user in `video`, `render`, `audio`, `gpio`, and `spi`. Nothing else owns the display, so the kernel rotation is the only rotation. `labwc` is the fallback: autologin on tty1 runs plain `labwc` (not `rpd-labwc`), a black `swaybg`, no panel, and `wlr-randr --transform` instead of the kernel rotate. Audio is the analog headphone jack (`bcm2835` / card name `Headphones`), not HDMI. The Dell monitor is DVI, so HDMI audio is not connected. `/tmp/mute` mutes the tick and, with `honor_mute`, turns the LED strip off. The GPIO5 switch stays unwired: sysfs GPIO is deprecated on Trixie, and a switch needs libgpiod.
+`kms` (the default) starts the `kms` binary on tty1 from `clockface.service` (`Restart=always`) with the console user in `video`, `render`, `audio`, `gpio`, and `spi`. Nothing else owns the display. The kernel `rotate=` token turns Plymouth and the console only; vc4 cannot rotate a KMS plane by 90° or 270°, so `clockface.toml` gets `[display] rotation` from `CLOCK_ROTATION` and the kms binary blits that turn itself. `labwc` is the fallback: autologin on tty1 runs plain `labwc` (not `rpd-labwc`), a black `swaybg`, no panel, and `wlr-randr --transform` instead of the kernel rotate. Audio is the analog headphone jack (`bcm2835` / card name `Headphones`), not HDMI. The Dell monitor is DVI, so HDMI audio is not connected. `/tmp/mute` mutes the tick and, with `honor_mute`, turns the LED strip off. The GPIO5 switch stays unwired: sysfs GPIO is deprecated on Trixie, and a switch needs libgpiod.
 
 Preview the splash on the build machine with `sdcard/out/plymouth/preview.gif` (upright, portrait at rotation 90). Regenerate it alone with:
 
@@ -423,7 +423,7 @@ python3 sdcard/make-boot-theme.py --out /tmp/clock-theme --rotation 90 --kiosk k
 QEMU will not show the VideoCore display, so this is a hardware checklist:
 
 - Plymouth is portrait, black, wizard only, and the console does not flash between the splash and the clock. A brief landscape rainbow from the firmware is expected; `disable_splash=1` only shortens it.
-- The face is upright on the Dell panel (1280×1024 turned clockwise, so 1024×1280). `kms` must not also be transformed by a compositor.
+- The face is upright on the Dell panel (1280×1024 turned clockwise). `[display] rotation = 90` lays the kiosk out at 1024×1280 and blits it onto the native mode. `kms` must not also be transformed by a compositor.
 - The status line is not `TIME SYNC UNKNOWN` after a minute on the network (`timedatectl`).
 - `timewarp` is on `PATH` (`~/.local/bin` and `/usr/local/bin`) and the calendar row is Indianapolis.
 - Ticking and the quarter/hour chimes come out of the 3.5 mm jack. HDMI is silent. `echo 1 > /tmp/mute` stops the tick.

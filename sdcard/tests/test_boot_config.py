@@ -223,6 +223,31 @@ class TomlTest(unittest.TestCase):
         )
         self.assertNotIn("leds", plain)
 
+    def test_display_rotation_follows_clock_rotation(self) -> None:
+        import tomllib
+
+        example = Path(__file__).resolve().parents[2].joinpath(
+            "clockface", "clockface.example.toml"
+        ).read_text(encoding="utf-8")
+        text = render_clockface_toml(
+            example,
+            audio=False,
+            timewarp_bin="/usr/local/bin/timewarp",
+            rotation=90,
+        )
+        data = tomllib.loads(text)
+        self.assertEqual(data["display"]["rotation"], 90)
+        self.assertEqual(text.count("\n[display]\n"), 1)
+        self.assertNotIn("# [display]", text)
+        omitted = render_clockface_toml(
+            example, audio=False, timewarp_bin="/usr/local/bin/timewarp"
+        )
+        self.assertNotIn("\n[display]\n", omitted)
+        with self.assertRaises(ValueError):
+            render_clockface_toml(
+                example, audio=False, timewarp_bin=None, rotation=45
+            )
+
 
 class ProvisionTest(unittest.TestCase):
     def test_timewarp_is_built_from_a_user_owned_copy(self) -> None:
