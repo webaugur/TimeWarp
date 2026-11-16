@@ -273,7 +273,10 @@ fn paint_thermometer(
     let spec = ArcSpec {
         start: LEFT_START,
         end: LEFT_END,
-        unit: "°F",
+        unit: match weather.units {
+            crate::settings::Units::Imperial => "°F",
+            crate::settings::Units::Metric => "°C",
+        },
         minor: 5.0,
         major: 10.0,
         decimals: 0,
@@ -451,20 +454,12 @@ fn paint_arc(
             );
         }
     }
-    let mid = (spec.start + spec.end) * 0.5;
-    let unit_size = 0.030 * radius;
-    let (unit_x, unit_y) = text_half(painter, spec.unit, unit_size);
-    let unit_at = polar(
-        center,
-        radius,
-        mid,
-        label_face_r(mid, unit_x / radius, unit_y / radius),
-    );
+    let (unit_at, unit_size) = unit_label_pos(painter, center, radius, spec);
     painter.text(
         unit_at,
         Align2::CENTER_CENTER,
         spec.unit,
-        FontId::new(0.030 * radius, FontFamily::Proportional),
+        FontId::new(unit_size, FontFamily::Proportional),
         Color32::from_rgb(0x3a, 0x22, 0x08),
     );
 
@@ -938,6 +933,70 @@ fn angle_of(spec: &ArcSpec, lo: f64, hi: f64, value: f64) -> f32 {
     value_to_angle(value, lo, hi, spec.start as f64, spec.end as f64) as f32
 }
 
+/// Unit label just past the red bulb, in the trough, clear of the scale.
+///
+/// The font is about 80% of the free radial gap between the tube and the
+/// nearer of the trough lip, the dial edge, and the boards.
+fn unit_label_pos(painter: &Painter, center: Pos2, radius: f32, spec: &ArcSpec) -> (Pos2, f32) {
+    let (hx, hy) = text_half(painter, spec.unit, 100.0);
+    let (angle, face_r, em) = unit_label_geometry(spec.start, spec.end, hx / 100.0, hy / 100.0);
+    (polar(center, radius, angle, face_r), em * radius)
+}
+
+/// `(angle, face_r, em)` with lengths in face radii. `w_em` and `h_em` are the
+/// text's half-width and half-height divided by the font size.
+fn unit_label_geometry(start: f32, end: f32, w_em: f32, h_em: f32) -> (f32, f32, f32) {
+    let sign = if end >= start { 1.0 } else { -1.0 };
+    let centerline = (TUBE_IN + TUBE_OUT) * 0.5;
+    let bulb_half = (TUBE_OUT - TUBE_IN) * 0.5 * BULB_RADIUS;
+    let bulb = start - sign * TUBE_BEFORE_BULB;
+    // Just up the tube from the bulb, still short of the first numeral.
+    let bulb_ang = (bulb_half / centerline).atan().to_degrees();
+    let mut angle = bulb + sign * (bulb_ang + 4.0);
+    let before_scale = start - sign * 2.2;
+    angle = if sign > 0.0 {
+        angle.min(before_scale)
+    } else {
+        angle.max(before_scale)
+    };
+    let inner = TUBE_OUT + 0.014;
+    let limit = radial_limit(angle);
+    let gap = (limit - inner).max(0.02);
+    // The opening beside the bulb is taller on the screen than the radial gap,
+    // because the board edge is horizontal. Size the cap to about 80% of that
+    // vertical room, and still stay inside the radial gap.
+    let down_for_size = (-angle.to_radians().cos()).max(0.35);
+    let vertical = ((BOARD_LIMIT - 0.016) - down_for_size * inner).max(gap);
+    let cap_over_em = (2.0 * h_em).max(0.9);
+    let em = (0.80 * vertical.max(gap) / cap_over_em).clamp(0.055, 0.10);
+    let down = (-angle.to_radians().cos()).max(0.2);
+    let bulb_down = (-bulb.to_radians().cos()) * centerline;
+    // Keep the word level with the bulb. A larger radius at this low angle
+    // drops the label under the glass and into the boards.
+    let mut face_r = inner + gap * 0.50;
+    let level = bulb_down + bulb_half * 0.25;
+    if face_r * down > level {
+        face_r = level / down;
+    }
+    face_r = face_r.clamp(inner + 0.01, (limit - 0.012).max(inner + 0.01));
+    let _ = (w_em, h_em);
+    (angle, face_r, em)
+}
+
+fn radial_limit(angle: f32) -> f32 {
+    let rad = angle.to_radians();
+    let outward = rad.sin().abs();
+    let down = (-rad.cos()).max(0.0);
+    let mut limit = TROUGH_OUT - OUTER_LIP - 0.008;
+    if outward > 1e-3 {
+        limit = limit.min((DIAL_LIMIT - 0.006) / outward);
+    }
+    if down > 1e-3 {
+        limit = limit.min((BOARD_LIMIT - 0.006) / down);
+    }
+    limit
+}
+
 fn text_half(painter: &Painter, text: &str, size: f32) -> (f32, f32) {
     let galley = painter.layout(
         text.to_owned(),
@@ -1085,14 +1144,9 @@ fn fluid_px(radius: f32) -> f32 {
     (FLUID_OUT - FLUID_IN) * 0.5 * radius
 }
 
-fn fahrenheit(value: f32, units: Units) -> Option<f32> {
-    if !value.is_finite() {
-        return None;
-    }
-    Some(match units {
-        Units::Imperial => value,
-        Units::Metric => value * 9.0 / 5.0 + 32.0,
-    })
+fn fahrenheit(value: f32, _units: Units) -> Option<f32> {
+    // The glass shows the number the report already uses, °F or °C.
+    value.is_finite().then_some(value)
 }
 
 fn today_high_f(weather: &WeatherReport, now: DateTime<Local>) -> Option<f32> {
@@ -1341,6 +1395,53 @@ mod tests {
             assert!(
                 glyph_inside(cap, centerline, cap_half, cap_half),
                 "tube cap at {cap} is clipped"
+            );
+        }
+    }
+
+    #[test]
+    fn unit_labels_sit_beside_the_bulb_in_the_free_gap() {
+        let centerline = (TUBE_IN + TUBE_OUT) * 0.5;
+        let bulb_half = (TUBE_OUT - TUBE_IN) * 0.5 * BULB_RADIUS;
+        // Half-extents over em, roughly "°F" and the wider "inHg".
+        for (start, end, w_em) in [(LEFT_START, LEFT_END, 0.70), (RIGHT_START, RIGHT_END, 1.15)] {
+            let (angle, face_r, em) = unit_label_geometry(start, end, w_em, 0.55);
+            let sign = if end >= start { 1.0 } else { -1.0 };
+            let bulb = start - sign * TUBE_BEFORE_BULB;
+            let mid = (start + end) * 0.5;
+            assert!(
+                (angle - bulb).abs() < (angle - mid).abs(),
+                "unit at {angle} is closer to mid-scale {mid} than to the bulb {bulb}"
+            );
+            assert!(
+                (angle - bulb) * sign > 0.0,
+                "unit should sit on the scale side of the bulb, not past it into the boards"
+            );
+            assert!(
+                face_r > TUBE_OUT + 0.01,
+                "unit overlaps the tube ({face_r})"
+            );
+            assert!(
+                (0.05..0.11).contains(&em),
+                "font {em} should fill most of the pocket beside the bulb"
+            );
+            let bulb_down = (-bulb.to_radians().cos()) * centerline;
+            let label_down = (-angle.to_radians().cos()) * face_r;
+            assert!(
+                label_down <= bulb_down + bulb_half + 0.02,
+                "unit sits under the bulb ({label_down} > {bulb_down})"
+            );
+            let half_x = w_em * em;
+            let half_y = 0.55 * em;
+            assert!(
+                glyph_inside(angle, face_r, half_x, half_y),
+                "unit at {angle} r={face_r} leaves the dial or the boards"
+            );
+            let from_bulb = direction(bulb) * centerline - direction(angle) * face_r;
+            assert!(
+                from_bulb.length() > bulb_half + half_y,
+                "unit collides with the bulb ({})",
+                from_bulb.length()
             );
         }
     }

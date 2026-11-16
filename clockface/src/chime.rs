@@ -17,9 +17,10 @@ use std::time::Duration;
 use chrono::{DateTime, Datelike, Local, Timelike};
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 
-/// Bells start this long after the top of the hour (four rainbow passes).
-pub const BELL_START: Duration = Duration::from_millis(20_500);
-/// One bell strike, matching the old theater-chase plus wipe.
+/// Minimum time between the starts of two bell strikes.
+///
+/// This matches the old theater-chase. A longer bell recording spaces the
+/// strikes by its own length instead, so two playbacks never overlap.
 pub const BELL_GAP: Duration = Duration::from_millis(1_700);
 /// Pause after the last strike, or after the quarter melody, before the lights clear.
 pub const CLEAR_PAUSE: Duration = Duration::from_secs(2);
@@ -50,9 +51,33 @@ pub fn bell_count(hour24: u32) -> u32 {
     }
 }
 
-/// When each strike begins, measured from the top of the hour.
-pub fn bell_offsets(count: u32) -> Vec<Duration> {
-    (0..count).map(|i| BELL_START + BELL_GAP * i).collect()
+/// Time from the start of one strike to the start of the next.
+pub fn strike_spacing(bell_len: Duration) -> Duration {
+    if bell_len > BELL_GAP {
+        bell_len
+    } else {
+        BELL_GAP
+    }
+}
+
+/// When each strike begins, measured from the start of the melody.
+///
+/// The first strike is the moment the melody ends. Strikes are evenly spaced
+/// and each one is its own playback.
+pub fn bell_offsets(melody: Duration, bell_len: Duration, count: u32) -> Vec<Duration> {
+    let gap = strike_spacing(bell_len);
+    (0..count).map(|i| melody + gap * i).collect()
+}
+
+/// Local wall time for a chime. Second 0 only, so a tick-seek or a pre-roll
+/// cannot start the melody early. The caller also keeps the minute stamp so
+/// the same mark does not fire twice.
+pub fn chime_due(minute: u32, second: u32) -> Option<Mark> {
+    if second != 0 {
+        None
+    } else {
+        mark_at(minute)
+    }
 }
 
 /// Fallback length of `ticktock-*.flac` when the decoder does not report one.
@@ -90,21 +115,49 @@ pub struct LightPlan {
     pub finished: bool,
 }
 
-pub fn light_plan(mark: Mark, bells: u32, elapsed: Duration) -> LightPlan {
-    let rainbows = ((elapsed.as_secs_f64() / 5.125).floor() as u32 + 1).min(4);
-    let bells_started = elapsed >= BELL_START;
-    let strikes = if bells_started && bells > 0 {
-        let since = elapsed.saturating_sub(BELL_START);
-        ((since.as_secs_f64() / 1.7).floor() as u32 + 1).min(bells)
+/// Four rainbow passes spread across the melody, then one chase per strike
+/// after the melody has finished.
+pub fn light_plan(
+    mark: Mark,
+    melody: Duration,
+    bell_len: Duration,
+    bells: u32,
+    elapsed: Duration,
+) -> LightPlan {
+    let rainbows = rainbows_due(melody, elapsed);
+    let gap = strike_spacing(bell_len);
+    let bells_started = mark == Mark::Hour && bells > 0 && elapsed >= melody;
+    let strikes = if bells_started {
+        let since = elapsed.saturating_sub(melody);
+        ((since.as_secs_f64() / gap.as_secs_f64()).floor() as u32 + 1).min(bells)
     } else {
         0
     };
-    let done_at = BELL_START + BELL_GAP * bells + CLEAR_PAUSE;
+    let done_at = if mark == Mark::Hour && bells > 0 {
+        melody
+            + gap * bells.saturating_sub(1)
+            + bell_len.max(Duration::from_millis(1))
+            + CLEAR_PAUSE
+    } else {
+        melody + CLEAR_PAUSE
+    };
     LightPlan {
         rainbows,
-        cleared_for_bells: mark == Mark::Hour && bells_started,
+        cleared_for_bells: bells_started,
         strikes,
         finished: rainbows == 4 && strikes == bells && elapsed >= done_at,
+    }
+}
+
+fn rainbows_due(melody: Duration, elapsed: Duration) -> u32 {
+    if melody.is_zero() {
+        return 4;
+    }
+    let t = elapsed.as_secs_f64() / melody.as_secs_f64();
+    if t <= 0.0 {
+        1
+    } else {
+        ((t * 4.0).floor() as u32 + 1).clamp(1, 4)
     }
 }
 
@@ -302,7 +355,13 @@ struct ChimeRun {
     mark: Mark,
     bells: u32,
     started: std::time::Instant,
+    melody_len: Duration,
+    bell_len: Duration,
+    gap: Duration,
     melody: bool,
+    melody_done_at: std::time::Instant,
+    next_strike: std::time::Instant,
+    last_strike: Option<std::time::Instant>,
     rainbows: u32,
     cleared_for_bells: bool,
     strikes: u32,
@@ -310,15 +369,28 @@ struct ChimeRun {
 }
 
 impl ChimeRun {
-    fn begin(mark: Mark, hour24: u32) -> Self {
+    fn begin(mark: Mark, hour24: u32, melody_len: Duration, bell_len: Duration) -> Self {
+        let bells = match mark {
+            Mark::Hour => bell_count(hour24),
+            Mark::Quarter | Mark::Half => 0,
+        };
+        let started = std::time::Instant::now();
+        let melody_len = if melody_len.is_zero() {
+            Duration::from_millis(1)
+        } else {
+            melody_len
+        };
         Self {
             mark,
-            bells: match mark {
-                Mark::Hour => bell_count(hour24),
-                Mark::Quarter | Mark::Half => 0,
-            },
-            started: std::time::Instant::now(),
+            bells,
+            started,
+            melody_len,
+            bell_len,
+            gap: strike_spacing(bell_len),
             melody: false,
+            melody_done_at: started + melody_len,
+            next_strike: started + melody_len,
+            last_strike: None,
             rainbows: 0,
             cleared_for_bells: false,
             strikes: 0,
@@ -337,30 +409,47 @@ fn advance_chime(
     if run.finished {
         return;
     }
-    let plan = light_plan(run.mark, run.bells, run.started.elapsed());
+    let now = std::time::Instant::now();
     if !run.melody {
         let stem = settings.melody(run.mark).to_string();
         if let Some(mixer) = mixer {
+            // One playback. The bells wait until this recording's duration
+            // has elapsed, which is when the sink has been given the whole melody.
             play_stem(settings, mixer, fault, &stem);
         }
         run.melody = true;
     }
-    while run.rainbows < plan.rainbows {
+    let rainbows = rainbows_due(run.melody_len, run.started.elapsed());
+    while run.rainbows < rainbows {
         lights.rainbow();
         run.rainbows += 1;
     }
-    if plan.cleared_for_bells && !run.cleared_for_bells {
-        lights.clear();
-        run.cleared_for_bells = true;
-    }
-    while run.strikes < plan.strikes {
-        if let Some(mixer) = mixer {
-            play_stem(settings, mixer, fault, &settings.bell.clone());
+    if run.mark == Mark::Hour && run.bells > 0 && now >= run.melody_done_at {
+        if !run.cleared_for_bells {
+            lights.clear();
+            run.cleared_for_bells = true;
         }
-        lights.flash();
-        run.strikes += 1;
+        // One strike per wake. A late wake waits out `gap` from the strike
+        // that just started, so a stall cannot stack or drop tolls.
+        if run.strikes < run.bells && now >= run.next_strike {
+            if let Some(mixer) = mixer {
+                play_stem(settings, mixer, fault, &settings.bell.clone());
+            }
+            lights.flash();
+            run.strikes += 1;
+            run.last_strike = Some(now);
+            run.next_strike = now + run.gap;
+        }
     }
-    if plan.finished {
+    let audio_done = if run.mark == Mark::Hour && run.bells > 0 {
+        run.strikes >= run.bells
+            && run.last_strike.is_some_and(|at| {
+                now >= at + run.bell_len.max(Duration::from_millis(1)) + CLEAR_PAUSE
+            })
+    } else {
+        now >= run.started + run.melody_len + CLEAR_PAUSE
+    };
+    if audio_done && run.rainbows == 4 {
         lights.clear();
         run.finished = true;
     }
@@ -464,7 +553,7 @@ fn audio_loop(settings: AudioSettings, leds: crate::leds::LedSettings, fault: So
     let mut chime: Option<ChimeRun> = None;
     loop {
         if sink.is_none() {
-            match DeviceSinkBuilder::open_default_sink() {
+            match open_output() {
                 Ok(opened) => {
                     if device_down {
                         eprintln!("clockface: audio output is back");
@@ -489,17 +578,17 @@ fn audio_loop(settings: AudioSettings, leds: crate::leds::LedSettings, fault: So
             if run.finished {
                 chime = None;
             }
-        } else if let Some(mark) = mark_at(now.minute()) {
-            if now.second() < 2 {
-                let stamp_text = stamp(&now);
-                if chime_stamp.as_deref() != Some(stamp_text.as_str()) {
-                    chime_stamp = Some(stamp_text);
-                    let muted = settings.mute_chimes && is_muted(&settings);
-                    if !muted {
-                        chime = Some(ChimeRun::begin(mark, now.hour()));
-                        if let Some(run) = chime.as_mut() {
-                            advance_chime(run, &settings, mixer, &fault, &mut lights);
-                        }
+        } else if let Some(mark) = chime_due(now.minute(), now.second()) {
+            let stamp_text = stamp(&now);
+            if chime_stamp.as_deref() != Some(stamp_text.as_str()) {
+                chime_stamp = Some(stamp_text);
+                let muted = settings.mute_chimes && is_muted(&settings);
+                if !muted {
+                    let melody_len = stem_duration(&settings, settings.melody(mark));
+                    let bell_len = stem_duration(&settings, &settings.bell.clone());
+                    chime = Some(ChimeRun::begin(mark, now.hour(), melody_len, bell_len));
+                    if let Some(run) = chime.as_mut() {
+                        advance_chime(run, &settings, mixer, &fault, &mut lights);
                     }
                 }
             }
@@ -534,6 +623,46 @@ fn audio_loop(settings: AudioSettings, leds: crate::leds::LedSettings, fault: So
     }
 }
 
+/// About a quarter second of frames. Rodio's own default is ~50 ms, which
+/// underruns on the Pi 3 when PipeWire is sitting on ALSA.
+fn open_output() -> Result<MixerDeviceSink, String> {
+    use rodio::cpal::traits::{DeviceTrait, HostTrait};
+    let host = rodio::cpal::default_host();
+    let Some(device) = host.default_output_device() else {
+        return DeviceSinkBuilder::open_default_sink().map_err(|err| err.to_string());
+    };
+    let rate = device
+        .default_output_config()
+        .map(|cfg| cfg.sample_rate())
+        .unwrap_or(48_000);
+    let frames = (rate / 4).clamp(4096, 16_384);
+    match DeviceSinkBuilder::from_device(device) {
+        Ok(builder) => {
+            match builder
+                .with_buffer_size(rodio::cpal::BufferSize::Fixed(frames))
+                .open_stream()
+            {
+                Ok(sink) => Ok(sink),
+                Err(err) => {
+                    eprintln!("clockface: {frames}-frame audio buffer was refused ({err}); using the default");
+                    DeviceSinkBuilder::open_default_sink().map_err(|err| err.to_string())
+                }
+            }
+        }
+        Err(err) => {
+            eprintln!("clockface: audio device: {err}");
+            DeviceSinkBuilder::open_default_sink().map_err(|err| err.to_string())
+        }
+    }
+}
+
+fn stem_duration(settings: &AudioSettings, stem: &str) -> Duration {
+    match load_clip(settings, stem) {
+        Ok(clip) => clip_duration(&clip_bytes(clip)),
+        Err(_) => Duration::from_secs(1),
+    }
+}
+
 fn tick_length(settings: &AudioSettings, stem: &str, cached: &mut Option<Duration>) -> Duration {
     if let Some(len) = *cached {
         return len;
@@ -554,10 +683,21 @@ fn clip_bytes(clip: Clip) -> Vec<u8> {
 }
 
 fn clip_duration(bytes: &[u8]) -> Duration {
-    Decoder::try_from(Cursor::new(bytes.to_vec()))
-        .ok()
-        .and_then(|source| source.total_duration())
-        .unwrap_or(TICK_FALLBACK)
+    let Ok(decoder) = Decoder::try_from(Cursor::new(bytes.to_vec())) else {
+        return Duration::from_secs(1);
+    };
+    if let Some(total) = decoder.total_duration() {
+        if !total.is_zero() {
+            return total;
+        }
+    }
+    let rate = decoder.sample_rate().get();
+    let channels = u32::from(decoder.channels().get()).max(1);
+    let samples = decoder.count() as u64;
+    if rate == 0 || samples == 0 {
+        return Duration::from_secs(1);
+    }
+    Duration::from_secs_f64(samples as f64 / (f64::from(rate) * f64::from(channels)))
 }
 
 fn stamp(now: &DateTime<Local>) -> String {
@@ -587,23 +727,70 @@ mod tests {
 
     #[test]
     fn bell_count_is_twelve_hour() {
-        assert_eq!(bell_count(0), 12);
-        assert_eq!(bell_count(12), 12);
-        assert_eq!(bell_count(13), 1);
-        assert_eq!(bell_count(10), 10);
-        assert_eq!(bell_count(23), 11);
+        for hour in 0..24 {
+            let expect = match hour % 12 {
+                0 => 12,
+                n => n,
+            };
+            assert_eq!(bell_count(hour), expect, "hour {hour}");
+        }
+        assert_eq!(bell_count(20), 8);
     }
 
     #[test]
-    fn bell_offsets_start_at_twenty_point_five_seconds() {
-        let offsets = bell_offsets(12);
+    fn bells_start_when_the_melody_ends_and_stay_even() {
+        let melody = Duration::from_millis(23_400);
+        let bell = Duration::from_millis(900);
+        let offsets = bell_offsets(melody, bell, 8);
+        assert_eq!(offsets.len(), 8);
+        assert_eq!(offsets[0], melody);
+        for pair in offsets.windows(2) {
+            assert_eq!(pair[1] - pair[0], BELL_GAP);
+        }
+        let long = Duration::from_millis(2_400);
+        let offsets = bell_offsets(melody, long, 12);
         assert_eq!(offsets.len(), 12);
-        assert_eq!(offsets[0], Duration::from_millis(20_500));
-        assert_eq!(offsets[1] - offsets[0], Duration::from_millis(1_700));
-        assert_eq!(offsets[11], Duration::from_millis(20_500 + 11 * 1_700));
-        assert!(bell_offsets(0).is_empty());
-        let one = bell_offsets(1);
-        assert_eq!(one, vec![Duration::from_millis(20_500)]);
+        assert_eq!(offsets[0], melody);
+        for pair in offsets.windows(2) {
+            assert_eq!(pair[1] - pair[0], long);
+        }
+        assert!(bell_offsets(melody, bell, 0).is_empty());
+        let noon = bell_offsets(melody, bell, bell_count(12));
+        let eight = bell_offsets(melody, bell, bell_count(20));
+        assert_eq!(noon.len(), 12);
+        assert_eq!(eight.len(), 8);
+        assert_eq!(noon[0], eight[0]);
+    }
+
+    #[test]
+    fn chime_starts_at_second_zero_once_per_mark() {
+        assert_eq!(chime_due(0, 0), Some(Mark::Hour));
+        assert_eq!(chime_due(15, 0), Some(Mark::Quarter));
+        assert_eq!(chime_due(30, 0), Some(Mark::Half));
+        assert_eq!(chime_due(45, 0), Some(Mark::Quarter));
+        assert_eq!(chime_due(0, 1), None);
+        assert_eq!(chime_due(59, 0), None);
+        assert_eq!(chime_due(0, 2), None);
+        // A tick may seek 400 ms into the recording. The chime ignores that
+        // offset and still waits for second 0.
+        assert_eq!(
+            tick_seek(0, 400_000_000, Duration::from_millis(59_100)),
+            Some(Duration::from_millis(400))
+        );
+        assert_eq!(chime_due(0, 0), Some(Mark::Hour));
+    }
+
+    #[test]
+    fn bundled_melody_is_longer_than_one_bell() {
+        let melody = clip_duration(include_bytes!("../sounds/clock-hour.flac"));
+        let bell = clip_duration(include_bytes!("../sounds/clock-bell.flac"));
+        assert!(melody > Duration::from_secs(5), "melody {melody:?}");
+        assert!(bell > Duration::from_millis(200), "bell {bell:?}");
+        assert!(melody > bell);
+        let offsets = bell_offsets(melody, bell, bell_count(20));
+        assert_eq!(offsets.len(), 8);
+        assert_eq!(offsets[0], melody);
+        assert!(offsets[0] > Duration::from_secs(1));
     }
 
     #[test]
@@ -639,33 +826,39 @@ mod tests {
     }
 
     #[test]
-    fn hour_lights_rainbow_four_times_then_chase_each_bell() {
-        let at = |ms| light_plan(Mark::Hour, 2, Duration::from_millis(ms));
+    fn hour_lights_follow_the_melody_then_each_strike() {
+        let melody = Duration::from_millis(10_000);
+        let bell = Duration::from_millis(500);
+        let at = |ms| light_plan(Mark::Hour, melody, bell, 2, Duration::from_millis(ms));
         assert_eq!(at(0).rainbows, 1);
         assert!(!at(0).cleared_for_bells);
-        assert_eq!(at(5_125).rainbows, 2);
-        assert_eq!(at(15_375).rainbows, 4);
-        assert!(!at(15_375).cleared_for_bells);
-        let bells = at(20_500);
-        assert!(bells.cleared_for_bells);
-        assert_eq!(bells.strikes, 1);
-        assert_eq!(at(22_200).strikes, 2);
-        assert!(!at(22_200).finished);
-        let done = 20_500 + 2 * 1_700 + 2_000;
+        assert_eq!(at(0).strikes, 0);
+        assert_eq!(at(2_500).rainbows, 2);
+        assert_eq!(at(7_500).rainbows, 4);
+        assert!(!at(7_500).cleared_for_bells);
+        let first = at(10_000);
+        assert!(first.cleared_for_bells);
+        assert_eq!(first.strikes, 1);
+        assert_eq!(at(11_700).strikes, 2);
+        assert!(!at(11_700).finished);
+        let done = 10_000 + 1_700 + 500 + 2_000;
         assert!(at(done).finished);
+        assert!(!at(done - 1).finished);
     }
 
     #[test]
-    fn quarter_clears_two_seconds_after_the_rainbows_and_does_not_strike() {
-        let during = light_plan(Mark::Quarter, 0, Duration::from_millis(20_500));
+    fn quarter_clears_two_seconds_after_the_melody_and_does_not_strike() {
+        let melody = Duration::from_millis(8_000);
+        let bell = Duration::from_millis(500);
+        let during = light_plan(Mark::Quarter, melody, bell, 0, melody);
         assert_eq!(during.rainbows, 4);
         assert_eq!(during.strikes, 0);
         assert!(!during.finished);
         assert!(!during.cleared_for_bells);
-        let done = light_plan(Mark::Quarter, 0, Duration::from_millis(22_500));
+        let done = light_plan(Mark::Quarter, melody, bell, 0, melody + CLEAR_PAUSE);
         assert!(done.finished);
         assert_eq!(
-            light_plan(Mark::Half, 0, Duration::from_millis(10_250)).rainbows,
+            light_plan(Mark::Half, melody, bell, 0, melody / 2).rainbows,
             3
         );
     }

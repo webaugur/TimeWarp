@@ -123,24 +123,40 @@ fn paint_weather_caption(painter: &Painter, center: Pos2, radius: f32, weather: 
     let condition = weather.condition.as_str();
     let color = Color32::from_rgb(0xff, 0xf6, 0xe8);
     // Roman numeral cap height is `numeral_size` (0.24 of the radius). The
-    // condition line is 42% of that. Shrink only if the pair would leave the
-    // landscape circle or sit on the hand hub.
-    let mut temp_size = roman::RomanClockStyle::default().numeral_size * radius;
+    // condition line is 42% of that. The pair sits high enough that the longest
+    // condition phrase clears the inward tips of the 5-minute ticks near VI.
+    let style = roman::RomanClockStyle::default();
+    let tick_tip = style.hour_tick.distance - style.hour_tick.inward;
+    let mut temp_size = style.numeral_size * radius;
     let (temp_at, cond_at, cond_size) = loop {
         let cond_size = temp_size * 0.42;
         let (_, th) = caption_extent(&painter, &temp, temp_size);
         let (cw, ch) = caption_extent(&painter, condition, cond_size);
         let (tw, _) = caption_extent(&painter, &temp, temp_size);
+        let wide = widest_condition(&painter, cond_size).max(cw);
         let gap = 0.018 * radius;
         let sep = th * 0.5 + gap + ch * 0.5;
         let halo = 0.014 * radius;
         let hub = 0.12 * radius;
-        let temp_y = center.y + hub + th * 0.5 + halo;
-        let cond_y = temp_y + sep;
+        let natural_temp_y = center.y + hub + th * 0.5 + halo;
+        let natural_cond_y = natural_temp_y + sep;
+        let half_w = wide * 0.5 + halo;
+        let tick_r = (tick_tip - 0.018) * radius;
+        let max_down = if half_w < tick_r {
+            (tick_r * tick_r - half_w * half_w).sqrt()
+        } else {
+            0.0
+        };
+        let natural_bottom = natural_cond_y + ch * 0.5 + halo;
+        let lift = (natural_bottom - (center.y + max_down)).max(0.0);
+        let temp_y = natural_temp_y - lift;
+        let cond_y = natural_cond_y - lift;
+        let top = temp_y - th * 0.5 - halo;
         let bottom = cond_y + ch * 0.5 + halo;
-        let inside = bottom <= center.y + aperture - 0.012 * radius
+        let inside = top >= center.y + 0.045 * radius
+            && bottom <= center.y + aperture - 0.012 * radius
             && caption_in_circle(center, aperture, temp_y, tw, th, halo)
-            && caption_in_circle(center, aperture, cond_y, cw, ch, halo);
+            && caption_in_circle(center, aperture, cond_y, wide, ch, halo);
         if inside || temp_size < 0.08 * radius {
             break (
                 Pos2::new(center.x, temp_y),
@@ -152,6 +168,15 @@ fn paint_weather_caption(painter: &Painter, center: Pos2, radius: f32, weather: 
     };
     paint_shadowed(&painter, temp_at, &temp, temp_size, color, radius);
     paint_shadowed(&painter, cond_at, condition, cond_size, color, radius);
+}
+
+fn widest_condition(painter: &Painter, size: f32) -> f32 {
+    // Every phrase `condition_name` can return. The layout clears the longest.
+    const CODES: &[i32] = &[0, 1, 2, 3, 45, 51, 56, 61, 66, 71, 73, 77, 80, 85, 95, 96];
+    CODES
+        .iter()
+        .map(|code| caption_extent(painter, crate::weather::condition_name(*code), size).0)
+        .fold(0.0_f32, f32::max)
 }
 
 fn caption_extent(painter: &Painter, text: &str, size: f32) -> (f32, f32) {
