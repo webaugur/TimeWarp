@@ -26,6 +26,7 @@ mod settings;
 mod sky;
 mod status;
 mod sun_image;
+mod swatch;
 mod timewarp;
 mod weather;
 
@@ -34,7 +35,7 @@ pub use display::{scanout_from_logical, view_mounted_panel, DisplayRotation};
 pub use events::{examples as example_events, CalendarEvent};
 pub use fonts::install_fonts;
 pub use gauges::gauge_fault;
-pub use kiosk::{paint as paint_kiosk, repaint_delay, KioskModel};
+pub use kiosk::{paint as paint_kiosk, paint_live, repaint_delay, KioskModel};
 pub use raster::{render_rgba, render_rgba_with, write_png};
 pub use roman::{
     hand_angles, milliseconds_since_midnight, paint, paint_with, screenshot_time, HandStyle,

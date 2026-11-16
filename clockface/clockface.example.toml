@@ -99,3 +99,11 @@ time = "all day"
 # the 1280x1024 scanout. The kernel video= rotate token does not turn KMS.
 # [display]
 # rotation = 90
+# Gap above the dial, in face radii. Leave it unset and a portrait frame
+# (the rotated Pi) uses 1, so XII clears an arch that springs near the old
+# IX–III line. A landscape window uses the chrome ring's overhang, 0.248.
+# The ring may hide in that gap. side_pad is the same unit on each side
+# (default 0). dial_scale multiplies the diameter (default 1).
+# top_pad = 1.0
+# side_pad = 0.0
+# dial_scale = 1.0

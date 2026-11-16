@@ -116,22 +116,36 @@ pub fn preferred_column_height(diameter: f32) -> f32 {
 /// face-diameter wide together), and a single-line status bar. Width and height
 /// both constrain it, with a small inset from the edges.
 pub fn fit_diameter(viewport: egui::Vec2) -> f32 {
+    fit_diameter_padded(viewport, 0.0, 0.0)
+}
+
+/// Like [`fit_diameter`], with extra room above the dial and on each side.
+///
+/// `top_pad` and `side_pad` are fractions of the face radius. The top pad sits
+/// above the dial (the chrome ring may occupy it and hide behind the case).
+/// The side pad is added on each side, so the width budget is
+/// `diameter * (1 + side_pad)`.
+pub fn fit_diameter_padded(viewport: egui::Vec2, top_pad: f32, side_pad: f32) -> f32 {
+    let top_pad = top_pad.max(0.0);
+    let side_pad = side_pad.max(0.0);
     let available_w = (viewport.x - 2.0 * SIDE_MARGIN).max(120.0);
     let available_h = (viewport.y - TOP_MARGIN - BOTTOM_MARGIN).max(120.0);
+    let height = |diameter: f32| preferred_column_height(diameter) + top_pad * diameter * 0.5;
+    let width = |diameter: f32| diameter * (1.0 + side_pad);
     let mut lo = 80.0_f32;
     let mut hi = available_w.min(available_h);
-    if preferred_column_height(lo) > available_h {
-        return lo.min(available_w);
+    if height(lo) > available_h || width(lo) > available_w {
+        return lo.min(available_w / (1.0 + side_pad));
     }
     for _ in 0..28 {
         let mid = (lo + hi) * 0.5;
-        if preferred_column_height(mid) <= available_h {
+        if height(mid) <= available_h && width(mid) <= available_w {
             lo = mid;
         } else {
             hi = mid;
         }
     }
-    lo.min(available_w)
+    lo
 }
 
 /// Where a ray from the shaft meets the straight outer edge of a mural window, in face radii.

@@ -1,15 +1,16 @@
 //! Curved thermometer and barometer in one chrome trough under the dial.
 //!
-//! The trough is a half circle from 9 o'clock through 6 to 3, concentric with
-//! the dial. Its inner lip tucks under the cream and its outer lip is a
-//! constant radius, so the dial and the boards clip it. The floor glows like
-//! a lamp behind frosted glass. Each vial floats in that channel: temperature
-//! in °F on the left, sea-level pressure in inches of mercury on the right.
-//! Numerals and tick icons stay inside the rim, on the outer side of the tube.
+//! The trough is a full circle concentric with the dial. Its inner lip tucks
+//! under the cream and its outer lip is a constant radius, with no clip
+//! against the dial width or the boards. The floor glows like a lamp behind
+//! frosted glass. Each vial floats in the lower part of that channel:
+//! temperature in °F on the left, sea-level pressure in inches of mercury on
+//! the right. Numerals and tick icons stay inside the rim, on the outer side
+//! of the tube.
 
 use chrono::{DateTime, Duration, Local, NaiveDateTime};
 use egui::epaint::{Vertex, WHITE_UV};
-use egui::{Align2, Color32, FontFamily, FontId, Mesh, Painter, Pos2, Rect, Shape, Stroke, Vec2};
+use egui::{Align2, Color32, FontFamily, FontId, Mesh, Painter, Pos2, Shape, Stroke, Vec2};
 
 use crate::roman::direction;
 use crate::settings::Units;
@@ -42,10 +43,15 @@ const FLUID: &[Color32] = &[
 
 /// Trough, in face radii. The inner lip starts under the dial (the disc ends at 1.0)
 /// so the chrome meets the cream with no sky between them. The outer lip is a
-/// constant radius: a half circle from 9 o'clock through 6 to 3, clipped by the
-/// dial and the boards rather than shrunk to the wedges.
+/// constant radius all the way around the dial.
 const TROUGH_IN: f32 = 0.990;
 const TROUGH_OUT: f32 = 1.248;
+
+/// How far the chrome ring extends past the dial edge, in face radii.
+///
+/// That band is the top padding the case door may hide. The dial, the
+/// numerals, and the ticks sit inside it.
+pub const RING_OVERHANG: f32 = TROUGH_OUT - 1.0;
 const INNER_LIP: f32 = 0.024;
 const OUTER_LIP: f32 = 0.012;
 const TUBE_IN: f32 = 1.042;
@@ -66,9 +72,7 @@ const TUBE_PAST_CAP: f32 = 12.5;
 const BULB_RADIUS: f32 = 1.95;
 /// Glass wall around the red, in the same half-width units.
 const BULB_WALL: f32 = 0.50;
-/// 9 o'clock, sweeping through 6 to 3 o'clock.
-const TROUGH_A0: f32 = 270.0;
-const TROUGH_A1: f32 = 90.0;
+/// 9 o'clock, sweeping through 6 to 3 o'clock. The ring itself is the full circle.
 
 /// Left wedge, bulb toward 6, values increasing toward 9.
 /// The span stops short of 9 and of the boards so the end numerals, the ticks,
@@ -281,10 +285,8 @@ fn paint_thermometer(
         major: 10.0,
         decimals: 0,
     };
-    let clip = wedge_rect(center, radius, true);
-    let painter = painter.with_clip_rect(clip);
     paint_arc(
-        &painter,
+        painter,
         center,
         radius,
         &spec,
@@ -295,7 +297,7 @@ fn paint_thermometer(
     let mut icons = Vec::new();
     if let Some(value) = high {
         icons.push(marker(
-            &painter,
+            painter,
             center,
             radius,
             &spec,
@@ -308,7 +310,7 @@ fn paint_thermometer(
     }
     if let Some(value) = dew {
         icons.push(marker(
-            &painter,
+            painter,
             center,
             radius,
             &spec,
@@ -321,7 +323,7 @@ fn paint_thermometer(
     }
     if let Some(value) = feels {
         icons.push(marker(
-            &painter,
+            painter,
             center,
             radius,
             &spec,
@@ -332,7 +334,7 @@ fn paint_thermometer(
             Mark::Feels,
         ));
     }
-    paint_marker_icons(&painter, center, radius, &icons);
+    paint_marker_icons(painter, center, radius, &icons);
 }
 
 fn paint_barometer(
@@ -374,13 +376,11 @@ fn paint_barometer(
         major: 0.5,
         decimals: 1,
     };
-    let clip = wedge_rect(center, radius, false);
-    let painter = painter.with_clip_rect(clip);
-    paint_arc(&painter, center, radius, &spec, lo, hi, current);
+    paint_arc(painter, center, radius, &spec, lo, hi, current);
     let mut icons = Vec::new();
     if let Some(value) = peak {
         icons.push(marker(
-            &painter,
+            painter,
             center,
             radius,
             &spec,
@@ -393,7 +393,7 @@ fn paint_barometer(
     }
     if let Some(value) = ahead {
         icons.push(marker(
-            &painter,
+            painter,
             center,
             radius,
             &spec,
@@ -404,7 +404,7 @@ fn paint_barometer(
             Mark::Forecast,
         ));
     }
-    paint_marker_icons(&painter, center, radius, &icons);
+    paint_marker_icons(painter, center, radius, &icons);
 }
 
 fn paint_arc(
@@ -1030,23 +1030,10 @@ fn glyph_inside(angle: f32, face_r: f32, half_x: f32, half_y: f32) -> bool {
     x <= DIAL_LIMIT + 1e-4 && y <= BOARD_LIMIT + 1e-4
 }
 
-fn wedge_rect(center: Pos2, radius: f32, left: bool) -> Rect {
-    // Stop at the board line so a numeral cannot draw underneath the lamps.
-    let bottom = center.y + radius * BOARD_LIMIT;
-    if left {
-        Rect::from_min_max(
-            Pos2::new(center.x - radius, center.y),
-            Pos2::new(center.x, bottom),
-        )
-    } else {
-        Rect::from_min_max(
-            Pos2::new(center.x, center.y),
-            Pos2::new(center.x + radius, bottom),
-        )
-    }
-}
-
-/// The glowing half-circle, drawn before the dial so the cream covers the overlap.
+/// The glowing ring, drawn before the dial so the cream covers the inner lip.
+///
+/// Full circle. The dial-width clip that squared the ends off, and the wedge
+/// clips on the two vials, are not applied.
 pub fn paint_trough(painter: &Painter, center: Pos2, radius: f32, weather: &WeatherReport) {
     if radius < 8.0 {
         return;
@@ -1056,20 +1043,12 @@ pub fn paint_trough(painter: &Painter, center: Pos2, radius: f32, weather: &Weat
     if !show {
         return;
     }
-    // The half circle stays inside the dial's left and right edges. The boards
-    // cover whatever continues below the face.
-    let clip = Rect::from_min_max(
-        Pos2::new(center.x - radius, center.y - 3.0),
-        Pos2::new(center.x + radius, center.y + radius * 1.6),
-    );
-    let painter = painter.with_clip_rect(clip);
-    let steps = 96u32;
+    let steps = 192u32;
     let bands = 10u32;
     let cols = bands + 1;
     let mut mesh = Mesh::default();
     for i in 0..=steps {
-        let t = i as f32 / steps as f32;
-        let deg = TROUGH_A0 + (TROUGH_A1 - TROUGH_A0) * t;
+        let deg = 360.0 * (i as f32 / steps as f32);
         for b in 0..=bands {
             let u = b as f32 / bands as f32;
             let r = TROUGH_IN + (TROUGH_OUT - TROUGH_IN) * u;
@@ -1126,14 +1105,8 @@ fn lamp_color(deg: f32, u: f32) -> Color32 {
     let hot = Color32::from_rgb(0xff, 0xf3, 0xc4);
     let edge = Color32::from_rgb(0xff, 0xb3, 0x47);
     let bell = (1.0 - (u * 2.0 - 1.0).abs()).clamp(0.0, 1.0);
-    let glow = lerp_color(edge, hot, bell.powf(0.5));
-    let ang = ((deg - 180.0).abs() / 70.0).clamp(0.0, 1.0);
-    let fall = 1.0 - ang * 0.08;
-    Color32::from_rgb(
-        (glow.r() as f32 * fall).round() as u8,
-        (glow.g() as f32 * fall).round() as u8,
-        (glow.b() as f32 * fall).round() as u8,
-    )
+    let _ = deg;
+    lerp_color(edge, hot, bell.powf(0.5))
 }
 
 fn tube_px(radius: f32) -> f32 {
@@ -1315,6 +1288,12 @@ mod tests {
         }
         let wide = barometer_scale(&[29.0, 30.8]).unwrap();
         assert!(wide.0 <= 29.0 && 30.8 <= wide.1);
+    }
+
+    #[test]
+    fn the_ring_stands_past_the_dial() {
+        assert!((RING_OVERHANG - (TROUGH_OUT - 1.0)).abs() < 1e-6);
+        assert!(RING_OVERHANG > 0.2 && RING_OVERHANG < 0.3);
     }
 
     #[test]

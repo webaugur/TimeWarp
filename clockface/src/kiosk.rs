@@ -4,11 +4,18 @@
 //! the discs they overlap. Every region is placed from the clock center and the face radius,
 //! so moving or resizing the face moves the complications with it.
 //!
-//! The two lower corners, outside the dial and below the 9–3 line, stay the black
-//! screen. The trough and the gauges are the only paint there. The sun and moon
-//! quarters above the 9–3 line are a separate layer and still fill the upper half.
+//! The corners outside the chrome ring stay the black screen. The ring itself is
+//! a full circle and is not clipped to the dial. The sun and moon quarters above
+//! the 9–3 line are a separate layer and still fill the upper half.
+//!
+//! On the kiosk loop the static layers (dial, numerals, ring, landscape, boards)
+//! are painted once into a texture. Later frames draw that texture and then the
+//! hands. The matrix boards are part of the texture and are rebuilt only when
+//! their text changes (the minute, the Swatch beat, or the forecast), not every
+//! second. `CLOCKFACE_FRAME_LOG=1` prints the CPU time of each of those frames.
 
-use std::time::Duration;
+use std::hash::{Hash, Hasher};
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Datelike, Local, Timelike};
 
@@ -62,6 +69,29 @@ impl KioskModel {
 }
 
 pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model: &KioskModel) {
+    paint_inner(painter, screen, center, diameter, model, false);
+}
+
+/// Static plate: everything except the hands. The boards keep the clock line,
+/// which no longer includes seconds.
+pub(crate) fn paint_static(
+    painter: &Painter,
+    screen: Rect,
+    center: Pos2,
+    diameter: f32,
+    model: &KioskModel,
+) {
+    paint_inner(painter, screen, center, diameter, model, true);
+}
+
+fn paint_inner(
+    painter: &Painter,
+    screen: Rect,
+    center: Pos2,
+    diameter: f32,
+    model: &KioskModel,
+    omit_hands: bool,
+) {
     painter.rect_filled(screen, 0.0, Color32::BLACK);
     let layout = KioskLayout::new(screen, center, diameter);
     let radius = layout.radius;
@@ -93,15 +123,27 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
     // Same dial mesh the window and the screenshot both fill.
     roman::paint_brass(painter, center, radius, aperture);
     roman::paint_aperture_shadow(painter, center, aperture);
-    roman::paint_markings_and_hands(
-        painter,
-        center,
-        diameter,
-        model.now,
-        &roman::RomanClockStyle::default(),
-        model.weather.wind_hand(),
-        model.cycles.as_ref(),
-    );
+    let style = roman::RomanClockStyle::default();
+    if omit_hands {
+        roman::paint_markings(
+            painter,
+            center,
+            diameter,
+            model.now,
+            &style,
+            model.cycles.as_ref(),
+        );
+    } else {
+        roman::paint_markings_and_hands(
+            painter,
+            center,
+            diameter,
+            model.now,
+            &style,
+            model.weather.wind_hand(),
+            model.cycles.as_ref(),
+        );
+    }
     crate::gauges::paint(
         painter,
         center,
@@ -450,16 +492,27 @@ pub fn repaint_delay(now: DateTime<Local>) -> Duration {
 }
 
 /// Local civil time as HH:MM:SS, the same 24-hour form as sunrise and sunset.
-fn board_hms(now: &DateTime<Local>) -> String {
-    format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second())
+fn board_hm(now: &DateTime<Local>) -> String {
+    format!("{:02}:{:02}", now.hour(), now.minute())
 }
 
-/// Left-board clock: local `HH:MM:SS` and the Cycles color, for example `10:08:37 RED`.
+/// Left-board clock: `HH:MM @BBB COLOR`, for example `10:08 @673 RED`.
+///
+/// No seconds. The beat is TimeWarp's Swatch Internet Time (BMT, 86.4 s), so
+/// the line changes when the minute changes or when the beat changes, not on
+/// every tick. The second hand is the only per-second motion. The color name
+/// comes from TimeWarp's Chart E rows when they are loaded, else the built-in
+/// Lewis table.
 fn board_clock_line(now: &DateTime<Local>, cycles: Option<&crate::cycles::CycleTable>) -> String {
     let name = cycles
         .and_then(|table| table.color_name_at(*now))
         .unwrap_or_else(|| crate::cycles::period_color_name(*now).to_owned());
-    format!("\u{1F55B} {} {}", board_hms(now), name.to_ascii_uppercase())
+    format!(
+        "\u{1F55B} {} {} {}",
+        board_hm(now),
+        crate::swatch::format_swatch(now),
+        name.to_ascii_uppercase()
+    )
 }
 
 /// Local civil date in the board's short style, for example `THU JAN 15 2026`.
@@ -487,10 +540,194 @@ fn line_fits(y: f32, pitch: f32, panel: Rect) -> bool {
 /// stays dark above the rule. The next line starts seven pitches below the rule,
 /// which is the height of one character cell of unlit lamps.
 fn paint_heading(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, text: &str) -> f32 {
-    let next = matrix::paint_text(painter, panel, origin, pitch, text, 2);
+    let next = matrix::paint_text_nowrap(painter, panel, origin, pitch, text);
     let rule_y = next - pitch;
     matrix::paint_rule(painter, panel, rule_y, pitch);
     rule_y + pitch * 7.0
+}
+
+/// Draw the cached plate, then the hands.
+///
+/// eboard clears the offscreen target and presents only after this pass
+/// returns. The first shape is the opaque plate, and the hands are in the
+/// same pass, so a flipped buffer is never a cleared frame or a frame that
+/// stopped before the second hand.
+pub fn paint_live(
+    painter: &Painter,
+    screen: Rect,
+    center: Pos2,
+    diameter: f32,
+    model: &KioskModel,
+) {
+    let started = Instant::now();
+    let pixels_w = screen.width().round().clamp(1.0, 4096.0) as u32;
+    let pixels_h = screen.height().round().clamp(1.0, 4096.0) as u32;
+    let local_center = Pos2::new(center.x - screen.min.x, center.y - screen.min.y);
+    let key = plate_key(pixels_w, pixels_h, local_center, diameter, model);
+    let cache_id = egui::Id::unique("clockface-static-plate");
+    let have = painter.ctx().data(|data| {
+        data.get_temp::<PlateCache>(cache_id)
+            .map(|plate| (plate.key, plate.width, plate.height))
+    });
+    let settle = in_settle(model.now);
+    let rebuild = match have {
+        Some((cached, w, h)) if cached == key && w == pixels_w && h == pixels_h => false,
+        Some(_) if settle => false,
+        _ => true,
+    };
+    let mut plate_ms = 0.0;
+    if rebuild {
+        let raster_started = Instant::now();
+        match crate::raster::render_static(pixels_w, pixels_h, local_center, diameter, model) {
+            Ok(rgba) => {
+                let image = egui::ColorImage::from_rgba_unmultiplied(
+                    [pixels_w as usize, pixels_h as usize],
+                    &rgba,
+                );
+                let handle = painter.ctx().load_texture(
+                    "clockface-plate",
+                    image,
+                    egui::TextureOptions::NEAREST,
+                );
+                painter.ctx().data_mut(|data| {
+                    data.insert_temp(
+                        cache_id,
+                        PlateCache {
+                            key,
+                            width: pixels_w,
+                            height: pixels_h,
+                            handle,
+                        },
+                    );
+                });
+            }
+            Err(err) => {
+                eprintln!("clockface plate: {err}");
+                paint(painter, screen, center, diameter, model);
+                log_frame(started.elapsed(), true, plate_ms, pixels_w, pixels_h, true);
+                return;
+            }
+        }
+        plate_ms = raster_started.elapsed().as_secs_f64() * 1000.0;
+    }
+    let Some(plate) = painter
+        .ctx()
+        .data(|data| data.get_temp::<PlateCache>(cache_id))
+    else {
+        paint(painter, screen, center, diameter, model);
+        log_frame(started.elapsed(), true, plate_ms, pixels_w, pixels_h, true);
+        return;
+    };
+    painter.image(
+        plate.handle.id(),
+        screen,
+        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+        Color32::WHITE,
+    );
+    roman::paint_hands(
+        painter,
+        center,
+        diameter,
+        model.now,
+        &roman::RomanClockStyle::default(),
+        model.weather.wind_hand(),
+    );
+    log_frame(
+        started.elapsed(),
+        rebuild,
+        plate_ms,
+        pixels_w,
+        pixels_h,
+        false,
+    );
+}
+
+#[derive(Clone)]
+struct PlateCache {
+    key: u64,
+    width: u32,
+    height: u32,
+    handle: egui::TextureHandle,
+}
+
+fn in_settle(now: DateTime<Local>) -> bool {
+    let window = roman::RomanClockStyle::default().second_bounce.window_ms;
+    f64::from(now.timestamp_subsec_millis()) < window
+}
+
+/// Identity of the cached picture. Seconds are not part of it: the board line
+/// is `HH:MM @BBB COLOR`, so it changes on the minute or the beat.
+fn plate_key(width: u32, height: u32, center: Pos2, diameter: f32, model: &KioskModel) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    width.hash(&mut hasher);
+    height.hash(&mut hasher);
+    center.x.to_bits().hash(&mut hasher);
+    center.y.to_bits().hash(&mut hasher);
+    diameter.to_bits().hash(&mut hasher);
+    board_clock_line(&model.now, model.cycles.as_ref()).hash(&mut hasher);
+    model.cycles.is_some().hash(&mut hasher);
+    board_date(model.now).hash(&mut hasher);
+    model.place.name.hash(&mut hasher);
+    model.weather.fetched_unix.hash(&mut hasher);
+    model.weather.temperature.to_bits().hash(&mut hasher);
+    model.weather.condition.hash(&mut hasher);
+    model.weather.note.hash(&mut hasher);
+    model.weather.code.hash(&mut hasher);
+    model
+        .weather
+        .pressure_hpa
+        .map(f32::to_bits)
+        .hash(&mut hasher);
+    model.weather.daily.len().hash(&mut hasher);
+    for event in &model.events {
+        event.date.hash(&mut hasher);
+        event.title.hash(&mut hasher);
+        event.time.hash(&mut hasher);
+    }
+    model.sky.season.hash(&mut hasher);
+    model.sky.sunrise_unix.map(|v| v as i64).hash(&mut hasher);
+    model.sky.sunset_unix.map(|v| v as i64).hash(&mut hasher);
+    model.status.hostname.hash(&mut hasher);
+    model.status.address.hash(&mut hasher);
+    model.status.warning.hash(&mut hasher);
+    model.status.alert.hash(&mut hasher);
+    model.barometer_hours.hash(&mut hasher);
+    model
+        .sun
+        .as_ref()
+        .map(|image| std::sync::Arc::as_ptr(image) as usize)
+        .hash(&mut hasher);
+    hasher.finish()
+}
+
+fn log_frame(
+    elapsed: Duration,
+    rebuild: bool,
+    plate_ms: f64,
+    width: u32,
+    height: u32,
+    fallback: bool,
+) {
+    let enabled = std::env::var("CLOCKFACE_FRAME_LOG")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(false);
+    if !enabled {
+        return;
+    }
+    let cpu_ms = elapsed.as_secs_f64() * 1000.0;
+    let kind = if fallback {
+        "fallback"
+    } else if rebuild {
+        "rebuild"
+    } else {
+        "cached"
+    };
+    // 60 Hz page flip is 16.7 ms. The spring asks for a frame every 16 ms
+    // during the 250 ms after each tick. A cached frame is the plate plus the
+    // hands; a rebuild also rasterizes the static layers.
+    eprintln!(
+        "clockface frame {cpu_ms:.1}ms plate={kind} raster={plate_ms:.1}ms {width}x{height} budget=16.7ms"
+    );
 }
 
 #[cfg(test)]
@@ -504,16 +741,109 @@ mod tests {
     #[test]
     fn the_board_clock_is_24_hour_and_the_date_is_the_short_form() {
         let now = screenshot_time();
-        assert_eq!(board_hms(&now), "10:08:37");
+        assert_eq!(board_hm(&now), "10:08");
         assert_eq!(board_date(now), "THU JAN 15 2026");
-        assert_eq!(board_clock_line(&now, None), "\u{1F55B} 10:08:37 RED");
+        assert!(
+            !board_clock_line(&now, None).contains(":37"),
+            "seconds stay off the board"
+        );
+        assert_eq!(
+            board_clock_line(&now, None),
+            format!("\u{1F55B} 10:08 {} RED", crate::swatch::format_swatch(&now))
+        );
         let sunday = match Local.with_ymd_and_hms(2026, 11, 15, 9, 5, 0) {
             chrono::LocalResult::Single(time) => time,
             chrono::LocalResult::Ambiguous(earliest, _) => earliest,
             chrono::LocalResult::None => panic!("2026-11-15 09:05 is not a local time"),
         };
-        assert_eq!(board_hms(&sunday), "09:05:00");
+        assert_eq!(board_hm(&sunday), "09:05");
         assert_eq!(board_date(sunday), "SUN NOV 15 2026");
+    }
+
+    #[test]
+    fn the_board_line_ignores_seconds_and_follows_the_beat() {
+        use chrono::{TimeZone, Utc};
+        let local = |h, m, s| {
+            Utc.with_ymd_and_hms(2026, 7, 4, h, m, s)
+                .unwrap()
+                .with_timezone(&Local)
+        };
+        // 11:00:00 UTC and 11:00:30 UTC are both @500. 11:00:50 UTC is @501.
+        let start = local(11, 0, 0);
+        let still = local(11, 0, 30);
+        let next = local(11, 0, 50);
+        assert_eq!(board_clock_line(&start, None), board_clock_line(&still, None));
+        assert_ne!(board_clock_line(&start, None), board_clock_line(&next, None));
+        assert!(board_clock_line(&next, None).contains("@501"));
+        let model = |now| KioskModel::for_screenshot(now, &crate::settings::Place::default());
+        let key = |now| plate_key(640, 800, Pos2::new(320.0, 400.0), 400.0, &model(now));
+        assert_eq!(key(start), key(still));
+        assert_ne!(key(start), key(next));
+    }
+
+    #[test]
+    fn a_cached_frame_redraws_the_hands_and_not_the_boards() {
+        use std::time::Instant;
+        let ctx = egui::Context::default();
+        crate::fonts::install_fonts(&ctx);
+        let width = 480.0;
+        let height = 640.0;
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(width, height));
+        let (center, diameter) = Settings::default().placement(screen.size());
+        let now = screenshot_time();
+        let model = KioskModel::for_screenshot(now, &crate::settings::Place::default());
+        let mut input = egui::RawInput::default();
+        input.screen_rect = Some(screen);
+        input.predicted_dt = 1.0 / 60.0;
+        let pass = |ctx: &egui::Context, input: egui::RawInput| {
+            let started = Instant::now();
+            let mut output = ctx.run_pass(input, |ctx| {
+                let painter = ctx.layer_painter(egui::LayerId::background());
+                paint_live(&painter, screen, center, diameter, &model);
+            });
+            let cpu = started.elapsed();
+            let primitives = ctx.tessellate(output.shapes.clone(), 1.0);
+            let verts: usize = primitives
+                .iter()
+                .map(|clipped| match &clipped.primitive {
+                    egui::epaint::Primitive::Mesh(mesh) => mesh.vertices.len(),
+                    _ => 0,
+                })
+                .sum();
+            let red = primitives.iter().any(|clipped| {
+                let egui::epaint::Primitive::Mesh(mesh) = &clipped.primitive else {
+                    return false;
+                };
+                mesh.vertices.iter().any(|vertex| {
+                    let [r, g, b, _] = vertex.color.to_array();
+                    r > 250 && g < 8 && b < 8
+                })
+            });
+            output.textures_delta.clear();
+            (cpu, verts, red)
+        };
+        let (first, first_verts, first_red) = pass(&ctx, input.clone());
+        let (second, second_verts, second_red) = pass(&ctx, input);
+        eprintln!(
+            "live frame rebuild {:.1} ms ({} verts), cached {:.1} ms ({} verts)",
+            first.as_secs_f64() * 1000.0,
+            first_verts,
+            second.as_secs_f64() * 1000.0,
+            second_verts
+        );
+        assert!(
+            first_red && second_red,
+            "the second hand is in the presented frame"
+        );
+        assert!(
+            second_verts < 20_000,
+            "cached frame still tessellates the whole face ({second_verts})"
+        );
+        assert!(
+            second.as_secs_f64() * 1000.0 < 50.0,
+            "cached frame took {:.1} ms",
+            second.as_secs_f64() * 1000.0
+        );
     }
 
     #[test]
@@ -527,15 +857,17 @@ mod tests {
 
     #[test]
     fn the_clock_line_fits_on_one_row_of_the_board() {
-        // Longest Heindel name. The 643-pixel face holds it on one line.
-        assert!(clock_line_fits(
-            "\u{1F55B} 10:08:37 ORANGE",
-            Vec2::new(1920.0, 1080.0)
-        ));
-        assert!(clock_line_fits(
-            "\u{1F55B} 10:08:37 RED",
-            Vec2::new(1200.0, 800.0)
-        ));
+        // Longest Heindel name plus `@BBB`. No seconds, so this is the wide line.
+        for viewport in [
+            Vec2::new(1920.0, 1080.0),
+            Vec2::new(1200.0, 800.0),
+            Vec2::new(1024.0, 1280.0),
+        ] {
+            assert!(
+                clock_line_fits("\u{1F55B} 22:23 @473 ORANGE", viewport),
+                "clock line wraps on {viewport:?}"
+            );
+        }
     }
 
     fn clock_line_fits(line: &str, viewport: Vec2) -> bool {

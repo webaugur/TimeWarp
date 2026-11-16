@@ -218,11 +218,37 @@ pub(crate) fn paint_markings_and_hands(
     wind: Option<crate::weather::WindHand>,
     cycles: Option<&crate::cycles::CycleTable>,
 ) {
+    paint_markings(painter, center, diameter, now, style, cycles);
+    paint_hands(painter, center, diameter, now, style, wind);
+}
+
+/// Ticks, numerals, and the inner ring. The kiosk caches these with the dial.
+/// Minute-tick colors come from TimeWarp's Chart E rows when `cycles` is set.
+pub(crate) fn paint_markings(
+    painter: &Painter,
+    center: Pos2,
+    diameter: f32,
+    now: DateTime<Local>,
+    style: &RomanClockStyle,
+    cycles: Option<&crate::cycles::CycleTable>,
+) {
     let r = diameter * 0.5;
-    paint_inner_ring(painter, center, r, &style);
-    paint_ticks(painter, center, r, &style, now, cycles);
-    paint_numerals(painter, center, r, &style);
-    let (hour, minute, second) = hand_angles(now, &style);
+    paint_inner_ring(painter, center, r, style);
+    paint_ticks(painter, center, r, style, now, cycles);
+    paint_numerals(painter, center, r, style);
+}
+
+/// Hour, minute, wind, and second hands, plus the hubs. Drawn every frame.
+pub(crate) fn paint_hands(
+    painter: &Painter,
+    center: Pos2,
+    diameter: f32,
+    now: DateTime<Local>,
+    style: &RomanClockStyle,
+    wind: Option<crate::weather::WindHand>,
+) {
+    let r = diameter * 0.5;
+    let (hour, minute, second) = hand_angles(now, style);
     // Gold hands, then the wind hand, then the red second hand. The hub is
     // painted again last so it stays above all of them.
     paint_hand(painter, center, r, hour, &style.hour_hand, &style.shadow);

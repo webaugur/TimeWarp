@@ -40,6 +40,41 @@ pub fn render_rgba_with(
     sun: Option<std::sync::Arc<crate::sun_image::SunImage>>,
     almanac: Option<&crate::timewarp::Almanac>,
 ) -> Result<Vec<u8>, String> {
+    let mut model = KioskModel::for_screenshot(now, place);
+    model.sun = sun;
+    if let Some(almanac) = almanac {
+        if almanac.from_timewarp {
+            model.events = almanac.events.clone();
+            model.sky = almanac.sky.clone();
+            model.cycles = almanac.cycles.clone();
+        }
+        if !almanac.fault.is_empty() {
+            model.status.alert = almanac.fault.clone();
+        }
+    }
+    rasterize(width, height, |painter, screen| {
+        kiosk::paint(painter, screen, center, diameter, &model);
+    })
+}
+
+/// Static layers only (no hands). The kiosk uploads this once per board change.
+pub(crate) fn render_static(
+    width: u32,
+    height: u32,
+    center: Pos2,
+    diameter: f32,
+    model: &KioskModel,
+) -> Result<Vec<u8>, String> {
+    rasterize(width, height, |painter, screen| {
+        kiosk::paint_static(painter, screen, center, diameter, model);
+    })
+}
+
+fn rasterize(
+    width: u32,
+    height: u32,
+    draw: impl FnOnce(&egui::Painter, Rect),
+) -> Result<Vec<u8>, String> {
     if width == 0 || height == 0 || width > 8192 || height > 8192 {
         return Err(format!("screenshot size {width}x{height} is out of range"));
     }
@@ -65,21 +100,12 @@ pub fn render_rgba_with(
         },
     );
 
-    let mut model = KioskModel::for_screenshot(now, place);
-    model.sun = sun;
-    if let Some(almanac) = almanac {
-        if almanac.from_timewarp {
-            model.events = almanac.events.clone();
-            model.sky = almanac.sky.clone();
-            model.cycles = almanac.cycles.clone();
-        }
-        if !almanac.fault.is_empty() {
-            model.status.alert = almanac.fault.clone();
-        }
-    }
+    let mut draw = Some(draw);
     let output = ctx.run_pass(input, |ctx| {
         let painter = ctx.layer_painter(egui::LayerId::background());
-        kiosk::paint(&painter, screen, center, diameter, &model);
+        if let Some(draw) = draw.take() {
+            draw(&painter, screen);
+        }
     });
 
     let mut textures = TextureSet::default();
@@ -444,6 +470,65 @@ mod tests {
     use crate::Settings;
 
     #[test]
+    fn portrait_ring_is_unclipped_and_the_boards_show_lamps() {
+        let width = 640u32;
+        let height = 800u32;
+        let settings = Settings::default();
+        let viewport = Vec2::new(width as f32, height as f32);
+        let (center, diameter) = settings.placement(viewport);
+        let rgba = render_rgba(
+            width,
+            height,
+            center,
+            diameter,
+            screenshot_time(),
+            &settings.place,
+        )
+        .unwrap();
+        let radius = diameter * 0.5;
+        let top = at_pos(
+            &rgba,
+            width,
+            height,
+            center + direction(0.0) * (1.12 * radius),
+        );
+        assert!(
+            top[0] > 40 || top[1] > 40,
+            "the ring at 12 o'clock should be lit chrome, got {top:?}"
+        );
+        let left = at_pos(
+            &rgba,
+            width,
+            height,
+            center + direction(270.0) * (1.12 * radius),
+        );
+        assert!(
+            left[0] as u16 + left[1] as u16 + left[2] as u16 > 40,
+            "the ring at 9 o'clock should not be clipped, got {left:?}"
+        );
+        let screen = Rect::from_min_size(Pos2::ZERO, viewport);
+        let layout = crate::layout::KioskLayout::new(screen, center, diameter);
+        let board = layout.boxes[0];
+        let mut amber = 0u32;
+        let x0 = board.left().clamp(0.0, width as f32) as i32;
+        let x1 = board.right().clamp(0.0, width as f32) as i32;
+        let y0 = board.top().clamp(0.0, height as f32) as i32;
+        let y1 = board.bottom().clamp(0.0, height as f32) as i32;
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let px = at(&rgba, width, x, y);
+                if px[0] > 200 && px[1] > 100 && px[2] < 90 {
+                    amber += 1;
+                }
+            }
+        }
+        assert!(
+            amber > 30,
+            "left board should show amber lamps, found {amber} (diameter {diameter})"
+        );
+    }
+
+    #[test]
     fn screenshot_frame_matches_the_spec_colors() {
         let width = 1000;
         let height = 820;
@@ -522,9 +607,10 @@ mod tests {
             height,
             egui::Pos2::new(center.x - r - 4.0, center.y + 0.15 * r),
         );
+        let past_black = past_left[0] < 12 && past_left[1] < 12 && past_left[2] < 12;
         assert!(
-            past_left[0] < 12 && past_left[1] < 12 && past_left[2] < 12,
-            "the trough should not pass the dial's left edge, got {past_left:?}"
+            !past_black,
+            "the ring continues past the dial edge, got {past_left:?}"
         );
         // The dial's amber meets the trough. Sky or a black ring in between is a gap.
         let rim = at_pos(&rgba, width, height, center + direction(225.0) * (0.97 * r));
