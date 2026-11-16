@@ -233,6 +233,36 @@ class ProvisionTest(unittest.TestCase):
         self.assertIn('chown -R "$CLOCK_USER:$CLOCK_USER" "$tw_src"', script)
         self.assertIn('install "$tw_src"', script)
 
+    def test_clockface_start_does_not_wait_on_provision(self) -> None:
+        script = (Path(__file__).resolve().parents[1] / "provision.sh").read_text(
+            encoding="utf-8"
+        )
+        starts = [
+            line.strip()
+            for line in script.splitlines()
+            if "systemctl start" in line and "clockface" in line
+        ]
+        self.assertTrue(starts)
+        for line in starts:
+            self.assertIn("--no-block", line)
+        self.assertLess(
+            script.index("/var/lib/clock-provision/done"),
+            script.index("systemctl start --no-block clockface.service"),
+        )
+
+    def test_first_boot_cmdline_uses_counter_clockwise_rotate(self) -> None:
+        once = merge_cmdline(
+            "console=tty1 rootwait quiet splash video=HDMI-A-1:1280x1024@60,rotate=90",
+            kiosk="kms",
+            rotation=90,
+            instance_id="clock-sdcard-1",
+            wifi_country="US",
+        ).split()
+        self.assertEqual(
+            [tok for tok in once if tok.startswith("video=")],
+            ["video=HDMI-A-1:1280x1024@60,rotate=270"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
