@@ -123,6 +123,183 @@ fn rasterize(
     Ok(buf)
 }
 
+/// One egui context for the plate worker. Fonts are installed once.
+pub(crate) struct SoftwareRaster {
+    ctx: Context,
+    textures: TextureSet,
+    buf: Vec<u8>,
+}
+
+impl SoftwareRaster {
+    pub(crate) fn new() -> Self {
+        let ctx = Context::default();
+        install_fonts(&ctx);
+        ctx.set_pixels_per_point(1.0);
+        Self {
+            ctx,
+            textures: TextureSet::default(),
+            buf: Vec::new(),
+        }
+    }
+
+    /// The whole static plate, opaque, origin top-left. Same pixels as
+    /// [`render_static`].
+    pub(crate) fn paint_static(
+        &mut self,
+        width: u32,
+        height: u32,
+        center: Pos2,
+        diameter: f32,
+        model: &KioskModel,
+    ) -> Result<Vec<u8>, String> {
+        self.paint(width, height, |painter, screen| {
+            kiosk::paint_static(painter, screen, center, diameter, model);
+        })?;
+        Ok(self.buf.clone())
+    }
+
+    /// Boards and the status bar only. Each returned patch is the panel
+    /// interior, which does not depend on the face underneath it.
+    pub(crate) fn paint_light(
+        &mut self,
+        width: u32,
+        height: u32,
+        center: Pos2,
+        diameter: f32,
+        model: &KioskModel,
+        layers: u16,
+    ) -> Result<Vec<crate::plate::Patch>, String> {
+        self.paint(width, height, |painter, screen| {
+            kiosk::paint_light(painter, screen, center, diameter, model, layers);
+        })?;
+        let mut patches = Vec::new();
+        for (layer, use_panel) in [
+            (crate::plate::Layer::BoardLeft, true),
+            (crate::plate::Layer::ClockRow, false),
+            (crate::plate::Layer::BoardRight, true),
+            (crate::plate::Layer::Status, true),
+        ] {
+            if layers & layer.bit() == 0 {
+                continue;
+            }
+            if layer == crate::plate::Layer::ClockRow
+                && layers & crate::plate::Layer::BoardLeft.bit() != 0
+            {
+                continue;
+            }
+            let rect = if use_panel {
+                kiosk::panel_px(layer, width, height, center, diameter)
+            } else {
+                kiosk::layer_px(layer, width, height, center, diameter)
+            };
+            patches.push(crop_patch(layer, &self.buf, width, rect));
+        }
+        Ok(patches)
+    }
+
+    /// Board fill, unlit lamps, and the clock heading. The row is opaque, so
+    /// these pixels match the same row of a full plate.
+    pub(crate) fn paint_clock_strip(
+        &mut self,
+        width: u32,
+        height: u32,
+        center: Pos2,
+        diameter: f32,
+        model: &KioskModel,
+    ) -> Result<crate::plate::Patch, String> {
+        let rect = kiosk::layer_px(
+            crate::plate::Layer::ClockRow,
+            width,
+            height,
+            center,
+            diameter,
+        );
+        self.paint(width, height, |painter, screen| {
+            kiosk::paint_clock_strip(painter, screen, center, diameter, model);
+        })?;
+        Ok(crop_patch(
+            crate::plate::Layer::ClockRow,
+            &self.buf,
+            width,
+            rect,
+        ))
+    }
+
+    fn paint(
+        &mut self,
+        width: u32,
+        height: u32,
+        draw: impl FnOnce(&egui::Painter, Rect),
+    ) -> Result<(), String> {
+        if width == 0 || height == 0 || width > 8192 || height > 8192 {
+            return Err(format!("plate size {width}x{height} is out of range"));
+        }
+        let pixels = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|n| n.checked_mul(4))
+            .ok_or_else(|| "plate dimensions overflow".to_owned())?;
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(width as f32, height as f32));
+        let mut input = egui::RawInput::default();
+        input.screen_rect = Some(screen);
+        input.predicted_dt = 1.0 / 60.0;
+        input.viewports.insert(
+            egui::ViewportId::ROOT,
+            egui::ViewportInfo {
+                inner_rect: Some(screen),
+                native_pixels_per_point: Some(1.0),
+                ..Default::default()
+            },
+        );
+        let mut draw = Some(draw);
+        let output = self.ctx.run_pass(input, |ctx| {
+            let painter = ctx.layer_painter(egui::LayerId::background());
+            if let Some(draw) = draw.take() {
+                draw(&painter, screen);
+            }
+        });
+        self.textures.apply(output.textures_delta);
+        let primitives = self.ctx.tessellate(output.shapes, output.pixels_per_point);
+        if self.buf.len() != pixels {
+            self.buf.resize(pixels, 0);
+        }
+        for pixel in self.buf.chunks_exact_mut(4) {
+            pixel[0] = 0;
+            pixel[1] = 0;
+            pixel[2] = 0;
+            pixel[3] = 255;
+        }
+        for clipped in primitives {
+            paint_primitive(&mut self.buf, width, height, &clipped, &self.textures);
+        }
+        Ok(())
+    }
+}
+
+fn crop_patch(
+    layer: crate::plate::Layer,
+    buf: &[u8],
+    width: u32,
+    rect: crate::plate::PxRect,
+) -> crate::plate::Patch {
+    if rect.is_empty() {
+        return crate::plate::Patch::empty(layer);
+    }
+    let mut rgba = Vec::with_capacity(rect.w as usize * rect.h as usize * 4);
+    for y in rect.y..rect.bottom() {
+        let start = ((y * width + rect.x) * 4) as usize;
+        let end = start + rect.w as usize * 4;
+        rgba.extend_from_slice(&buf[start..end]);
+    }
+    crate::plate::Patch {
+        layer,
+        x: rect.x,
+        y: rect.y,
+        w: rect.w,
+        h: rect.h,
+        rgba,
+    }
+}
+
 pub fn write_png(path: &Path, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> {
     if rgba.len() != width as usize * height as usize * 4 {
         return Err("PNG buffer length does not match the image size".into());

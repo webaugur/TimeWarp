@@ -18,6 +18,7 @@ mod leds;
 mod matrix;
 mod mural;
 mod ornament;
+mod plate;
 mod quarters;
 mod raster;
 mod roman;

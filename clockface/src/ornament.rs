@@ -140,20 +140,13 @@ fn paint_placed(
     let height = (place.view[3] * scale * ppp * 1.7)
         .round()
         .clamp(32.0, 1600.0) as u32;
-    let Some(rgba) = cached_rgba(name, svg, width, height) else {
+    let Some(texture) = cached_texture(ctx, name, svg, width, height) else {
         return;
     };
-    let image = egui::ColorImage::from_rgba_premultiplied([width as usize, height as usize], &rgba);
-    let texture = ctx.load_texture_cached(
-        name,
-        Id::unique((name, width, height)),
-        image,
-        TextureOptions::LINEAR,
-    );
     if let Some(shadow) = shadow {
         paint_hand_shadow(
             painter,
-            texture.id(),
+            texture,
             center,
             degrees,
             scale,
@@ -163,11 +156,11 @@ fn paint_placed(
         );
     }
     if numeral_ring {
-        paint_numeral_ring(painter, texture.id(), center, scale, place.view, place.tip);
+        paint_numeral_ring(painter, texture, center, scale, place.view, place.tip);
     } else {
         paint_quad(
             painter,
-            texture.id(),
+            texture,
             center,
             degrees,
             scale,
@@ -176,6 +169,27 @@ fn paint_placed(
             Color32::WHITE,
         );
     }
+}
+
+/// Keep the decoded SVG on the context. A cache hit must not clone the pixels
+/// or ask egui to memcmp them, which the hands would otherwise do every frame.
+fn cached_texture(
+    ctx: &egui::Context,
+    name: &str,
+    svg: &str,
+    width: u32,
+    height: u32,
+) -> Option<egui::TextureId> {
+    let key = Id::unique((name, width, height));
+    if let Some(handle) = ctx.data(|data| data.get_temp::<egui::TextureHandle>(key)) {
+        return Some(handle.id());
+    }
+    let rgba = cached_rgba(name, svg, width, height)?;
+    let image = egui::ColorImage::from_rgba_premultiplied([width as usize, height as usize], &rgba);
+    let handle = ctx.load_texture(name, image, TextureOptions::LINEAR);
+    let id = handle.id();
+    ctx.data_mut(|data| data.insert_temp(key, handle));
+    Some(id)
 }
 
 fn paint_hand_shadow(

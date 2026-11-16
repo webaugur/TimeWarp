@@ -346,7 +346,7 @@ fn dial_color(dist: f32, radius: f32) -> Color32 {
     Color32::from_rgb(red.round() as u8, green.round() as u8, blue.round() as u8)
 }
 
-fn paint_inner_ring(painter: &Painter, center: Pos2, r: f32, style: &RomanClockStyle) {
+pub(crate) fn paint_inner_ring(painter: &Painter, center: Pos2, r: f32, style: &RomanClockStyle) {
     let width = style.inner_ring_width * r;
     if width <= 0.0 {
         return;
@@ -358,7 +358,7 @@ fn paint_inner_ring(painter: &Painter, center: Pos2, r: f32, style: &RomanClockS
     );
 }
 
-fn paint_ticks(
+pub(crate) fn paint_ticks(
     painter: &Painter,
     center: Pos2,
     r: f32,
@@ -472,7 +472,7 @@ fn paint_gold_pin(
     painter.add(Shape::mesh(mesh));
 }
 
-fn paint_numerals(painter: &Painter, center: Pos2, r: f32, _style: &RomanClockStyle) {
+pub(crate) fn paint_numerals(painter: &Painter, center: Pos2, r: f32, _style: &RomanClockStyle) {
     crate::ornament::paint_numerals(painter, center, r);
 }
 
