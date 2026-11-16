@@ -15,7 +15,11 @@
 
 use chrono::{DateTime, Datelike, Local, NaiveDate, Timelike};
 
-const KNOWN_NEW_JD: f64 = 2_451_550.25972;
+/// Mean new moon used by `timewarp.astro.NEW_MOON_JD` (noon-scale age).
+const KNOWN_NEW_JD: f64 = 2_451_550.1;
+/// Meeus new moon of 2000-01-06 18:14 UTC. TimeWarp's constant is earlier; the
+/// live face uses TimeWarp's `age_days`. This instant is only the unit check.
+const MEEUS_NEW_JD: f64 = 2_451_550.25972;
 const SYNODIC_DAYS: f64 = 29.530588853;
 const UNIX_EPOCH_JD: f64 = 2_440_587.5;
 
@@ -29,6 +33,30 @@ pub fn moon_phase_unix(unix_secs: f64) -> f64 {
 pub fn moon_phase(now: DateTime<Local>) -> f64 {
     let secs = now.timestamp() as f64 + now.timestamp_subsec_nanos() as f64 / 1e9;
     moon_phase_unix(secs)
+}
+
+/// Phase at 12:00 UTC on `date`, the same noon Julian day `timewarp moon` uses.
+pub fn moon_phase_on(date: NaiveDate) -> f64 {
+    let jd = julian_day(date.year(), date.month(), date.day()) + 0.5;
+    let age = (jd - KNOWN_NEW_JD).rem_euclid(SYNODIC_DAYS);
+    age / SYNODIC_DAYS
+}
+
+/// Eight named phases, nearest eighth, matching `timewarp.astro._phase_name`.
+pub fn phase_name(phase: f64) -> &'static str {
+    let phase = phase.rem_euclid(1.0);
+    let slice = 1.0 / 8.0;
+    let idx = ((phase + slice / 2.0) / slice).floor().rem_euclid(8.0) as usize;
+    [
+        "new moon",
+        "waxing crescent",
+        "first quarter",
+        "waxing gibbous",
+        "full moon",
+        "waning gibbous",
+        "last quarter",
+        "waning crescent",
+    ][idx]
 }
 
 /// Fraction of the local civil day, 0 at midnight and 0.5 at noon.
@@ -330,6 +358,8 @@ pub struct DaySky {
     pub sunset_unix: Option<f64>,
     pub season: String,
     pub moon_phase: f64,
+    /// TimeWarp's phase name, lowercased. The board prints this rather than a second classifier.
+    pub moon_name: String,
     pub moonrise_unix: Option<f64>,
     pub moonset_unix: Option<f64>,
 }
@@ -340,11 +370,13 @@ impl DaySky {
         let date = now.date_naive();
         let times = sun_times(date, place.latitude, place.longitude);
         let (rise, set) = moon_events(date, place.latitude, place.longitude);
+        let phase = moon_phase_on(date);
         Self {
             sunrise_unix: times.map(|times| times.sunrise_unix),
             sunset_unix: times.map(|times| times.sunset_unix),
             season: season_name(date).to_owned(),
-            moon_phase: moon_phase(now),
+            moon_phase: phase,
+            moon_name: phase_name(phase).to_owned(),
             moonrise_unix: rise,
             moonset_unix: set,
         }
@@ -371,6 +403,7 @@ mod tests {
     fn known_new_moon_is_near_zero_and_full_is_near_half() {
         // 2000-01-06 18:14:00 UTC.
         let new_moon = 947_182_440.0;
+        assert!((MEEUS_NEW_JD - KNOWN_NEW_JD).abs() < 0.2);
         let phase = moon_phase_unix(new_moon);
         assert!(phase < 0.02 || phase > 0.98, "new moon phase {phase}");
         let full = new_moon + 14.765 * 86_400.0;
@@ -396,7 +429,7 @@ mod tests {
     #[test]
     fn indianapolis_january_day_is_shorter_than_night() {
         let date = NaiveDate::from_ymd_opt(2026, 1, 15).unwrap();
-        let times = sun_times(date, 39.7684, -86.1581).unwrap();
+        let times = sun_times(date, 39.768623, -86.162643).unwrap();
         let hours = (times.sunset_unix - times.sunrise_unix) / 3600.0;
         assert!(times.sunrise_unix < times.sunset_unix);
         assert!(hours > 8.5 && hours < 11.0, "day length {hours} h");
@@ -405,7 +438,7 @@ mod tests {
     #[test]
     fn january_screenshot_day_has_a_moonrise_and_a_moonset() {
         let date = NaiveDate::from_ymd_opt(2026, 1, 15).unwrap();
-        let (rise, set) = moon_events(date, 39.7684, -86.1581);
+        let (rise, set) = moon_events(date, 39.768623, -86.162643);
         let rise = rise.expect("moonrise");
         let set = set.expect("moonset");
         assert!((rise - set).abs() > 3600.0);

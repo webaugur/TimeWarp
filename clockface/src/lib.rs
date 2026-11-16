@@ -47,7 +47,7 @@ pub use sun_image::{
     load_cached as load_cached_sun, load_or_fetch as load_sun, SunImage,
     REFRESH_SECS as SUN_REFRESH_SECS,
 };
-pub use timewarp::{fetch_almanac, Almanac, AlmanacSlot};
+pub use timewarp::{cached_almanac, fetch_almanac, Almanac, AlmanacSlot};
 pub use weather::{fetch as fetch_weather, load_cache, now_unix, store_cache, WeatherReport};
 
 /// Default face diameter, in pixels.

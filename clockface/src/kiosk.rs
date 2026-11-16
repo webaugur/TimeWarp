@@ -38,6 +38,8 @@ pub struct KioskModel {
     pub sun: Option<std::sync::Arc<SunImage>>,
     /// Hours ahead for the barometer's forecast tick. Three is the tendency window.
     pub barometer_hours: u32,
+    /// Chart E rows from `timewarp cycle`. None uses the built-in Lewis table.
+    pub cycles: Option<crate::cycles::CycleTable>,
 }
 
 impl KioskModel {
@@ -54,6 +56,7 @@ impl KioskModel {
             status,
             sun: None,
             barometer_hours: 3,
+            cycles: None,
         }
     }
 }
@@ -97,6 +100,7 @@ pub fn paint(painter: &Painter, screen: Rect, center: Pos2, diameter: f32, model
         model.now,
         &roman::RomanClockStyle::default(),
         model.weather.wind_hand(),
+        model.cycles.as_ref(),
     );
     crate::gauges::paint(
         painter,
@@ -264,7 +268,7 @@ fn paint_boxes(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
 fn paint_calendar(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, model: &KioskModel) {
     let mut y = origin.y;
     if line_fits(y, pitch, panel) {
-        let clock = board_clock_line(&model.now);
+        let clock = board_clock_line(&model.now, model.cycles.as_ref());
         y = paint_heading(painter, panel, origin, pitch, &clock);
     }
     let today = model.now.date_naive();
@@ -288,7 +292,7 @@ fn paint_calendar(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, mode
         }
         let title = format!(
             "{} {}",
-            events::event_mark(&event.title, &event.time),
+            events::event_mark(&event.title, &event.time, &event.date),
             event.title
         );
         y = matrix::paint_text(painter, panel, Pos2::new(origin.x, y), pitch, &title, 2);
@@ -327,7 +331,7 @@ fn paint_forecast(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, mode
         sky_lines.push(format!("\u{2B07} Sunset   {}", sky::format_local_hm(when)));
     }
     sky_lines.push(format!("\u{1F31E} {}", model.sky.season));
-    sky_lines.push(format!("\u{1F319} {}", moon_name(model.sky.moon_phase)));
+    sky_lines.push(format!("\u{1F319} {}", model.sky.moon_name));
     if let Some(when) = model.sky.moonrise_unix {
         sky_lines.push(format!("\u{2B06} Moonrise  {}", sky::format_local_hm(when)));
     }
@@ -423,27 +427,6 @@ fn brief_condition(code: i32) -> &'static str {
     }
 }
 
-fn moon_name(phase: f64) -> &'static str {
-    let p = phase.rem_euclid(1.0);
-    if p < 0.03 || p > 0.97 {
-        "new"
-    } else if p < 0.22 {
-        "waxing crescent"
-    } else if p < 0.28 {
-        "first quarter"
-    } else if p < 0.47 {
-        "waxing gibbous"
-    } else if p < 0.53 {
-        "full"
-    } else if p < 0.72 {
-        "waning gibbous"
-    } else if p < 0.78 {
-        "last quarter"
-    } else {
-        "waning crescent"
-    }
-}
-
 fn serif() -> FontFamily {
     FontFamily::Name("serif".into())
 }
@@ -472,12 +455,11 @@ fn board_hms(now: &DateTime<Local>) -> String {
 }
 
 /// Left-board clock: local `HH:MM:SS` and the Cycles color, for example `10:08:37 RED`.
-fn board_clock_line(now: &DateTime<Local>) -> String {
-    format!(
-        "\u{1F55B} {} {}",
-        board_hms(now),
-        crate::cycles::period_color_name(*now)
-    )
+fn board_clock_line(now: &DateTime<Local>, cycles: Option<&crate::cycles::CycleTable>) -> String {
+    let name = cycles
+        .and_then(|table| table.color_name_at(*now))
+        .unwrap_or_else(|| crate::cycles::period_color_name(*now).to_owned());
+    format!("\u{1F55B} {} {}", board_hms(now), name.to_ascii_uppercase())
 }
 
 /// Local civil date in the board's short style, for example `THU JAN 15 2026`.
@@ -524,7 +506,7 @@ mod tests {
         let now = screenshot_time();
         assert_eq!(board_hms(&now), "10:08:37");
         assert_eq!(board_date(now), "THU JAN 15 2026");
-        assert_eq!(board_clock_line(&now), "\u{1F55B} 10:08:37 RED");
+        assert_eq!(board_clock_line(&now, None), "\u{1F55B} 10:08:37 RED");
         let sunday = match Local.with_ymd_and_hms(2026, 11, 15, 9, 5, 0) {
             chrono::LocalResult::Single(time) => time,
             chrono::LocalResult::Ambiguous(earliest, _) => earliest,

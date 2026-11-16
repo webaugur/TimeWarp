@@ -67,13 +67,23 @@ pub fn upcoming(events: &[CalendarEvent], today: NaiveDate, limit: usize) -> Vec
 /// Solstices and equinoxes use the solar mark (🌞), the one TimeWarp puts on a
 /// season heading. A named holiday uses that table. An all-day row with no closer
 /// match uses the default holiday mark (🎉). A timed event uses the calendar mark (📅).
-pub fn event_mark(title: &str, time: &str) -> &'static str {
+pub fn event_mark(title: &str, time: &str, date: &str) -> &'static str {
     let low = title.to_lowercase();
     if low.contains("solstice") || low.contains("equinox") {
         return "\u{1F31E}";
     }
+    // Same table and order as timewarp.ui.holiday_emoji. Orthodox/Julian
+    // Christmas on 6 January uses the eve mark, matching that function.
+    let orthodox = low.contains("orthodox") || low.contains("julian");
+    if date.ends_with("-01-06") && orthodox && low.contains("christmas") {
+        return "\u{1F385}";
+    }
     const KEYS: &[(&str, &str)] = &[
+        ("orthodox christmas eve", "\u{1F385}"),
+        ("julian christmas eve", "\u{1F385}"),
         ("christmas eve", "\u{1F385}"),
+        ("orthodox christmas", "\u{1F384}"),
+        ("julian christmas", "\u{1F384}"),
         ("christmas", "\u{1F384}"),
         ("new year", "\u{1F386}"),
         ("good friday", "\u{1F423}"),
@@ -81,7 +91,12 @@ pub fn event_mark(title: &str, time: &str) -> &'static str {
         ("pentecost", "\u{1F423}"),
         ("whit", "\u{1F423}"),
         ("easter", "\u{1F423}"),
+        ("thanksgiving", "\u{1F983}"),
         ("halloween", "\u{1F383}"),
+        ("hanukkah", "\u{1F54E}"),
+        ("chanukah", "\u{1F54E}"),
+        ("diwali", "\u{1FA94}"),
+        ("deepavali", "\u{1FA94}"),
         ("ramadan", "\u{1F319}"),
         ("eid", "\u{1F319}"),
         ("juneteenth", "\u{1F386}"),
@@ -89,6 +104,14 @@ pub fn event_mark(title: &str, time: &str) -> &'static str {
         ("bastille", "\u{1F386}"),
         ("canada day", "\u{1F386}"),
         ("national day", "\u{1F386}"),
+        ("memorial", "\u{1F396}\u{FE0F}"),
+        ("veterans", "\u{1F396}\u{FE0F}"),
+        ("armistice", "\u{1F396}\u{FE0F}"),
+        ("remembrance", "\u{1F396}\u{FE0F}"),
+        ("anzac", "\u{1F396}\u{FE0F}"),
+        ("may day", "\u{1F6E0}\u{FE0F}"),
+        ("labour", "\u{1F6E0}\u{FE0F}"),
+        ("labor", "\u{1F6E0}\u{FE0F}"),
     ];
     for (key, glyph) in KEYS {
         if low.contains(key) {
@@ -140,13 +163,37 @@ mod tests {
 
     #[test]
     fn marks_follow_the_timewarp_holiday_table() {
-        assert_eq!(event_mark("Christmas Eve", "all day"), "\u{1F385}");
-        assert_eq!(event_mark("Christmas Day", "all day"), "\u{1F384}");
-        assert_eq!(event_mark("Winter solstice", "all day"), "\u{1F31E}");
         assert_eq!(
-            event_mark("Martin Luther King Jr. Day", "all day"),
+            event_mark("Christmas Eve", "all day", "2026-12-24"),
+            "\u{1F385}"
+        );
+        assert_eq!(
+            event_mark("Christmas Day", "all day", "2026-12-25"),
+            "\u{1F384}"
+        );
+        assert_eq!(
+            event_mark("Orthodox Christmas", "all day", "2026-01-06"),
+            "\u{1F385}"
+        );
+        assert_eq!(
+            event_mark("Winter solstice", "all day", "2026-12-21"),
+            "\u{1F31E}"
+        );
+        assert_eq!(
+            event_mark("Thanksgiving Day", "all day", "2026-11-26"),
+            "\u{1F983}"
+        );
+        assert_eq!(
+            event_mark("Labor Day", "all day", "2026-09-07"),
+            "\u{1F6E0}\u{FE0F}"
+        );
+        assert_eq!(
+            event_mark("Martin Luther King Jr. Day", "all day", "2026-01-19"),
             "\u{1F389}"
         );
-        assert_eq!(event_mark("Family dinner", "18:00"), "\u{1F4C5}");
+        assert_eq!(
+            event_mark("Family dinner", "18:00", "2026-01-18"),
+            "\u{1F4C5}"
+        );
     }
 }

@@ -46,10 +46,10 @@ impl Place {
     pub fn indianapolis() -> Self {
         Self {
             name: "Indianapolis".into(),
-            latitude: 39.7684,
-            longitude: -86.1581,
+            latitude: 39.768623,
+            longitude: -86.162643,
             units: Units::Imperial,
-            tz: None,
+            tz: Some("America/Indiana/Indianapolis".into()),
         }
     }
 }

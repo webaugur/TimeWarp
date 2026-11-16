@@ -205,7 +205,7 @@ pub fn paint_with(
     }
     let r = diameter * 0.5;
     paint_brass(painter, center, r, 0.0);
-    paint_markings_and_hands(painter, center, diameter, now, style, None);
+    paint_markings_and_hands(painter, center, diameter, now, style, None, None);
 }
 
 /// Inner ring, ticks, numerals, and hands. The kiosk paints these after the aperture discs.
@@ -216,10 +216,11 @@ pub(crate) fn paint_markings_and_hands(
     now: DateTime<Local>,
     style: &RomanClockStyle,
     wind: Option<crate::weather::WindHand>,
+    cycles: Option<&crate::cycles::CycleTable>,
 ) {
     let r = diameter * 0.5;
     paint_inner_ring(painter, center, r, &style);
-    paint_ticks(painter, center, r, &style, now);
+    paint_ticks(painter, center, r, &style, now, cycles);
     paint_numerals(painter, center, r, &style);
     let (hour, minute, second) = hand_angles(now, &style);
     // Gold hands, then the wind hand, then the red second hand. The hub is
@@ -337,6 +338,7 @@ fn paint_ticks(
     r: f32,
     style: &RomanClockStyle,
     now: DateTime<Local>,
+    cycles: Option<&crate::cycles::CycleTable>,
 ) {
     for step in 0..60 {
         let degrees = step as f32 * 6.0;
@@ -348,7 +350,7 @@ fn paint_ticks(
             paint_teardrop(painter, center, r, degrees, &style.hour_tick, Some(1.0));
         } else {
             let mut minute = style.minute_tick;
-            minute.color = crate::cycles::minute_tick_color_at(now, step);
+            minute.color = crate::cycles::minute_tick_color_at(now, step, cycles);
             paint_teardrop(painter, center, r, degrees, &minute, None);
         }
     }

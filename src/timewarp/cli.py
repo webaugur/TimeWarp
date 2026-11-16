@@ -953,8 +953,10 @@ def cmd_cycle(args: argparse.Namespace) -> int:
     cite = [
         ("Calendar:", "CE+1353; RC day and equinox year start at local midnight"),
         ("Cycle:", "1690 years from midnight on the 337 CE equinox date"),
-        ("Lewis:", "Self-Mastery and Fate with the Cycles of Life (1929)"),
-        ("Clock:", "https://cycles.amorc.org/en/cycles"),
+        ("Lewis:", "Self-Mastery and Fate with the Cycles of Life (1929), Chart E"),
+        ("Planets:", "Nordhaus-Bike, Rose+Croix Journal 16 (2022)"),
+        ("Pigments:", "Heindel, The Message of the Stars (1918), p. 64"),
+        ("Letters:", "https://cycles.amorc.org/en/cycles (letter grid only)"),
     ]
     print(marked("cycle", "Rosicrucian cycle", emoji=em))
     print_kv_blocks([meta, now_rows, lewis_rows, cite], color=em)

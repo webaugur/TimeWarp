@@ -6,9 +6,16 @@ Calendar rules (user + public AMORC):
   Star date YEAR.DDD = midnights since the equinox-date midnight.
   1690-year cycles from midnight on the 337 CE March-equinox date.
 
-Lewis *Self-Mastery and Fate with the Cycles of Life*: period *lengths* only.
-Daily A–G letters follow https://cycles.amorc.org/en/cycles (seven slices
-from local midnight). Place defaults to Greenwich.
+Daily periods follow H. Spencer Lewis, *Self-Mastery and Fate with the
+Cycles of Life* (1929), Chart E: seven exact parts of the local standard
+day (86400/7 seconds). Printed boundaries (03:25, 06:51, …) are that
+division rounded to the minute and are only for display. Daylight saving
+is removed before the period is chosen. The letter is the color's key.
+Planets are the Chaldean rulers Lewis built the cycle on (Nordhaus-Bike
+2022): A Sun, B Venus, C Mercury, D Moon, E Saturn, F Jupiter, G Mars.
+Lewis prints no pigments. The colors are Heindel's planetary colors
+(*The Message of the Stars*, 1918, p. 64). https://cycles.amorc.org/en/cycles
+is only a letter-grid reference. Place defaults to Greenwich.
 """
 
 from __future__ import annotations
@@ -19,7 +26,7 @@ from zoneinfo import ZoneInfo
 
 from timewarp.astro import seasons_for_year
 from timewarp.errors import TimeWarpError
-from timewarp.iso import Instant, as_date, format_clock, format_instant
+from timewarp.iso import Instant, as_date, format_instant
 from timewarp.places import Place
 
 # AMORC historically reckons the equinox at Greenwich.
@@ -33,55 +40,48 @@ EPOCH_CE = 337
 SOUL_START_MONTH = 3
 SOUL_START_DAY = 22
 
-# AMORC cycles.amorc.org colors for letters A–G (musical notes).
+# One seventh of a civil day. Lewis's "3 hours, 25 minutes, and 43 seconds."
+PERIOD_SECS = 86400.0 / 7.0
+
+# Heindel pigments, keyed by Lewis's Chart E letter (not by period number).
 NOTE_COLOR = {
-    "A": (241, 207, 103),
-    "B": (146, 209, 129),
-    "C": (232, 155, 69),
-    "D": (204, 117, 199),
-    "E": (143, 160, 201),
-    "F": (123, 196, 223),
-    "G": (238, 111, 111),
+    "A": (0xFF, 0x8C, 0x00),  # Sun, orange
+    "B": (0xE6, 0xC2, 0x00),  # Venus, yellow
+    "C": (0x7B, 0x2D, 0xB0),  # Mercury, violet
+    "D": (0x2E, 0x8B, 0x57),  # Moon, green
+    "E": (0x32, 0x2A, 0x6E),  # Saturn, indigo
+    "F": (0x1E, 0x5A, 0xB0),  # Jupiter, blue
+    "G": (0xD0, 0x22, 0x22),  # Mars, red
 }
 NOTE_HEX = {k: f"#{r:02x}{g:02x}{b:02x}" for k, (r, g, b) in NOTE_COLOR.items()}
-# Names for the same hex values (cycles.amorc.org has no English labels).
 NOTE_NAME = {
-    "A": "gold",
-    "B": "green",
-    "C": "orange",
-    "D": "orchid",
-    "E": "periwinkle",
-    "F": "sky",
-    "G": "coral",
+    "A": "orange",
+    "B": "yellow",
+    "C": "violet",
+    "D": "green",
+    "E": "indigo",
+    "F": "blue",
+    "G": "red",
 }
+# Chaldean day ruler on the letter, not on the period index.
+NOTE_PLANET = {
+    "A": "sun",
+    "B": "venus",
+    "C": "mercury",
+    "D": "moon",
+    "E": "saturn",
+    "F": "jupiter",
+    "G": "mars",
+}
+# Kept so a period-indexed lookup cannot drift from the letter again.
+DAILY_PLANET = {letter: NOTE_PLANET[letter] for letter in "ABCDEFG"}
 
-# Daily 24h / 7 (AMORC clock, minutes from local midnight).
-DAILY_SLICES = (
-    (1, 0, 205, "Midnight to 3:25 a.m."),
-    (2, 205, 411, "3:25 a.m. to 6:51 a.m."),
-    (3, 411, 617, "6:51 a.m. to 10:17 a.m."),
-    (4, 617, 822, "10:17 a.m. to 1:42 p.m."),
-    (5, 822, 1028, "1:42 p.m. to 5:08 p.m."),
-    (6, 1028, 1234, "5:08 p.m. to 8:34 p.m."),
-    (7, 1234, 1440, "8:34 p.m. to midnight"),
-)
+# Lewis's printed boundaries, minutes from standard midnight. Display only.
+LEWIS_MINUTES = (0, 205, 411, 617, 822, 1028, 1234, 1440)
 
-# weekday (Mon=0..Sun=6 Python) → AMORC sunday-first index
+# weekday (Mon=0..Sun=6 Python) → Sunday-first index
 _PY_TO_SUNDAY = (1, 2, 3, 4, 5, 6, 0)
-
-# period 1..7 × sunday-first weekday → letter (cycles.amorc.org)
-DAILY_LETTERS = (
-    # Sun Mon Tue Wed Thu Fri Sat
-    ("G", "C", "F", "B", "E", "A", "D"),
-    ("A", "D", "G", "C", "F", "B", "E"),
-    ("B", "E", "A", "D", "G", "C", "F"),
-    ("C", "F", "B", "E", "A", "D", "G"),
-    ("D", "G", "C", "F", "B", "E", "A"),
-    ("E", "A", "D", "G", "C", "F", "B"),
-    ("F", "B", "E", "A", "D", "G", "C"),
-)
-
-DAILY_PLANET = (None, "sun", "venus", "mercury", "moon", "mars", "jupiter", "saturn")
+_LETTERS = "ABCDEFG"
 
 # Yearly cycle 1–7 keywords (Hershenow / 1947 Digest public summary of Lewis).
 YEARLY_KEY = (
@@ -268,33 +268,116 @@ def yearly_period(born: Instant, when: Instant, tz: str) -> tuple[int, str, str]
     return i + 1, letter, YEARLY_KEY[i]
 
 
+def dst_advance_seconds(local: datetime) -> int:
+    """Seconds the civil clock is ahead of local standard time.
+
+    The standard offset is the smaller of the 15 January and 15 July offsets
+    in this zone. A zone with no daylight saving contributes 0. Indianapolis
+    has observed daylight saving since 2006, so a July afternoon there is
+    3600 seconds ahead of Eastern standard time.
+    """
+    if local.tzinfo is None or local.utcoffset() is None:
+        return 0
+    zone = local.tzinfo
+    year = local.year
+    january = datetime(year, 1, 15, 12, tzinfo=zone)
+    july = datetime(year, 7, 15, 12, tzinfo=zone)
+    jan_off = january.utcoffset()
+    jul_off = july.utcoffset()
+    now_off = local.utcoffset()
+    if jan_off is None or jul_off is None or now_off is None:
+        return 0
+    standard = min(int(jan_off.total_seconds()), int(jul_off.total_seconds()))
+    return int(now_off.total_seconds()) - standard
+
+
+def standard_seconds_from_midnight(local: datetime) -> int:
+    """Local standard seconds since midnight, in 0..86399."""
+    civil = local.hour * 3600 + local.minute * 60 + local.second
+    return (civil - dst_advance_seconds(local)) % 86400
+
+
+def period_index(standard_secs: float) -> int:
+    """0 is midnight–03:25, 2 is 06:51–10:17, 6 is 20:34–midnight."""
+    index = int(standard_secs // PERIOD_SECS)
+    if index >= 7:
+        return 6
+    if index < 0:
+        return 0
+    return index
+
+
+def chart_e_letter(sunday_index: int, period: int) -> str:
+    """Chart E. Sunday's first period is G. Each later weekday starts three letters later."""
+    start = (6 + 3 * (sunday_index % 7)) % 7
+    return _LETTERS[(start + period) % 7]
+
+
+def _hhmm(minutes: int) -> str:
+    if minutes >= 1440:
+        return "24:00"
+    hour, minute = divmod(minutes, 60)
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _lewis_span(index: int) -> str:
+    """Printed Chart E bounds for this period. Classification does not use these."""
+    return f"{_hhmm(LEWIS_MINUTES[index])}–{_hhmm(LEWIS_MINUTES[index + 1])} standard"
+
+
+def period_row(sunday_index: int, index: int) -> dict:
+    letter = chart_e_letter(sunday_index, index)
+    start = index * PERIOD_SECS
+    end = 86400.0 if index == 6 else (index + 1) * PERIOD_SECS
+    return {
+        "period": index + 1,
+        "letter": letter,
+        "planet": NOTE_PLANET[letter],
+        "color": NOTE_NAME[letter],
+        "color_hex": NOTE_HEX[letter],
+        "color_rgb": list(NOTE_COLOR[letter]),
+        "start_sec": start,
+        "end_sec": end,
+        "time": _lewis_span(index),
+    }
+
+
+def period_day(day: date, tz: str) -> dict:
+    """One civil day's Chart E rows, in local standard time, plus that day's noon DST lead."""
+    noon = datetime(day.year, day.month, day.day, 12, 0, tzinfo=ZoneInfo(tz))
+    sunday = _PY_TO_SUNDAY[day.weekday()]
+    return {
+        "date": day.isoformat(),
+        "weekday": day.strftime("%A"),
+        "dst_advance_seconds": dst_advance_seconds(noon),
+        "periods": [period_row(sunday, index) for index in range(7)],
+    }
+
+
+def period_days(day: date, tz: str) -> list[dict]:
+    """Yesterday, today, and tomorrow, so a DST shift across midnight still has a letter."""
+    return [period_day(day + timedelta(days=offset), tz) for offset in (-1, 0, 1)]
+
+
 def daily_period(when: Instant, place: Place | None = None) -> dict:
     place = place or GREENWICH
     d, start, note = rc_day(when, place)
     local = _local_dt(when, place.tz)
-    elapsed_min = int((local - start.astimezone(ZoneInfo(place.tz))).total_seconds() // 60)
-    if elapsed_min < 0:
-        elapsed_min = 0
-    slice_i = 6
-    period = 7
-    lo_m, hi_m = DAILY_SLICES[6][1], DAILY_SLICES[6][2]
-    for p, lo, hi, _lab in DAILY_SLICES:
-        if lo <= elapsed_min < hi:
-            period, slice_i, lo_m, hi_m = p, p - 1, lo, hi
-            break
-    span_lo = start + timedelta(minutes=lo_m)
-    span_hi = start + timedelta(minutes=hi_m)
-    sun_i = _PY_TO_SUNDAY[d.weekday()]
-    letter = DAILY_LETTERS[slice_i][sun_i]
+    secs = standard_seconds_from_midnight(local)
+    index = period_index(secs)
+    sunday = _PY_TO_SUNDAY[d.weekday()]
+    letter = chart_e_letter(sunday, index)
     return {
-        "period": period,
+        "period": index + 1,
         "letter": letter,
-        "time": f"{format_clock(span_lo)}–{format_clock(span_hi)}",
+        "time": _lewis_span(index),
         "weekday": d.strftime("%A"),
-        "planet": DAILY_PLANET[period],
+        "planet": NOTE_PLANET[letter],
         "color": NOTE_NAME[letter],
         "color_hex": NOTE_HEX[letter],
         "color_rgb": NOTE_COLOR[letter],
+        "standard_seconds": secs,
+        "dst_advance_seconds": dst_advance_seconds(local),
         "day_start": format_instant(start),
         "note": note,
     }
@@ -334,7 +417,7 @@ def format_note(letter: str, *, color: bool) -> str:
 
 
 def format_color_period(letter: str, *, color: bool) -> str:
-    """Color period that belongs to this note (AMORC hex, named)."""
+    """Heindel pigment for this Chart E letter, named, with its hex."""
     name = NOTE_NAME[letter]
     hex_s = NOTE_HEX[letter]
     r, g, b = NOTE_COLOR[letter]
@@ -375,10 +458,13 @@ def to_dict(
             "length_days": cyc.length_days,
         },
         "daily": daily,
+        "period_days": period_days(stamp.day_start.astimezone(ZoneInfo(place.tz)).date(), place.tz),
         "source": {
             "calendar": "AMORC: CE+1353; RC day and equinox year start at local midnight",
-            "lewis": "H. Spencer Lewis, Self-Mastery and Fate with the Cycles of Life (1929)",
-            "clock": "https://cycles.amorc.org/en/cycles (A–G letters; slices from midnight)",
+            "lewis": "H. Spencer Lewis, Self-Mastery and Fate with the Cycles of Life (1929), Chart E",
+            "planets": "Julie Nordhaus-Bike, Rose+Croix Journal 16 (2022): A Sun through G Mars",
+            "pigments": "Max Heindel, The Message of the Stars (1918), p. 64",
+            "letters": "https://cycles.amorc.org/en/cycles (letter grid only)",
         },
     }
     if stamp.note:
