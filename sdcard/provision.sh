@@ -326,7 +326,10 @@ exit 0
 EOF
 chmod 0755 /opt/clock/bin/wait-for-pipewire.sh
 
-# Re-apply splash tokens in case raspi-config rewrote cmdline, then rebuild
+# Re-apply splash tokens in case raspi-config rewrote cmdline (do_boot_splash
+# only touches quiet/splash/plymouth tokens, never video=). boot_config.py
+# then replaces the video= token with rotate=kernel_rotate(CLOCK_ROTATION),
+# which is counter-clockwise (rotation 90 -> rotate=270). Then rebuild
 # the initramfs with MODULES=most (Trixie sometimes ignores a new theme until
 # the initramfs actually contains the DRM modules).
 if command -v raspi-config >/dev/null 2>&1; then
@@ -357,5 +360,10 @@ fi
 systemctl disable clock-provision.service || true
 log "provision finished"
 if [[ "$CLOCK_KIOSK" == "kms" ]]; then
-  systemctl start clockface.service || log "clockface did not start; it will start on the next boot"
+  # --no-block: this script runs inside clock-provision.service, and
+  # clockface.service is After= it, so a blocking start waits on this very
+  # job and provision never leaves "activating". The done marker above
+  # already satisfies clockface's ConditionPathExists.
+  systemctl start --no-block clockface.service \
+    || log "clockface did not start; it will start on the next boot"
 fi
