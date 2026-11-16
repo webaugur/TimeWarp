@@ -82,6 +82,17 @@ pub struct Settings {
     pub barometer_hours: u32,
     /// Clockwise turn applied by the kms build. The desktop window ignores it.
     pub rotation: crate::display::DisplayRotation,
+    /// Gap above the dial, in face radii. `None` picks the doorway default:
+    /// one radius on a portrait frame (the rotated Pi, so XII clears an arch
+    /// that springs near the old IX–III line), and the chrome ring's overhang
+    /// on a landscape frame. The ring may sit in that gap and be hidden by
+    /// the door.
+    pub top_pad: Option<f32>,
+    /// Extra inset on each side, in face radii. The default is 0: the doorway
+    /// is about as wide as the dial, and the ring may run behind the case.
+    pub side_pad: f32,
+    /// Multiplier on the fitted (or requested) diameter. The default is 1.
+    pub dial_scale: f32,
 }
 
 impl Default for Settings {
@@ -100,6 +111,9 @@ impl Default for Settings {
             timewarp_bin: None,
             barometer_hours: 3,
             rotation: crate::display::DisplayRotation::Deg0,
+            top_pad: None,
+            side_pad: 0.0,
+            dial_scale: 1.0,
         }
     }
 }
@@ -120,22 +134,44 @@ impl Settings {
     /// (face, mural windows, two frames, status bar) fits. `--diameter` and
     /// a config file keep the requested size.
     pub fn placement(&self, viewport: Vec2) -> (Pos2, f32) {
+        let scale = if self.dial_scale.is_finite() && self.dial_scale > 0.0 {
+            self.dial_scale
+        } else {
+            1.0
+        };
+        let top_pad = self.top_pad_for(viewport);
+        let side_pad = self.side_pad.max(0.0);
         let diameter = if self.diameter_explicit {
             self.diameter
         } else {
-            crate::layout::fit_diameter(viewport)
-        };
+            crate::layout::fit_diameter_padded(viewport, top_pad, side_pad)
+        } * scale;
         let y = if let Some(y) = self.center_y {
             y
-        } else if self.diameter_explicit {
-            diameter * 0.5
         } else {
-            crate::layout::TOP_MARGIN + diameter * 0.5
+            let top = if self.diameter_explicit {
+                0.0
+            } else {
+                crate::layout::TOP_MARGIN
+            };
+            top + diameter * 0.5 * (1.0 + top_pad)
         };
         (
             Pos2::new(self.center_x.unwrap_or(viewport.x * 0.5), y),
             diameter,
         )
+    }
+
+    /// Gap above the dial for this viewport, in face radii.
+    pub fn top_pad_for(&self, viewport: Vec2) -> f32 {
+        let pad = self.top_pad.unwrap_or_else(|| {
+            if viewport.y > viewport.x {
+                1.0
+            } else {
+                crate::gauges::RING_OVERHANG
+            }
+        });
+        pad.max(0.0)
     }
 }
 
@@ -192,6 +228,12 @@ struct FileConfig {
 #[serde(deny_unknown_fields, default)]
 struct DisplayFile {
     rotation: Option<i32>,
+    /// Fraction of the face radius left above the dial. Absent keeps the default.
+    top_pad: Option<f32>,
+    /// Fraction of the face radius added on each side. Absent keeps the default.
+    side_pad: Option<f32>,
+    /// Multiplier on the face diameter. Absent keeps 1.
+    dial_scale: Option<f32>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -338,6 +380,26 @@ fn apply_file(
                 crate::display::DisplayRotation::from_degrees(degrees).ok_or_else(|| {
                     format!("display.rotation must be 0, 90, 180, or 270, not {degrees}")
                 })?;
+        }
+        if let Some(pad) = display.top_pad {
+            if !pad.is_finite() || pad < 0.0 {
+                return Err(format!("display.top_pad must be zero or more, not {pad}"));
+            }
+            settings.top_pad = Some(pad);
+        }
+        if let Some(pad) = display.side_pad {
+            if !pad.is_finite() || pad < 0.0 {
+                return Err(format!("display.side_pad must be zero or more, not {pad}"));
+            }
+            settings.side_pad = pad;
+        }
+        if let Some(scale) = display.dial_scale {
+            if !scale.is_finite() || scale <= 0.0 || scale > 2.0 {
+                return Err(format!(
+                    "display.dial_scale must be greater than zero and at most 2, not {scale}"
+                ));
+            }
+            settings.dial_scale = scale;
         }
     }
     if let Some(audio) = file.audio {
@@ -534,8 +596,17 @@ mod tests {
             diameter < 1080.0,
             "fitted {diameter} should be smaller than the frame"
         );
-        assert!(column <= 1080.0 - crate::layout::TOP_MARGIN - crate::layout::BOTTOM_MARGIN + 0.5);
-        assert!((center.y - (crate::layout::TOP_MARGIN + diameter * 0.5)).abs() < 0.5);
+        let pad = settings.top_pad_for(egui::vec2(1920.0, 1080.0));
+        let used = column + pad * diameter * 0.5;
+        assert!(
+            used <= 1080.0 - crate::layout::TOP_MARGIN - crate::layout::BOTTOM_MARGIN + 0.5,
+            "column {used} past the frame"
+        );
+        assert!(
+            (center.y - (crate::layout::TOP_MARGIN + diameter * 0.5 * (1.0 + pad))).abs() < 0.5,
+            "center {:?} pad {pad} diameter {diameter}",
+            center
+        );
         let (_, windowed) = settings.placement(egui::vec2(1200.0, 800.0));
         assert!(windowed < diameter);
         assert!(
@@ -663,6 +734,21 @@ mod tests {
         )
         .unwrap();
         assert_eq!(settings.rotation, crate::display::DisplayRotation::Deg180);
+    }
+
+    #[test]
+    fn display_padding_is_optional_and_rejects_a_bad_scale() {
+        let file: FileConfig =
+            toml::from_str("[display]\ntop_pad = 0.248\nside_pad = 0.0\ndial_scale = 0.9\n")
+                .unwrap();
+        let mut settings = Settings::default();
+        apply_file(&mut settings, file).unwrap();
+        assert_eq!(settings.top_pad, Some(0.248));
+        assert_eq!(settings.side_pad, 0.0);
+        assert!((settings.dial_scale - 0.9).abs() < 1e-6);
+        let file: FileConfig = toml::from_str("[display]\ndial_scale = 0\n").unwrap();
+        let err = apply_file(&mut Settings::default(), file).unwrap_err();
+        assert!(err.contains("dial_scale"), "{err}");
     }
 
     #[test]

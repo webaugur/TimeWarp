@@ -14,7 +14,7 @@ use clap::Parser;
 
 use clockface::{
     example_events, fetch_almanac, fetch_weather, gather_status, install_fonts, load_cache,
-    load_cached_sun, load_settings, load_sun, now_unix, paint_kiosk, render_rgba_with,
+    load_cached_sun, load_settings, load_sun, now_unix, paint_live, render_rgba_with,
     repaint_delay, rotation_from_env, scanout_from_logical, screenshot_time, start_audio,
     store_cache, view_mounted_panel, write_png, Almanac, AlmanacSlot, DisplayRotation, KioskModel,
     Place, Settings, SettingsOverride, SoundFault, StatusLine, Units, WeatherReport,
@@ -302,7 +302,7 @@ fn show_clock(ui: &mut egui::Ui, app: &mut ClockApp) {
         sun,
         barometer_hours: app.settings.barometer_hours,
     };
-    paint_kiosk(ui.painter(), screen, center, diameter, &model);
+    paint_live(ui.painter(), screen, center, diameter, &model);
 }
 
 fn join_faults(weather: &str, timewarp: &str) -> String {

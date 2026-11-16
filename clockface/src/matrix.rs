@@ -20,8 +20,143 @@ pub fn frame_pitch(radius: f32) -> f32 {
 }
 
 pub fn paint_board(painter: &Painter, rect: Rect, pitch: f32) {
+    paint_board_shadow(painter, rect);
     painter.rect_filled(rect, 0.0, BOARD);
-    let painter = painter.with_clip_rect(rect);
+    paint_unlit_field(painter, rect, pitch);
+}
+
+/// Soft square shadow on all four sides. The board itself stays square.
+fn paint_board_shadow(painter: &Painter, rect: Rect) {
+    for (grow, alpha) in [(14.0, 22u8), (8.0, 36), (3.0, 54)] {
+        painter.rect_filled(
+            rect.expand(grow),
+            0.0,
+            Color32::from_rgba_unmultiplied(0, 0, 0, alpha),
+        );
+    }
+}
+
+/// Unlit lamps as one texture, not a dot mesh.
+///
+/// A portrait board is on the order of 10^4 lamps. Each lamp was a 9-vertex
+/// fan, so one board was past 65,535 vertices. GLES 2 draws indexed meshes
+/// with 16-bit indices unless `GL_OES_element_index_uint` is present and
+/// honored; the overflow (or the cost of uploading it every frame) is the
+/// scrambled blue band on the Pi. One quad stays under that limit, and
+/// `egui_glow` already sets `GL_UNPACK_ALIGNMENT` to 1 before the upload.
+fn paint_unlit_field(painter: &Painter, rect: Rect, pitch: f32) {
+    let Some(texture) = unlit_texture(painter.ctx(), rect.size(), pitch) else {
+        return;
+    };
+    painter.image(
+        texture,
+        rect,
+        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+        Color32::WHITE,
+    );
+}
+
+#[derive(Clone)]
+struct UnlitTex {
+    w: u32,
+    h: u32,
+    pitch_bits: u32,
+    handle: egui::TextureHandle,
+}
+
+fn unlit_texture(ctx: &egui::Context, size: Vec2, pitch: f32) -> Option<egui::TextureId> {
+    let w = size.x.round().clamp(1.0, 2048.0) as u32;
+    let h = size.y.round().clamp(1.0, 2048.0) as u32;
+    let pitch_bits = (pitch.max(0.5) * 100.0).round() as u32;
+    let id = egui::Id::unique("clockface-unlit-field");
+    if let Some(hit) = ctx.data(|data| {
+        data.get_temp::<Vec<UnlitTex>>(id).and_then(|entries| {
+            entries
+                .iter()
+                .find(|entry| entry.w == w && entry.h == h && entry.pitch_bits == pitch_bits)
+                .map(|entry| entry.handle.id())
+        })
+    }) {
+        return Some(hit);
+    }
+    let image = unlit_image(w, h, pitch);
+    let handle = ctx.load_texture("clockface-unlit", image, egui::TextureOptions::NEAREST);
+    let texture = handle.id();
+    ctx.data_mut(|data| {
+        let entries = data.get_temp_mut_or_default::<Vec<UnlitTex>>(id);
+        entries.retain(|entry| !(entry.w == w && entry.h == h && entry.pitch_bits == pitch_bits));
+        if entries.len() >= 4 {
+            entries.remove(0);
+        }
+        entries.push(UnlitTex {
+            w,
+            h,
+            pitch_bits,
+            handle,
+        });
+    });
+    Some(texture)
+}
+
+fn unlit_image(w: u32, h: u32, pitch: f32) -> egui::ColorImage {
+    let mut pixels = vec![BOARD; (w as usize) * (h as usize)];
+    let radius = (pitch * 0.22).max(0.55);
+    let mut y = pitch;
+    let limit_y = h as f32 - pitch * 0.3;
+    let limit_x = w as f32 - pitch * 0.3;
+    while y < limit_y {
+        let mut x = pitch;
+        while x < limit_x {
+            stamp_dot(&mut pixels, w, h, x, y, radius, UNLIT);
+            x += pitch;
+        }
+        y += pitch;
+    }
+    egui::ColorImage::new([w as usize, h as usize], pixels)
+}
+
+fn stamp_dot(
+    pixels: &mut [Color32],
+    w: u32,
+    h: u32,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    color: Color32,
+) {
+    let min_x = (cx - radius).floor().max(0.0) as i32;
+    let max_x = (cx + radius).ceil().min(w as f32 - 1.0) as i32;
+    let min_y = (cy - radius).floor().max(0.0) as i32;
+    let max_y = (cy + radius).ceil().min(h as f32 - 1.0) as i32;
+    let r2 = radius * radius;
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            let dx = x as f32 + 0.5 - cx;
+            let dy = y as f32 + 0.5 - cy;
+            if dx * dx + dy * dy <= r2 {
+                pixels[(y as u32 * w + x as u32) as usize] = color;
+            }
+        }
+    }
+}
+
+/// How many unlit lamps the old per-frame mesh would have emitted.
+pub fn unlit_lamp_count(rect: Rect, pitch: f32) -> usize {
+    let mut count = 0usize;
+    let mut y = rect.top() + pitch;
+    while y < rect.bottom() - pitch * 0.3 {
+        let mut x = rect.left() + pitch;
+        while x < rect.right() - pitch * 0.3 {
+            count += 1;
+            x += pitch;
+        }
+        y += pitch;
+    }
+    count
+}
+
+/// Build the old fan mesh, so a test can time the cost the Pi was paying.
+pub fn legacy_unlit_mesh(rect: Rect, pitch: f32) -> Mesh {
     let mut dots = Mesh::default();
     let r = pitch * 0.22;
     let mut y = rect.top() + pitch;
@@ -33,9 +168,7 @@ pub fn paint_board(painter: &Painter, rect: Rect, pitch: f32) {
         }
         y += pitch;
     }
-    if dots.indices.len() >= 3 {
-        painter.add(Shape::mesh(dots));
-    }
+    dots
 }
 
 /// One row of lit lamps across the text column. `y` is a grid row, the same pitch as the glyphs.
@@ -52,12 +185,8 @@ pub fn paint_rule(painter: &Painter, bounds: Rect, y: f32, pitch: f32) {
         push_dot(&mut lit, at, pitch * 0.36, AMBER);
         x += pitch;
     }
-    if glow.indices.len() >= 3 {
-        painter.add(Shape::mesh(glow));
-    }
-    if lit.indices.len() >= 3 {
-        painter.add(Shape::mesh(lit));
-    }
+    add_mesh(&painter, glow);
+    add_mesh(&painter, lit);
 }
 
 /// Width of one 5×7 character cell, including the gap before the next glyph.
@@ -169,13 +298,40 @@ fn paint_text_limited(
             x += width;
         }
     }
-    if glow.indices.len() >= 3 {
-        painter.add(Shape::mesh(glow));
-    }
-    if lit.indices.len() >= 3 {
-        painter.add(Shape::mesh(lit));
-    }
+    add_mesh(&painter, glow);
+    add_mesh(&painter, lit);
     y + line
+}
+
+/// GLES 2 indexes a mesh with 16-bit elements unless the uint extension is
+/// reliable. Keep every draw under that, on a boundary between lamp fans
+/// (9 vertices each) so a triangle is never split.
+fn add_mesh(painter: &Painter, mesh: Mesh) {
+    const LIMIT: usize = 16380;
+    if mesh.vertices.len() <= LIMIT {
+        if mesh.indices.len() >= 3 {
+            painter.add(Shape::mesh(mesh));
+        }
+        return;
+    }
+    let mut start = 0;
+    while start < mesh.vertices.len() {
+        let end = (start + LIMIT).min(mesh.vertices.len());
+        let mut part = Mesh::default();
+        part.vertices.extend_from_slice(&mesh.vertices[start..end]);
+        for tri in mesh.indices.chunks_exact(3) {
+            let a = tri[0] as usize;
+            let b = tri[1] as usize;
+            let c = tri[2] as usize;
+            if a >= start && b >= start && c >= start && a < end && b < end && c < end {
+                part.add_triangle((a - start) as u32, (b - start) as u32, (c - start) as u32);
+            }
+        }
+        if part.indices.len() >= 3 {
+            painter.add(Shape::mesh(part));
+        }
+        start = end;
+    }
 }
 
 fn words(text: &str) -> Vec<String> {
@@ -521,5 +677,50 @@ mod tests {
         let pitch = frame_pitch(321.6);
         let cap = pitch * 7.0;
         assert!((15.0..17.0).contains(&cap), "cap height {cap}");
+    }
+
+    #[test]
+    fn a_portrait_board_grid_used_to_exceed_the_gles2_index_limit() {
+        // Pi 3, logical 1024×1280, one info board about half the dial wide.
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(383.0, 250.0));
+        let pitch = 2.7;
+        let lamps = unlit_lamp_count(rect, pitch);
+        let started = std::time::Instant::now();
+        let mesh = legacy_unlit_mesh(rect, pitch);
+        let built = started.elapsed();
+        eprintln!(
+            "legacy unlit board: {lamps} lamps, {} vertices, built in {:.1} ms",
+            mesh.vertices.len(),
+            built.as_secs_f64() * 1000.0
+        );
+        assert!(
+            mesh.vertices.len() > 65_535,
+            "the old grid has to be the GLES overflow, got {}",
+            mesh.vertices.len()
+        );
+        assert_eq!(mesh.vertices.len(), lamps * 9);
+
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 300.0));
+        input.screen_rect = Some(screen);
+        let mut output = ctx.run_pass(input, |ctx| {
+            let painter = ctx.layer_painter(egui::LayerId::background());
+            paint_board(&painter, rect, pitch);
+        });
+        let primitives = ctx.tessellate(output.shapes, 1.0);
+        let verts: usize = primitives
+            .iter()
+            .map(|clipped| match &clipped.primitive {
+                egui::epaint::Primitive::Mesh(mesh) => mesh.vertices.len(),
+                _ => 0,
+            })
+            .sum();
+        assert!(
+            verts < 1_000,
+            "the texture board should be a handful of quads, got {verts}"
+        );
+        eprintln!("texture board: {verts} vertices");
+        output.textures_delta.clear();
     }
 }
