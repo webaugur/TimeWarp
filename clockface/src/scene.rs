@@ -136,16 +136,71 @@ impl Theme {
 }
 
 /// Embedded default, or the folder in `CLOCKFACE_SCENE` when that folder loads.
+///
+/// The folder is read again only when `scene.svg` or `theme.toml` is newer
+/// than the copy already parsed. A sky redraw must not re-read both files.
 pub fn theme() -> Theme {
     if let Ok(dir) = std::env::var("CLOCKFACE_SCENE") {
-        let path = Path::new(&dir);
-        match load_dir(path) {
-            Ok(theme) => return theme,
-            Err(err) => eprintln!("clockface: scenery theme {}: {err}", path.display()),
+        if let Some(theme) = cached_external(&dir) {
+            return theme;
         }
     }
-    Theme::from_parts(DEFAULT_SVG, DEFAULT_TOML).expect("default scenery theme")
+    default_theme()
 }
+
+fn default_theme() -> Theme {
+    static THEME: std::sync::OnceLock<Theme> = std::sync::OnceLock::new();
+    THEME
+        .get_or_init(|| {
+            Theme::from_parts(DEFAULT_SVG, DEFAULT_TOML).expect("default scenery theme")
+        })
+        .clone()
+}
+
+fn cached_external(dir: &str) -> Option<Theme> {
+    let path = Path::new(dir);
+    let stamp = theme_stamp(path);
+    let mut slot = EXTERNAL.lock().ok()?;
+    if let Some(hit) = slot.as_ref() {
+        if hit.dir == dir && hit.stamp == stamp {
+            return Some(hit.theme.clone());
+        }
+    }
+    match load_dir(path) {
+        Ok(theme) => {
+            *slot = Some(ExternalTheme {
+                dir: dir.to_owned(),
+                stamp,
+                theme: theme.clone(),
+            });
+            Some(theme)
+        }
+        Err(err) => {
+            eprintln!("clockface: scenery theme {}: {err}", path.display());
+            slot.as_ref().map(|hit| hit.theme.clone())
+        }
+    }
+}
+
+struct ExternalTheme {
+    dir: String,
+    stamp: Option<std::time::SystemTime>,
+    theme: Theme,
+}
+
+fn theme_stamp(dir: &Path) -> Option<std::time::SystemTime> {
+    let svg = std::fs::metadata(dir.join("scene.svg"))
+        .ok()?
+        .modified()
+        .ok()?;
+    let toml = std::fs::metadata(dir.join("theme.toml"))
+        .ok()?
+        .modified()
+        .ok()?;
+    Some(svg.max(toml))
+}
+
+static EXTERNAL: std::sync::Mutex<Option<ExternalTheme>> = std::sync::Mutex::new(None);
 
 fn load_dir(dir: &Path) -> Result<Theme, String> {
     let svg = std::fs::read_to_string(dir.join("scene.svg"))

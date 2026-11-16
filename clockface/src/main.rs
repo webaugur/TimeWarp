@@ -221,8 +221,9 @@ struct ClockApp {
     sun: Arc<Mutex<Option<std::sync::Arc<clockface::SunImage>>>>,
     sun_at: Instant,
     almanac: Arc<Mutex<AlmanacSlot>>,
-    status: StatusLine,
+    status: Arc<Mutex<StatusLine>>,
     status_at: Instant,
+    fetching_status: Arc<AtomicBool>,
     fetching: Arc<AtomicBool>,
     fetching_sun: Arc<AtomicBool>,
     fetching_almanac: Arc<AtomicBool>,
@@ -250,8 +251,9 @@ impl ClockApp {
                 almanac: initial,
                 attempted: None,
             })),
-            status: gather_status(),
+            status: Arc::new(Mutex::new(gather_status())),
             status_at: Instant::now(),
+            fetching_status: Arc::new(AtomicBool::new(false)),
             fetching: Arc::new(AtomicBool::new(false)),
             fetching_sun: Arc::new(AtomicBool::new(false)),
             fetching_almanac: Arc::new(AtomicBool::new(false)),
@@ -262,9 +264,19 @@ impl ClockApp {
 fn show_clock(ui: &mut egui::Ui, app: &mut ClockApp) {
     let now = Local::now();
     ui.ctx().request_repaint_after(repaint_delay(now));
-    if app.status_at.elapsed() >= Duration::from_secs(30) {
-        app.status = gather_status();
+    if app.status_at.elapsed() >= Duration::from_secs(30)
+        && !app.fetching_status.swap(true, Ordering::SeqCst)
+    {
+        // timedatectl and the route tables stay off this thread. The bar
+        // keeps the previous line until the read finishes.
         app.status_at = Instant::now();
+        let slot = Arc::clone(&app.status);
+        let flag = Arc::clone(&app.fetching_status);
+        std::thread::spawn(move || {
+            let line = gather_status();
+            *slot.lock().expect("status lock") = line;
+            flag.store(false, Ordering::SeqCst);
+        });
     }
     refresh_weather_if_stale(app);
     refresh_sun_if_stale(app);
@@ -272,7 +284,7 @@ fn show_clock(ui: &mut egui::Ui, app: &mut ClockApp) {
     let weather = app.weather.lock().expect("weather lock").clone();
     let sun = app.sun.lock().expect("sun lock").clone();
     let held = app.almanac.lock().expect("almanac lock").almanac.clone();
-    let mut status = app.status.clone();
+    let mut status = app.status.lock().expect("status lock").clone();
     status.alert = join_faults(&weather.note, &held.fault);
     if let Some(fault) = clockface::gauge_fault(&weather) {
         status.alert = join_faults(&status.alert, fault);

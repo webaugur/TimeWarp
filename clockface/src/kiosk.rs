@@ -8,12 +8,14 @@
 //! a full circle and is not clipped to the dial. The sun and moon quarters above
 //! the 9–3 line are a separate layer and still fill the upper half.
 //!
-//! On the kiosk loop the static layers (dial, numerals, ring, landscape, boards)
-//! are painted once into a texture. Later frames draw that texture and then the
-//! hands. The matrix boards are part of the texture and are rebuilt only when
-//! their text changes (the minute, the Swatch beat, or the forecast), not every
-//! second. `CLOCKFACE_FRAME_LOG=1` prints the CPU time of each of those frames.
+//! On the kiosk loop the plate is a texture. A background thread rasterizes the
+//! layers that changed (dial, numerals, ticks, landscape, caption, gauges, each
+//! board, the clock row, status). The UI thread uploads that rectangle and
+//! draws the hands every frame, so a raster never stops the second hand.
+//! `CLOCKFACE_FRAME_LOG=1` prints the UI time, the layers, the worker raster,
+//! and the upload.
 
+use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
@@ -24,6 +26,7 @@ use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Vec2};
 use crate::events::{self, CalendarEvent};
 use crate::layout::{KioskLayout, APERTURE_R};
 use crate::matrix;
+use crate::plate::{Layer, PxRect};
 use crate::quarters;
 use crate::roman;
 use crate::scene;
@@ -81,7 +84,37 @@ pub(crate) fn paint_static(
     diameter: f32,
     model: &KioskModel,
 ) {
-    paint_inner(painter, screen, center, diameter, model, true);
+    paint_masked(painter, screen, center, diameter, model, true, None);
+}
+
+/// Boards and the status bar, not the face.
+///
+/// Both boards and the status bar are painted, even when the caller will keep
+/// only one rectangle. A later board's shadow falls on the earlier panel, and
+/// leaving that shadow out makes the edge a few shades too light.
+pub(crate) fn paint_light(
+    painter: &Painter,
+    screen: Rect,
+    center: Pos2,
+    diameter: f32,
+    model: &KioskModel,
+    _layers: u16,
+) {
+    let layout = KioskLayout::new(screen, center, diameter);
+    paint_boxes(painter, &layout, model);
+    paint_status(painter, &layout, model);
+}
+
+/// The clock heading and the board behind it, plus the later shadows that
+/// cross that row on the full plate.
+pub(crate) fn paint_clock_strip(
+    painter: &Painter,
+    screen: Rect,
+    center: Pos2,
+    diameter: f32,
+    model: &KioskModel,
+) {
+    paint_light(painter, screen, center, diameter, model, 0);
 }
 
 fn paint_inner(
@@ -92,70 +125,102 @@ fn paint_inner(
     model: &KioskModel,
     omit_hands: bool,
 ) {
-    painter.rect_filled(screen, 0.0, Color32::BLACK);
+    paint_masked(painter, screen, center, diameter, model, omit_hands, None);
+}
+
+fn paint_masked(
+    painter: &Painter,
+    screen: Rect,
+    center: Pos2,
+    diameter: f32,
+    model: &KioskModel,
+    omit_hands: bool,
+    only: Option<Layer>,
+) {
+    let show = |layer: Layer| only.map(|only| only == layer).unwrap_or(true);
+    if only.is_none() {
+        painter.rect_filled(screen, 0.0, Color32::BLACK);
+    }
     let layout = KioskLayout::new(screen, center, diameter);
     let radius = layout.radius;
-
     let aperture = APERTURE_R * radius;
-    // Lower half: the landscape, sky on the 9–3 line and ground toward 6.
-    scene::paint_horizon(
-        painter,
-        painter.ctx(),
-        center,
-        aperture,
-        model.now,
-        &model.weather,
-        Some(model.sky.season.as_str()),
-    );
-    // Upper quarters: sun on the left (9 to 12), moon on the right (12 to 3).
-    quarters::paint(
-        painter,
-        painter.ctx(),
-        center,
-        aperture,
-        model.sky.moon_phase,
-        model.sun.as_deref(),
-    );
-    paint_weather_caption(painter, center, radius, &model.weather);
 
-    // Under the dial, so the chrome meets the cream and the boards cover the rest.
-    crate::gauges::paint_trough(painter, center, radius, &model.weather);
-    // Same dial mesh the window and the screenshot both fill.
-    roman::paint_brass(painter, center, radius, aperture);
-    roman::paint_aperture_shadow(painter, center, aperture);
+    if show(Layer::Sky) {
+        // Lower half: the landscape, sky on the 9–3 line and ground toward 6.
+        scene::paint_horizon(
+            painter,
+            painter.ctx(),
+            center,
+            aperture,
+            model.now,
+            &model.weather,
+            Some(model.sky.season.as_str()),
+        );
+        // Upper quarters: sun on the left (9 to 12), moon on the right (12 to 3).
+        quarters::paint(
+            painter,
+            painter.ctx(),
+            center,
+            aperture,
+            model.sky.moon_phase,
+            model.sun.as_deref(),
+        );
+    }
+    if show(Layer::Caption) {
+        paint_weather_caption(painter, center, radius, &model.weather);
+    }
+    if show(Layer::Dial) {
+        // Under the dial, so the chrome meets the cream and the boards cover the rest.
+        crate::gauges::paint_trough(painter, center, radius, &model.weather);
+        roman::paint_brass(painter, center, radius, aperture);
+        roman::paint_aperture_shadow(painter, center, aperture);
+        roman::paint_inner_ring(painter, center, radius, &roman::RomanClockStyle::default());
+    }
     let style = roman::RomanClockStyle::default();
-    if omit_hands {
-        roman::paint_markings(
+    if show(Layer::Ticks) {
+        roman::paint_ticks(
             painter,
             center,
-            diameter,
-            model.now,
+            radius,
             &style,
+            model.now,
             model.cycles.as_ref(),
         );
-    } else {
-        roman::paint_markings_and_hands(
+    }
+    if show(Layer::Numerals) {
+        roman::paint_numerals(painter, center, radius, &style);
+    }
+    if only.is_none() && !omit_hands {
+        roman::paint_hands(
             painter,
             center,
             diameter,
             model.now,
             &style,
             model.weather.wind_hand(),
-            model.cycles.as_ref(),
         );
     }
-    crate::gauges::paint(
-        painter,
-        center,
-        radius,
-        model.now,
-        &model.weather,
-        model.barometer_hours,
-    );
-
-    paint_boxes(painter, &layout, model);
-    paint_status(painter, &layout, model);
-    crate::leds::paint_debug(painter, screen);
+    if show(Layer::Gauges) {
+        crate::gauges::paint(
+            painter,
+            center,
+            radius,
+            model.now,
+            &model.weather,
+            model.barometer_hours,
+        );
+    }
+    if only.is_none() {
+        paint_boxes(painter, &layout, model);
+    } else {
+        paint_board_layer(painter, &layout, model, only.unwrap());
+    }
+    if show(Layer::Status) {
+        paint_status(painter, &layout, model);
+    }
+    if only.is_none() {
+        crate::leds::paint_debug(painter, screen);
+    }
 }
 
 fn paint_weather_caption(painter: &Painter, center: Pos2, radius: f32, weather: &WeatherReport) {
@@ -268,11 +333,15 @@ fn paint_shadowed(
     radius: f32,
 ) {
     let font = FontId::new(size, serif());
+    // One galley, stamped at each halo offset. `painter.text` would lay the
+    // same line out again for every stamp.
+    let galley = painter.layout_no_wrap(text.to_owned(), font, Color32::PLACEHOLDER);
     let blur = 0.012 * radius;
     let drop = Vec2::new(0.15 * blur, 0.55 * blur);
     let shadow = Color32::from_rgba_unmultiplied(0, 0, 0, 153);
     let scale = (shadow.a() as f32 / 255.0) / 0.6;
     let [red, green, blue, _] = shadow.to_array();
+    let place = |at: Pos2| Align2::CENTER_CENTER.anchor_size(at, galley.size()).min;
     for (spread, alpha) in roman::SHADOW_LAYERS {
         let a = ((alpha * scale) * 255.0).round().clamp(0.0, 255.0) as u8;
         if a == 0 {
@@ -283,16 +352,14 @@ fn paint_shadowed(
         for step in 0..12 {
             let ang = step as f32 / 12.0 * std::f32::consts::TAU;
             let offset = Vec2::new(ang.cos(), ang.sin()) * reach;
-            painter.text(
-                pos + drop + offset,
-                Align2::CENTER_CENTER,
-                text,
-                font.clone(),
+            painter.galley_with_override_text_color(
+                place(pos + drop + offset),
+                galley.clone(),
                 layer,
             );
         }
     }
-    painter.text(pos, Align2::CENTER_CENTER, text, font, color);
+    painter.galley_with_override_text_color(place(pos), galley, color);
 }
 
 fn paint_boxes(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
@@ -301,17 +368,58 @@ fn paint_boxes(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
         matrix::paint_board(painter, *panel, pitch);
         let origin = Pos2::new(panel.left() + pitch, panel.top() + pitch);
         match index {
-            0 => paint_calendar(painter, *panel, origin, pitch, model),
+            0 => paint_calendar(painter, *panel, origin, pitch, model, true),
             _ => paint_forecast(painter, *panel, origin, pitch, model),
         }
     }
 }
 
-fn paint_calendar(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, model: &KioskModel) {
+/// One board layer. The clock heading is its own layer so a minute or a beat
+/// does not redraw the events under it.
+fn paint_board_layer(painter: &Painter, layout: &KioskLayout, model: &KioskModel, layer: Layer) {
+    let pitch = matrix::frame_pitch(layout.radius);
+    match layer {
+        Layer::BoardLeft => {
+            let panel = layout.boxes[0];
+            matrix::paint_board(painter, panel, pitch);
+            let origin = Pos2::new(panel.left() + pitch, panel.top() + pitch);
+            paint_calendar(painter, panel, origin, pitch, model, false);
+        }
+        Layer::ClockRow => {
+            let panel = layout.boxes[0];
+            let origin = Pos2::new(panel.left() + pitch, panel.top() + pitch);
+            if line_fits(origin.y, pitch, panel) {
+                let clock = board_clock_line(&model.now, model.cycles.as_ref());
+                paint_heading(painter, panel, origin, pitch, &clock);
+            }
+        }
+        Layer::BoardRight => {
+            let panel = layout.boxes[1];
+            matrix::paint_board(painter, panel, pitch);
+            let origin = Pos2::new(panel.left() + pitch, panel.top() + pitch);
+            paint_forecast(painter, panel, origin, pitch, model);
+        }
+        _ => {}
+    }
+}
+
+fn paint_calendar(
+    painter: &Painter,
+    panel: Rect,
+    origin: Pos2,
+    pitch: f32,
+    model: &KioskModel,
+    include_clock: bool,
+) {
     let mut y = origin.y;
     if line_fits(y, pitch, panel) {
-        let clock = board_clock_line(&model.now, model.cycles.as_ref());
-        y = paint_heading(painter, panel, origin, pitch, &clock);
+        if include_clock {
+            let clock = board_clock_line(&model.now, model.cycles.as_ref());
+            y = paint_heading(painter, panel, origin, pitch, &clock);
+        } else {
+            // The heading layer owns this strip. Events start where it ends.
+            y = origin.y + pitch * 15.0;
+        }
     }
     let today = model.now.date_naive();
     let rows = events::upcoming(&model.events, today, 4);
@@ -530,6 +638,208 @@ fn board_date(now: DateTime<Local>) -> String {
     )
 }
 
+/// Pixel bounds of one layer in a framebuffer whose origin is the top-left.
+pub(crate) fn layer_px(
+    layer: Layer,
+    width: u32,
+    height: u32,
+    center: Pos2,
+    diameter: f32,
+) -> PxRect {
+    let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(width as f32, height as f32));
+    let layout = KioskLayout::new(screen, center, diameter);
+    let radius = layout.radius;
+    let outer = radius * (1.0 + crate::gauges::RING_OVERHANG) + 4.0;
+    let aperture = APERTURE_R * radius + 4.0;
+    let rect = match layer {
+        Layer::Sky => Rect::from_center_size(center, Vec2::splat(aperture * 2.0)),
+        Layer::Caption => Rect::from_min_max(
+            Pos2::new(center.x - aperture, center.y - 0.06 * radius),
+            Pos2::new(center.x + aperture, center.y + aperture),
+        ),
+        Layer::Dial | Layer::Ticks | Layer::Numerals | Layer::Gauges => {
+            Rect::from_center_size(center, Vec2::splat(outer * 2.0))
+        }
+        Layer::BoardLeft => layout.boxes[0].expand(16.0),
+        Layer::ClockRow => {
+            let pitch = matrix::frame_pitch(radius);
+            let panel = layout.boxes[0];
+            Rect::from_min_max(
+                Pos2::new(panel.left(), panel.top()),
+                Pos2::new(panel.right(), panel.top() + pitch * 16.0 + 2.0),
+            )
+        }
+        Layer::BoardRight => layout.boxes[1].expand(16.0),
+        Layer::Status => layout.status.expand(16.0),
+    };
+    PxRect::from_egui(rect, width, height)
+}
+
+/// The panel itself, without the shadow outside it.
+pub(crate) fn panel_px(
+    layer: Layer,
+    width: u32,
+    height: u32,
+    center: Pos2,
+    diameter: f32,
+) -> PxRect {
+    let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(width as f32, height as f32));
+    let layout = KioskLayout::new(screen, center, diameter);
+    let rect = match layer {
+        Layer::BoardLeft => layout.boxes[0],
+        Layer::BoardRight => layout.boxes[1],
+        Layer::Status => layout.status,
+        _ => return layer_px(layer, width, height, center, diameter),
+    };
+    PxRect::from_egui(rect, width, height)
+}
+
+/// One hash per layer. Seconds are not part of any of them.
+pub(crate) fn layer_keys(
+    width: u32,
+    height: u32,
+    center: Pos2,
+    diameter: f32,
+    model: &KioskModel,
+) -> [u64; crate::plate::LAYER_COUNT] {
+    let mut keys = [0u64; crate::plate::LAYER_COUNT];
+    let geom = hash_with(|hasher| {
+        width.hash(hasher);
+        height.hash(hasher);
+        center.x.to_bits().hash(hasher);
+        center.y.to_bits().hash(hasher);
+        diameter.to_bits().hash(hasher);
+    });
+    let trough = model.weather.temperature.is_finite()
+        || model.weather.pressure_hpa.is_some_and(|p| p.is_finite());
+    keys[Layer::Dial.index()] = hash_with(|hasher| {
+        geom.hash(hasher);
+        trough.hash(hasher);
+    });
+    keys[Layer::Numerals.index()] = geom;
+    keys[Layer::Ticks.index()] = hash_with(|hasher| {
+        geom.hash(hasher);
+        for step in 0..60 {
+            let color = crate::cycles::minute_tick_color_at(model.now, step, model.cycles.as_ref());
+            color.to_array().hash(hasher);
+        }
+    });
+    keys[Layer::Sky.index()] = hash_with(|hasher| {
+        geom.hash(hasher);
+        scene_id(model.weather.scene()).hash(hasher);
+        model.weather.cloud_cover().hash(hasher);
+        model.weather.night.hash(hasher);
+        model.sky.season.hash(hasher);
+        sky_band_id(model.now).hash(hasher);
+        ((model.sky.moon_phase * 1000.0).round() as i32).hash(hasher);
+        model.sky.sunrise_unix.map(|v| v.to_bits()).hash(hasher);
+        model.sky.sunset_unix.map(|v| v.to_bits()).hash(hasher);
+        model
+            .sun
+            .as_ref()
+            .map(|image| std::sync::Arc::as_ptr(image) as usize)
+            .hash(hasher);
+    });
+    keys[Layer::Caption.index()] = hash_with(|hasher| {
+        geom.hash(hasher);
+        model.weather.temperature_text().hash(hasher);
+        model.weather.condition.hash(hasher);
+    });
+    keys[Layer::Gauges.index()] = hash_with(|hasher| {
+        geom.hash(hasher);
+        model.weather.temperature.to_bits().hash(hasher);
+        model
+            .weather
+            .apparent_temperature
+            .map(f32::to_bits)
+            .hash(hasher);
+        model.weather.dew_point.map(f32::to_bits).hash(hasher);
+        model.weather.pressure_hpa.map(f32::to_bits).hash(hasher);
+        match model.weather.units {
+            crate::settings::Units::Imperial => 0u8,
+            crate::settings::Units::Metric => 1u8,
+        }
+        .hash(hasher);
+        model.barometer_hours.hash(hasher);
+        model.now.timestamp().div_euclid(1800).hash(hasher);
+        model.now.date_naive().hash(hasher);
+        for day in &model.weather.daily {
+            day.date.hash(hasher);
+            day.high.to_bits().hash(hasher);
+            day.low.to_bits().hash(hasher);
+        }
+        for pressure in &model.weather.hourly_pressure_hpa {
+            pressure.to_bits().hash(hasher);
+        }
+    });
+    keys[Layer::BoardLeft.index()] = hash_with(|hasher| {
+        geom.hash(hasher);
+        board_date(model.now).hash(hasher);
+        for event in &model.events {
+            event.date.hash(hasher);
+            event.title.hash(hasher);
+            event.time.hash(hasher);
+        }
+    });
+    keys[Layer::ClockRow.index()] = hash_with(|hasher| {
+        geom.hash(hasher);
+        board_clock_line(&model.now, model.cycles.as_ref()).hash(hasher);
+    });
+    keys[Layer::BoardRight.index()] = hash_with(|hasher| {
+        geom.hash(hasher);
+        board_date(model.now).hash(hasher);
+        model.sky.season.hash(hasher);
+        model.sky.moon_name.hash(hasher);
+        model.sky.sunrise_unix.map(|v| v.to_bits()).hash(hasher);
+        model.sky.sunset_unix.map(|v| v.to_bits()).hash(hasher);
+        model.sky.moonrise_unix.map(|v| v.to_bits()).hash(hasher);
+        model.sky.moonset_unix.map(|v| v.to_bits()).hash(hasher);
+        for day in &model.weather.daily {
+            day.date.hash(hasher);
+            day.code.hash(hasher);
+            day.high.to_bits().hash(hasher);
+            day.low.to_bits().hash(hasher);
+        }
+    });
+    keys[Layer::Status.index()] = hash_with(|hasher| {
+        geom.hash(hasher);
+        model.status.hostname.hash(hasher);
+        model.status.address.hash(hasher);
+        model.status.warning.hash(hasher);
+        model.status.alert.hash(hasher);
+    });
+    keys
+}
+
+fn hash_with(fill: impl FnOnce(&mut DefaultHasher)) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    fill(&mut hasher);
+    hasher.finish()
+}
+
+fn scene_id(scene: crate::weather::Scene) -> u8 {
+    use crate::weather::Scene::*;
+    match scene {
+        ClearDay => 0,
+        ClearNight => 1,
+        Cloud => 2,
+        Rain => 3,
+        Snow => 4,
+        Storm => 5,
+        Fog => 6,
+        Unknown => 7,
+    }
+}
+
+fn sky_band_id(now: DateTime<Local>) -> u8 {
+    match scene::sky_band(now) {
+        scene::SkyBand::Night => 0,
+        scene::SkyBand::Dawn => 1,
+        scene::SkyBand::Day => 2,
+        scene::SkyBand::Dusk => 3,
+    }
+}
+
 fn line_fits(y: f32, pitch: f32, panel: Rect) -> bool {
     y + pitch * 7.0 <= panel.bottom()
 }
@@ -546,12 +856,12 @@ fn paint_heading(painter: &Painter, panel: Rect, origin: Pos2, pitch: f32, text:
     rule_y + pitch * 7.0
 }
 
-/// Draw the cached plate, then the hands.
+/// Draw the plate, then the hands.
 ///
-/// eboard clears the offscreen target and presents only after this pass
-/// returns. The first shape is the opaque plate, and the hands are in the
-/// same pass, so a flipped buffer is never a cleared frame or a frame that
-/// stopped before the second hand.
+/// The plate is whatever the worker has finished. This pass never rasterizes
+/// it: a minute change, a beat, or a weather arrival only records dirty
+/// layers. eboard clears the offscreen target and presents after this pass
+/// returns, so the hands are in the same pass as the plate.
 pub fn paint_live(
     painter: &Painter,
     screen: Rect,
@@ -563,67 +873,19 @@ pub fn paint_live(
     let pixels_w = screen.width().round().clamp(1.0, 4096.0) as u32;
     let pixels_h = screen.height().round().clamp(1.0, 4096.0) as u32;
     let local_center = Pos2::new(center.x - screen.min.x, center.y - screen.min.y);
-    let key = plate_key(pixels_w, pixels_h, local_center, diameter, model);
-    let cache_id = egui::Id::unique("clockface-static-plate");
-    let have = painter.ctx().data(|data| {
-        data.get_temp::<PlateCache>(cache_id)
-            .map(|plate| (plate.key, plate.width, plate.height))
-    });
-    let settle = in_settle(model.now);
-    let rebuild = match have {
-        Some((cached, w, h)) if cached == key && w == pixels_w && h == pixels_h => false,
-        Some(_) if settle => false,
-        _ => true,
-    };
-    let mut plate_ms = 0.0;
-    if rebuild {
-        let raster_started = Instant::now();
-        match crate::raster::render_static(pixels_w, pixels_h, local_center, diameter, model) {
-            Ok(rgba) => {
-                let image = egui::ColorImage::from_rgba_unmultiplied(
-                    [pixels_w as usize, pixels_h as usize],
-                    &rgba,
-                );
-                let handle = painter.ctx().load_texture(
-                    "clockface-plate",
-                    image,
-                    egui::TextureOptions::NEAREST,
-                );
-                painter.ctx().data_mut(|data| {
-                    data.insert_temp(
-                        cache_id,
-                        PlateCache {
-                            key,
-                            width: pixels_w,
-                            height: pixels_h,
-                            handle,
-                        },
-                    );
-                });
-            }
-            Err(err) => {
-                eprintln!("clockface plate: {err}");
-                paint(painter, screen, center, diameter, model);
-                log_frame(started.elapsed(), true, plate_ms, pixels_w, pixels_h, true);
-                return;
-            }
-        }
-        plate_ms = raster_started.elapsed().as_secs_f64() * 1000.0;
+    let (texture, note) =
+        crate::plate::present_painter(painter, pixels_w, pixels_h, local_center, diameter, model);
+    if let Some(texture) = texture {
+        painter.image(
+            texture,
+            screen,
+            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            Color32::WHITE,
+        );
     }
-    let Some(plate) = painter
-        .ctx()
-        .data(|data| data.get_temp::<PlateCache>(cache_id))
-    else {
-        paint(painter, screen, center, diameter, model);
-        log_frame(started.elapsed(), true, plate_ms, pixels_w, pixels_h, true);
-        return;
-    };
-    painter.image(
-        plate.handle.id(),
-        screen,
-        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-        Color32::WHITE,
-    );
+    // The strip is a few rects and changes with the chime thread. It stays
+    // out of the plate so a chase is not frozen until the next raster.
+    crate::leds::paint_debug(painter, screen);
     roman::paint_hands(
         painter,
         center,
@@ -632,82 +894,13 @@ pub fn paint_live(
         &roman::RomanClockStyle::default(),
         model.weather.wind_hand(),
     );
-    log_frame(
-        started.elapsed(),
-        rebuild,
-        plate_ms,
-        pixels_w,
-        pixels_h,
-        false,
-    );
-}
-
-#[derive(Clone)]
-struct PlateCache {
-    key: u64,
-    width: u32,
-    height: u32,
-    handle: egui::TextureHandle,
-}
-
-fn in_settle(now: DateTime<Local>) -> bool {
-    let window = roman::RomanClockStyle::default().second_bounce.window_ms;
-    f64::from(now.timestamp_subsec_millis()) < window
-}
-
-/// Identity of the cached picture. Seconds are not part of it: the board line
-/// is `HH:MM @BBB COLOR`, so it changes on the minute or the beat.
-fn plate_key(width: u32, height: u32, center: Pos2, diameter: f32, model: &KioskModel) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    width.hash(&mut hasher);
-    height.hash(&mut hasher);
-    center.x.to_bits().hash(&mut hasher);
-    center.y.to_bits().hash(&mut hasher);
-    diameter.to_bits().hash(&mut hasher);
-    board_clock_line(&model.now, model.cycles.as_ref()).hash(&mut hasher);
-    model.cycles.is_some().hash(&mut hasher);
-    board_date(model.now).hash(&mut hasher);
-    model.place.name.hash(&mut hasher);
-    model.weather.fetched_unix.hash(&mut hasher);
-    model.weather.temperature.to_bits().hash(&mut hasher);
-    model.weather.condition.hash(&mut hasher);
-    model.weather.note.hash(&mut hasher);
-    model.weather.code.hash(&mut hasher);
-    model
-        .weather
-        .pressure_hpa
-        .map(f32::to_bits)
-        .hash(&mut hasher);
-    model.weather.daily.len().hash(&mut hasher);
-    for event in &model.events {
-        event.date.hash(&mut hasher);
-        event.title.hash(&mut hasher);
-        event.time.hash(&mut hasher);
+    if let Some(after) = note.wake {
+        painter.ctx().request_repaint_after(after);
     }
-    model.sky.season.hash(&mut hasher);
-    model.sky.sunrise_unix.map(|v| v as i64).hash(&mut hasher);
-    model.sky.sunset_unix.map(|v| v as i64).hash(&mut hasher);
-    model.status.hostname.hash(&mut hasher);
-    model.status.address.hash(&mut hasher);
-    model.status.warning.hash(&mut hasher);
-    model.status.alert.hash(&mut hasher);
-    model.barometer_hours.hash(&mut hasher);
-    model
-        .sun
-        .as_ref()
-        .map(|image| std::sync::Arc::as_ptr(image) as usize)
-        .hash(&mut hasher);
-    hasher.finish()
+    log_frame(started.elapsed(), &note, pixels_w, pixels_h);
 }
 
-fn log_frame(
-    elapsed: Duration,
-    rebuild: bool,
-    plate_ms: f64,
-    width: u32,
-    height: u32,
-    fallback: bool,
-) {
+fn log_frame(elapsed: Duration, note: &crate::plate::FrameNote, width: u32, height: u32) {
     let enabled = std::env::var("CLOCKFACE_FRAME_LOG")
         .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
         .unwrap_or(false);
@@ -715,18 +908,12 @@ fn log_frame(
         return;
     }
     let cpu_ms = elapsed.as_secs_f64() * 1000.0;
-    let kind = if fallback {
-        "fallback"
-    } else if rebuild {
-        "rebuild"
-    } else {
-        "cached"
-    };
     // 60 Hz page flip is 16.7 ms. The spring asks for a frame every 16 ms
-    // during the 250 ms after each tick. A cached frame is the plate plus the
-    // hands; a rebuild also rasterizes the static layers.
+    // during the 250 ms after each tick. `raster` is the worker; `upload` is
+    // this thread's sub-texture copy.
     eprintln!(
-        "clockface frame {cpu_ms:.1}ms plate={kind} raster={plate_ms:.1}ms {width}x{height} budget=16.7ms"
+        "clockface frame {cpu_ms:.1}ms plate={} raster={:.1}ms upload={:.1}ms layers={} {width}x{height} budget=16.7ms",
+        note.kind, note.raster_ms, note.upload_ms, note.layers
     );
 }
 
@@ -772,13 +959,58 @@ mod tests {
         let start = local(11, 0, 0);
         let still = local(11, 0, 30);
         let next = local(11, 0, 50);
-        assert_eq!(board_clock_line(&start, None), board_clock_line(&still, None));
-        assert_ne!(board_clock_line(&start, None), board_clock_line(&next, None));
+        assert_eq!(
+            board_clock_line(&start, None),
+            board_clock_line(&still, None)
+        );
+        assert_ne!(
+            board_clock_line(&start, None),
+            board_clock_line(&next, None)
+        );
         assert!(board_clock_line(&next, None).contains("@501"));
         let model = |now| KioskModel::for_screenshot(now, &crate::settings::Place::default());
-        let key = |now| plate_key(640, 800, Pos2::new(320.0, 400.0), 400.0, &model(now));
-        assert_eq!(key(start), key(still));
-        assert_ne!(key(start), key(next));
+        let keys = |now| layer_keys(640, 800, Pos2::new(320.0, 400.0), 400.0, &model(now));
+        let start_keys = keys(start);
+        let still_keys = keys(still);
+        let next_keys = keys(next);
+        assert_eq!(start_keys, still_keys, "seconds do not dirty a layer");
+        assert_ne!(
+            start_keys[Layer::ClockRow.index()],
+            next_keys[Layer::ClockRow.index()],
+            "a new beat dirties the clock row"
+        );
+        assert_eq!(
+            start_keys[Layer::BoardLeft.index()],
+            next_keys[Layer::BoardLeft.index()]
+        );
+        assert_eq!(
+            start_keys[Layer::Dial.index()],
+            next_keys[Layer::Dial.index()]
+        );
+        assert_eq!(
+            start_keys[Layer::Ticks.index()],
+            next_keys[Layer::Ticks.index()]
+        );
+        let minute = local(11, 1, 0);
+        let minute_keys = keys(minute);
+        assert_ne!(
+            start_keys[Layer::ClockRow.index()],
+            minute_keys[Layer::ClockRow.index()]
+        );
+        assert_eq!(
+            start_keys[Layer::Sky.index()],
+            minute_keys[Layer::Sky.index()]
+        );
+        assert_eq!(
+            start_keys[Layer::Gauges.index()],
+            minute_keys[Layer::Gauges.index()]
+        );
+        let moved = layer_keys(640, 800, Pos2::new(300.0, 400.0), 400.0, &model(start));
+        assert_eq!(
+            crate::plate::dirty_mask(&start_keys, &moved),
+            (1u16 << crate::plate::LAYER_COUNT) - 1,
+            "a move dirties every layer"
+        );
     }
 
     #[test]
@@ -836,8 +1068,13 @@ mod tests {
             "the second hand is in the presented frame"
         );
         assert!(
-            second_verts < 20_000,
-            "cached frame still tessellates the whole face ({second_verts})"
+            first_verts < 20_000 && second_verts < 20_000,
+            "a live frame tessellated the plate ({first_verts}, {second_verts})"
+        );
+        assert!(
+            first.as_secs_f64() * 1000.0 < 400.0,
+            "the UI thread rasterized the plate ({:.1} ms)",
+            first.as_secs_f64() * 1000.0
         );
         assert!(
             second.as_secs_f64() * 1000.0 < 50.0,
@@ -853,6 +1090,64 @@ mod tests {
         let after_bounce = at_tick + chrono::Duration::milliseconds(400);
         let wait = repaint_delay(after_bounce);
         assert_eq!(wait, Duration::from_millis(600));
+    }
+
+    #[test]
+    fn a_clock_row_and_a_board_match_the_full_plate() {
+        let width = 320u32;
+        let height = 400u32;
+        let settings = Settings::default();
+        let viewport = Vec2::new(width as f32, height as f32);
+        let (center, diameter) = settings.placement(viewport);
+        let model = KioskModel::for_screenshot(screenshot_time(), &settings.place);
+        let full = crate::raster::render_static(width, height, center, diameter, &model).unwrap();
+        let mut session = crate::raster::SoftwareRaster::new();
+        let strip = session
+            .paint_clock_strip(width, height, center, diameter, &model)
+            .unwrap();
+        assert_row(&full, width, &strip, "clock row");
+        let boards = session
+            .paint_light(
+                width,
+                height,
+                center,
+                diameter,
+                &model,
+                Layer::BoardLeft.bit() | Layer::BoardRight.bit() | Layer::Status.bit(),
+            )
+            .unwrap();
+        assert!(!boards.is_empty());
+        for patch in &boards {
+            assert_row(&full, width, patch, patch.layer.name());
+        }
+    }
+
+    /// One level of difference is a coverage sample where a lamp edge meets a
+    /// pixel the full plate had already painted. It is not a different lamp.
+    fn assert_row(full: &[u8], width: u32, patch: &crate::plate::Patch, label: &str) {
+        let mut mismatch = 0usize;
+        let mut first = None;
+        for row in 0..patch.h {
+            let y = patch.y + row;
+            for col in 0..patch.w {
+                let x = patch.x + col;
+                let fi = ((y * width + x) * 4) as usize;
+                let pi = ((row * patch.w + col) * 4) as usize;
+                let a = &full[fi..fi + 4];
+                let b = &patch.rgba[pi..pi + 4];
+                let off = a.iter().zip(b).any(|(p, q)| p.abs_diff(*q) > 1);
+                if off {
+                    mismatch += 1;
+                    if first.is_none() {
+                        first = Some((x, y, [a[0], a[1], a[2], a[3]], [b[0], b[1], b[2], b[3]]));
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            mismatch, 0,
+            "{label} differs at {first:?} ({mismatch} pixels)"
+        );
     }
 
     #[test]
