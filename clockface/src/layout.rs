@@ -50,9 +50,10 @@ impl KioskLayout {
         let gap_above_bar = (0.05 * radius).max(10.0);
         let limit = status.top() - gap_above_bar;
         let mut top = preferred_top.max(screen.top());
-        // Height stays on the old three-across budget. Wider boards must not
-        // grow the column and shrink the face.
-        let mut height = info_frame_height(radius).min((limit - top).max(0.0));
+        // The boards fill the space between the dial and the status bar. The face is
+        // sized first (fit_diameter_padded still budgets the old board height), so a
+        // taller board never shrinks the dial.
+        let mut height = (limit - top).max(0.0);
         let narrow = ((col_width - 2.0 * gutter) / 3.0).max(8.0);
         if height < 0.55 * narrow {
             top = (limit - 0.72 * narrow).max(min_top.min(limit - 8.0));
