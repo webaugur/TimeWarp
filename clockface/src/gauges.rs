@@ -45,7 +45,7 @@ const FLUID: &[Color32] = &[
 /// so the chrome meets the cream with no sky between them. The outer lip is a
 /// constant radius all the way around the dial.
 const TROUGH_IN: f32 = 0.990;
-const TROUGH_OUT: f32 = 1.248;
+pub(crate) const TROUGH_OUT: f32 = 1.248;
 
 /// How far the chrome ring extends past the dial edge, in face radii.
 ///

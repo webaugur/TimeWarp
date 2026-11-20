@@ -19,21 +19,23 @@ pub fn frame_pitch(radius: f32) -> f32 {
     (0.049 * radius / 7.0).clamp(1.8, 2.7)
 }
 
-pub fn paint_board(painter: &Painter, rect: Rect, pitch: f32) {
-    paint_board_shadow(painter, rect);
+pub fn paint_board(painter: &Painter, rect: Rect, pitch: f32, radius: f32) {
+    paint_board_shadow(painter, rect, radius);
     painter.rect_filled(rect, 0.0, BOARD);
     paint_unlit_field(painter, rect, pitch);
 }
 
-/// Soft square shadow on all four sides. The board itself stays square.
-fn paint_board_shadow(painter: &Painter, rect: Rect) {
-    for (grow, alpha) in [(14.0, 22u8), (8.0, 36), (3.0, 54)] {
-        painter.rect_filled(
-            rect.expand(grow),
-            0.0,
-            Color32::from_rgba_unmultiplied(0, 0, 0, alpha),
-        );
+/// Thin halo, the same width on every side. The board itself stays square.
+fn paint_board_shadow(painter: &Painter, rect: Rect, radius: f32) {
+    let grow = crate::layout::board_shadow_px(radius);
+    if grow < 0.4 {
+        return;
     }
+    painter.rect_filled(
+        rect.expand(grow),
+        0.0,
+        Color32::from_rgba_unmultiplied(0, 0, 0, 96),
+    );
 }
 
 /// Unlit lamps as one texture, not a dot mesh.
@@ -706,7 +708,7 @@ mod tests {
         input.screen_rect = Some(screen);
         let mut output = ctx.run_pass(input, |ctx| {
             let painter = ctx.layer_painter(egui::LayerId::background());
-            paint_board(&painter, rect, pitch);
+            paint_board(&painter, rect, pitch, 400.0);
         });
         let primitives = ctx.tessellate(output.shapes, 1.0);
         let verts: usize = primitives
