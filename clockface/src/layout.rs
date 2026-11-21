@@ -12,9 +12,7 @@ pub const APERTURE_R: f32 = 0.64;
 pub const YEAR_WEDGE: (f32, f32) = (180.0, 270.0);
 /// Sky window: the mirror, from 3 o'clock to 6, cut off by the right and bottom tangents.
 pub const SKY_WEDGE: (f32, f32) = (90.0, 180.0);
-/// Half-width of the info frames, in face radii. 1.0 makes their outer edges
-/// the same width as the face diameter (left tangent to right tangent).
-const ROW_HALF: f32 = 1.0;
+/// Gap between the two boards, in face radii. The same gap sits under the dial.
 const GUTTER: f32 = 0.03;
 /// Inset so the column is not flush with a window border or a panel.
 pub const TOP_MARGIN: f32 = 16.0;
@@ -33,16 +31,18 @@ impl KioskLayout {
     pub fn new(screen: Rect, center: Pos2, diameter: f32) -> Self {
         let radius = (diameter * 0.5).max(1.0);
         let gutter = GUTTER * radius;
-        let col_left = center.x - ROW_HALF * radius;
-        let col_right = center.x + ROW_HALF * radius;
-        let col_width = col_right - col_left;
+        // Outer edges of the chrome trough, clamped to the side margin.
+        // Wider than the dial. `fit_diameter` still budgets the dial width,
+        // so this does not shrink the face.
+        let (col_left, col_right) = column_edges(screen, center.x, radius);
+        let col_width = (col_right - col_left).max(16.0);
         let box_w = ((col_width - gutter) / 2.0).max(8.0);
         let status_h = status_height(radius);
         let status_bottom = screen.bottom() - BOTTOM_MARGIN;
         let status_top = status_bottom - status_h;
         let status = Rect::from_min_max(
-            Pos2::new(col_left.max(screen.left()), status_top),
-            Pos2::new(col_right.min(screen.right()), status_bottom),
+            Pos2::new(col_left, status_top),
+            Pos2::new(col_right, status_bottom),
         );
         // The squared windows end on the bottom tangent of the dial.
         let preferred_top = center.y + radius + gutter;
@@ -83,6 +83,35 @@ impl KioskLayout {
     }
 }
 
+/// Left and right edges of the board column, in pixels.
+///
+/// Unclamped, each edge is `TROUGH_OUT` radii from the clock center, which is
+/// the outer width of the chrome ring. A column that would pass the side
+/// margin is pulled in to that margin.
+fn column_edges(screen: Rect, center_x: f32, radius: f32) -> (f32, f32) {
+    let half = crate::gauges::TROUGH_OUT * radius;
+    let left_limit = screen.left() + SIDE_MARGIN;
+    let right_limit = screen.right() - SIDE_MARGIN;
+    if right_limit <= left_limit + 8.0 {
+        return (screen.left(), screen.right().max(screen.left() + 8.0));
+    }
+    let left = (center_x - half).max(left_limit);
+    let right = (center_x + half).min(right_limit).max(left + 8.0);
+    (left, right)
+}
+
+/// Width of the board halo, in pixels. About 5 px on the Pi portrait face
+/// (radius near 338 at dial_scale 0.95). It stays inside half the gutter and
+/// half the gap above the status bar, so a neighbor does not cover it.
+pub fn board_shadow_px(radius: f32) -> f32 {
+    let wanted = radius * (5.0 / 338.0);
+    let gutter = GUTTER * radius;
+    let gap = (0.05 * radius).max(10.0);
+    // Half the gap, minus a pixel, so the two halos meet without stacking.
+    let room = (gutter.min(gap) * 0.5 - 1.0).max(0.0);
+    wanted.min(room).clamp(0.0, 8.0)
+}
+
 /// Point size of the status line for a face of this radius.
 pub fn status_font_size(radius: f32) -> f32 {
     (0.06 * radius).clamp(18.0, 24.0)
@@ -113,9 +142,10 @@ pub fn preferred_column_height(diameter: f32) -> f32 {
 
 /// Largest face diameter whose column fits in `viewport`.
 ///
-/// The column is the face, the squared windows under it, the two frames (one
-/// face-diameter wide together), and a single-line status bar. Width and height
-/// both constrain it, with a small inset from the edges.
+/// The column is the face, the squared windows under it, the two frames, and a
+/// single-line status bar. The width budget is the dial (plus `side_pad`), not
+/// the wider trough, so the boards can stick out to the chrome without
+/// shrinking the face. Height and that dial width both constrain it.
 pub fn fit_diameter(viewport: egui::Vec2) -> f32 {
     fit_diameter_padded(viewport, 0.0, 0.0)
 }
@@ -217,7 +247,7 @@ mod tests {
     }
 
     #[test]
-    fn two_frames_are_exactly_one_face_diameter_wide() {
+    fn two_frames_match_the_trough_and_the_status_bar() {
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(1920.0, 1080.0));
         for (diameter, center) in [
             (600.0, Pos2::new(960.0, 300.0)),
@@ -226,19 +256,27 @@ mod tests {
         ] {
             let layout = KioskLayout::new(screen, center, diameter);
             let span = layout.boxes[1].right() - layout.boxes[0].left();
+            let trough = diameter * crate::gauges::TROUGH_OUT;
             assert!(
-                (span - diameter).abs() < 0.5,
-                "span {span} should equal diameter {diameter}"
+                (span - trough).abs() < 0.5,
+                "span {span} should equal trough width {trough}"
             );
-            assert!((layout.boxes[0].left() - (center.x - diameter * 0.5)).abs() < 0.5);
-            assert!((layout.boxes[1].right() - (center.x + diameter * 0.5)).abs() < 0.5);
+            assert!((layout.boxes[0].left() - (center.x - trough * 0.5)).abs() < 0.5);
+            assert!((layout.boxes[1].right() - (center.x + trough * 0.5)).abs() < 0.5);
             let gutter = 0.03 * diameter * 0.5;
-            let expected = (diameter - gutter) / 2.0;
+            let expected = (trough - gutter) / 2.0;
             assert!(
                 (layout.boxes[0].width() - expected).abs() < 1.0,
-                "each board should be half the face minus the gap"
+                "each board should be half the trough minus the gap"
             );
             assert!(layout.boxes[1].left() > layout.boxes[0].right() - 0.5);
+            assert!((layout.status.left() - layout.boxes[0].left()).abs() < 0.5);
+            assert!((layout.status.right() - layout.boxes[1].right()).abs() < 0.5);
+            let shadow = board_shadow_px(diameter * 0.5);
+            assert!(
+                layout.boxes[1].left() - layout.boxes[0].right() + 0.05 >= shadow * 2.0,
+                "shadow {shadow} is clipped by the gutter"
+            );
         }
     }
 
@@ -252,10 +290,15 @@ mod tests {
             let screen = Rect::from_min_size(Pos2::ZERO, viewport);
             let layout = KioskLayout::new(screen, center, diameter);
             let span = layout.boxes[1].right() - layout.boxes[0].left();
+            let trough = diameter * crate::gauges::TROUGH_OUT;
+            let limit = w - 2.0 * SIDE_MARGIN;
+            let expected = trough.min(limit);
             assert!(
-                (span - diameter).abs() < 1.0,
-                "{w}x{h} span {span} diameter {diameter}"
+                (span - expected).abs() < 1.5,
+                "{w}x{h} span {span} trough {trough} limit {limit}"
             );
+            assert!(layout.boxes[0].left() + 0.5 >= SIDE_MARGIN);
+            assert!(layout.boxes[1].right() <= w - SIDE_MARGIN + 0.5);
             assert!(layout.boxes[0].bottom() <= layout.status.top() + 0.5);
             assert!(layout.status.bottom() <= h - BOTTOM_MARGIN + 0.5);
             assert!(
@@ -265,6 +308,43 @@ mod tests {
             );
             assert!(center.y - diameter * 0.5 >= TOP_MARGIN - 0.5);
         }
+    }
+
+    #[test]
+    fn a_wider_column_does_not_shrink_the_fitted_dial() {
+        // Tall and narrow enough that the dial width binds, not the height.
+        // Budgeting the trough here would stop the face at available / TROUGH_OUT.
+        let viewport = vec2(800.0, 2000.0);
+        let fitted = fit_diameter(viewport);
+        let available_w = 800.0 - 2.0 * SIDE_MARGIN;
+        assert!(
+            (fitted - available_w).abs() < 1.0,
+            "fitted {fitted}, dial budget {available_w}"
+        );
+        assert!(
+            fitted > available_w / crate::gauges::TROUGH_OUT + 40.0,
+            "fitted {fitted} shrank to the trough"
+        );
+        let screen = Rect::from_min_size(Pos2::ZERO, viewport);
+        let center = Pos2::new(viewport.x * 0.5, TOP_MARGIN + fitted * 0.5);
+        let layout = KioskLayout::new(screen, center, fitted);
+        let span = layout.boxes[1].right() - layout.boxes[0].left();
+        assert!((span - available_w).abs() < 1.5, "clamped span {span}");
+    }
+
+    #[test]
+    fn pi_portrait_boards_are_wider_and_the_halo_clears_its_neighbors() {
+        let (before_chars, after_chars, text_rows, shadow, gap) = pi_board_capacity();
+        assert!(
+            after_chars > before_chars,
+            "chars {before_chars} -> {after_chars}"
+        );
+        assert!(text_rows > 4, "rows {text_rows}");
+        assert!((4.0..5.5).contains(&shadow), "shadow {shadow}");
+        assert!(
+            gap + 0.05 >= shadow * 2.0,
+            "status gap {gap} clips shadow {shadow}"
+        );
     }
 
     #[test]
@@ -286,4 +366,82 @@ mod tests {
         let shown = wheel_sample(0.04, 225.0, YEAR_WEDGE);
         assert!((shown - 0.04).abs() < 0.001, "{shown}");
     }
+}
+
+#[cfg(test)]
+/// Pi portrait (1024×1280, dial_scale 0.95, top_pad 0.248, center_y 422).
+///
+/// Returns glyph columns before the widen, after, text rows, halo width, and
+/// the gap between a board and the status bar.
+fn pi_board_capacity() -> (u32, u32, u32, f32, f32) {
+    use crate::matrix::{self, cell};
+    use crate::Settings;
+
+    let viewport = egui::vec2(1024.0, 1280.0);
+    let mut settings = Settings::default();
+    settings.top_pad = Some(0.248);
+    settings.dial_scale = 0.95;
+    settings.center_y = Some(422.0);
+    let (center, diameter) = settings.placement(viewport);
+    let screen = Rect::from_min_size(Pos2::ZERO, viewport);
+    let layout = KioskLayout::new(screen, center, diameter);
+    let pitch = matrix::frame_pitch(layout.radius);
+    let panel = layout.boxes[0];
+    let before_width = {
+        let gutter = 0.03 * layout.radius;
+        (diameter - gutter) * 0.5
+    };
+    let before_chars = glyph_columns(before_width, pitch);
+    let after_chars = glyph_columns(panel.width(), pitch);
+    let rows = text_rows(panel.height(), pitch);
+    let shadow = board_shadow_px(layout.radius);
+    let gap = layout.status.top() - panel.bottom();
+    eprintln!(
+        "pi diameter {diameter:.2} radius {:.2} center ({:.1},{:.1}) pitch {pitch:.4} cell {:.3} board {:.1}x{:.1} (was {before_width:.1} wide) chars {before_chars}->{after_chars} text_rows {rows} lamp_cols {}->{} lamp_rows {} shadow {shadow:.2} status_gap {gap:.2}",
+        layout.radius,
+        center.x,
+        center.y,
+        cell(pitch),
+        panel.width(),
+        panel.height(),
+        lamp_steps(before_width, pitch),
+        lamp_steps(panel.width(), pitch),
+        lamp_steps(panel.height(), pitch),
+    );
+    (before_chars, after_chars, rows, shadow, gap)
+}
+
+/// Glyphs that fit on one line. The first lamp is one pitch in, the wrap
+/// limit is `0.4 * pitch` inside the right edge, and each cell is `6 * pitch`.
+#[cfg(test)]
+fn glyph_columns(width: f32, pitch: f32) -> u32 {
+    let room = width - pitch - pitch * 0.4;
+    if room <= 0.0 {
+        return 0;
+    }
+    (room / (pitch * 6.0)).floor() as u32
+}
+
+/// Text lines, using the same step as `paint_text` (`9 * pitch`) and the same
+/// fit test as `line_fits` (`y + 7 * pitch` inside the panel).
+#[cfg(test)]
+fn text_rows(height: f32, pitch: f32) -> u32 {
+    let mut rows = 0u32;
+    let mut y = pitch;
+    while y + pitch * 7.0 <= height + 0.01 {
+        rows += 1;
+        y += pitch * 9.0;
+    }
+    rows
+}
+
+#[cfg(test)]
+fn lamp_steps(span: f32, pitch: f32) -> u32 {
+    let mut n = 0u32;
+    let mut at = pitch;
+    while at < span - pitch * 0.3 {
+        n += 1;
+        at += pitch;
+    }
+    n
 }

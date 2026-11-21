@@ -105,8 +105,10 @@ pub(crate) fn paint_light(
     paint_status(painter, &layout, model);
 }
 
-/// The clock heading and the board behind it, plus the later shadows that
-/// cross that row on the full plate.
+/// The clock heading and the board behind it, including the halo.
+///
+/// The halo sits on the chrome, so the ring is painted first. The cropped
+/// row then matches the full plate, shadow included.
 pub(crate) fn paint_clock_strip(
     painter: &Painter,
     screen: Rect,
@@ -114,6 +116,18 @@ pub(crate) fn paint_clock_strip(
     diameter: f32,
     model: &KioskModel,
 ) {
+    let layout = KioskLayout::new(screen, center, diameter);
+    // The halo is outside the board: on the chrome, and on a gauge that
+    // reaches the board. Paint those first so the cropped row matches.
+    crate::gauges::paint_trough(painter, center, layout.radius, &model.weather);
+    crate::gauges::paint(
+        painter,
+        center,
+        layout.radius,
+        model.now,
+        &model.weather,
+        model.barometer_hours,
+    );
     paint_light(painter, screen, center, diameter, model, 0);
 }
 
@@ -365,7 +379,7 @@ fn paint_shadowed(
 fn paint_boxes(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
     let pitch = matrix::frame_pitch(layout.radius);
     for (index, panel) in layout.boxes.iter().enumerate() {
-        matrix::paint_board(painter, *panel, pitch);
+        matrix::paint_board(painter, *panel, pitch, layout.radius);
         let origin = Pos2::new(panel.left() + pitch, panel.top() + pitch);
         match index {
             0 => paint_calendar(painter, *panel, origin, pitch, model, true),
@@ -381,7 +395,7 @@ fn paint_board_layer(painter: &Painter, layout: &KioskLayout, model: &KioskModel
     match layer {
         Layer::BoardLeft => {
             let panel = layout.boxes[0];
-            matrix::paint_board(painter, panel, pitch);
+            matrix::paint_board(painter, panel, pitch, layout.radius);
             let origin = Pos2::new(panel.left() + pitch, panel.top() + pitch);
             paint_calendar(painter, panel, origin, pitch, model, false);
         }
@@ -395,7 +409,7 @@ fn paint_board_layer(painter: &Painter, layout: &KioskLayout, model: &KioskModel
         }
         Layer::BoardRight => {
             let panel = layout.boxes[1];
-            matrix::paint_board(painter, panel, pitch);
+            matrix::paint_board(painter, panel, pitch, layout.radius);
             let origin = Pos2::new(panel.left() + pitch, panel.top() + pitch);
             paint_forecast(painter, panel, origin, pitch, model);
         }
@@ -538,7 +552,7 @@ fn paint_status(painter: &Painter, layout: &KioskLayout, model: &KioskModel) {
     // still in the same range as the board lamps.
     let previous = ((bar.height() - 4.0) / 8.0).clamp(1.4, 2.4);
     let pitch = (previous * 0.88).clamp(1.3, 2.2);
-    matrix::paint_board(painter, bar, pitch);
+    matrix::paint_board(painter, bar, pitch, layout.radius);
     let y = bar.center().y - pitch * 3.5;
     let version = StatusLine::version_text();
     let mark = |ch: char| {
@@ -651,6 +665,7 @@ pub(crate) fn layer_px(
     let radius = layout.radius;
     let outer = radius * (1.0 + crate::gauges::RING_OVERHANG) + 4.0;
     let aperture = APERTURE_R * radius + 4.0;
+    let shadow = crate::layout::board_shadow_px(radius);
     let rect = match layer {
         Layer::Sky => Rect::from_center_size(center, Vec2::splat(aperture * 2.0)),
         Layer::Caption => Rect::from_min_max(
@@ -660,17 +675,19 @@ pub(crate) fn layer_px(
         Layer::Dial | Layer::Ticks | Layer::Numerals | Layer::Gauges => {
             Rect::from_center_size(center, Vec2::splat(outer * 2.0))
         }
-        Layer::BoardLeft => layout.boxes[0].expand(16.0),
+        Layer::BoardLeft => layout.boxes[0].expand(shadow),
         Layer::ClockRow => {
             let pitch = matrix::frame_pitch(radius);
             let panel = layout.boxes[0];
+            // The heading plus the halo on the top and both sides. The bottom
+            // of this strip is still inside the board.
             Rect::from_min_max(
-                Pos2::new(panel.left(), panel.top()),
-                Pos2::new(panel.right(), panel.top() + pitch * 16.0 + 2.0),
+                Pos2::new(panel.left() - shadow, panel.top() - shadow),
+                Pos2::new(panel.right() + shadow, panel.top() + pitch * 16.0 + 2.0),
             )
         }
-        Layer::BoardRight => layout.boxes[1].expand(16.0),
-        Layer::Status => layout.status.expand(16.0),
+        Layer::BoardRight => layout.boxes[1].expand(shadow),
+        Layer::Status => layout.status.expand(shadow),
     };
     PxRect::from_egui(rect, width, height)
 }
